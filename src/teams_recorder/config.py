@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 ENV_PROJECT_DIR = "TEAMS_RECORDER_DIR"
 ENV_LLM_PROVIDER = "TREC_LLM_PROVIDER"
+ENV_TEAMS_PROCESS = "TREC_TEAMS_PROCESS"   # para testes: simular o Teams com outro processo
 LLM_PROVIDERS = ("api", "claude-code")
 ICLOUD_MARKER = "Mobile Documents"
 
@@ -52,6 +53,10 @@ class Settings:
     @property
     def usage_log(self) -> Path:
         return self.data_dir / "log" / "llm_usage.jsonl"
+
+    @property
+    def daemon_log(self) -> Path:
+        return self.data_dir / "log" / "teams-recorder.log"
 
 
 def _provider(value: object) -> str:
@@ -105,7 +110,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         project_dir=project_dir,
         data_dir=data_dir,
         mic_device=str(audio.get("mic_device", "MacBook Air Microphone")),
-        teams_process_name=str(audio.get("teams_process_name", "MSTeams")),
+        teams_process_name=os.environ.get(ENV_TEAMS_PROCESS) or str(audio.get("teams_process_name", "MSTeams")),
         bitrate_kbps=int(audio.get("bitrate_kbps", 64)),
         poll_seconds=int(detector.get("poll_seconds", 3)),
         start_after_positive_polls=int(detector.get("start_after_positive_polls", 2)),
