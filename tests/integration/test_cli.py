@@ -48,9 +48,35 @@ def test_status_shows_meetings_and_next_step(tmp_path: Path, monkeypatch):
 
 def test_future_commands_report_phase(tmp_path: Path, monkeypatch):
     _project(tmp_path, monkeypatch)
-    result = runner.invoke(app, ["transcribe"])
+    result = runner.invoke(app, ["analyze"])
     assert result.exit_code == 2
-    assert "fase 3" in result.output
+    assert "fase 4" in result.output
+
+
+def test_transcribe_nothing_pending(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["transcribe"])
+    assert result.exit_code == 0 and "Nenhuma reunião pendente" in result.output
+
+
+def test_transcribe_unknown_meeting(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["transcribe", "2026-01-01_00-00-00"])
+    assert result.exit_code == 1 and "não existe" in result.output
+
+
+def test_transcribe_marks_failure_when_model_missing(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0))
+    repo.create(m)
+    repo.path(m.id, AUDIO).write_bytes(b"\x00" * 2048)
+
+    result = runner.invoke(app, ["transcribe"])
+
+    assert result.exit_code == 1
+    assert "FALHOU" in result.output and "modelo não encontrado" in result.output
+    assert (project / "data" / "recordings" / m.id / "error.txt").exists()
 
 
 def test_stop_and_cancel_without_active_recording(tmp_path: Path, monkeypatch):

@@ -1,0 +1,11 @@
+{
+  "systeminfo": "AVX = 0 | NEON = 1",
+  "model": {"type": "large-v3-turbo", "multilingual": true, "vocab": 51866},
+  "params": {"model": "ggml-large-v3-turbo-q5_0.bin", "language": "pt", "translate": false},
+  "result": {"language": "pt"},
+  "transcription": [
+    {"timestamps": {"from": "00:00:00,000", "to": "00:00:03,200"}, "offsets": {"from": 0, "to": 3200}, "text": " Bom dia, pessoal. Vamos começar pela revisão da sprint."},
+    {"timestamps": {"from": "00:00:03,200", "to": "00:00:09,800"}, "offsets": {"from": 3200, "to": 9800}, "text": " Felipe, você fica responsável pelo relatório até quarta."},
+    {"timestamps": {"from": "00:00:09,800", "to": "00:00:10,000"}, "offsets": {"from": 9800, "to": 10000}, "text": "   "}
+  ]
+}

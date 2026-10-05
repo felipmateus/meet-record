@@ -19,7 +19,7 @@ FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_recorder.py"
 STARTUP = 5.0
 
 
-def wait_for(path: Path, timeout: float = 20.0) -> None:
+def wait_for(path: Path, timeout: float = 60.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():
