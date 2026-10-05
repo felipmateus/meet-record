@@ -32,6 +32,12 @@ class CoreAudioTapCapture:
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)
 
+    def is_running(self, handle: CaptureHandle) -> bool:
+        proc = self._procs.get(handle.pid)
+        if proc is not None:
+            return proc.poll() is None
+        return process_control.is_running(handle.pid)
+
     def stop(self, handle: CaptureHandle) -> Path:
         process_control.terminate(handle.pid, signal.SIGTERM, self.stop_timeout, self._procs)
         return handle.out

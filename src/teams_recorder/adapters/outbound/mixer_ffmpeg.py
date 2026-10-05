@@ -1,10 +1,13 @@
 """AudioMixer via ffmpeg: soma as trilhas, normaliza loudness e codifica AAC mono."""
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
 from teams_recorder.domain import CaptureError
+
+log = logging.getLogger(__name__)
 
 MIN_TRACK_BYTES = 1024  # cabeçalho WAV sem amostras tem 44 bytes; menos de 1 KB é lixo
 
@@ -35,6 +38,9 @@ class FfmpegMixer:
 
     def mix(self, tracks: list[Path], out: Path) -> Path:
         usable = self.usable_tracks(tracks)
+        for t in tracks:
+            size = t.stat().st_size if t.exists() else 0
+            log.info("trilha %s: %.1f MB%s", t.name, size / 1e6, "" if t in usable else " (descartada)")
         if not usable:
             raise CaptureError("nenhuma trilha de áudio utilizável para mixar: " + ", ".join(str(t) for t in tracks))
         try:

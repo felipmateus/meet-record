@@ -32,6 +32,7 @@ class Daemon:
     active: ActiveRecording | None = None
     positives: int = 0
     negatives: int = 0
+    warned_dead: set[str] = field(default_factory=set)
     stop_event: threading.Event = field(default_factory=threading.Event)
     workers: list[threading.Thread] = field(default_factory=list)
 
@@ -65,6 +66,8 @@ class Daemon:
         if detector is None:
             raise TeamsRecorderError("daemon sem detector configurado")
         state = detector.poll()
+        if self.active is not None:
+            self._watch_capturers()
         if state == CallState.UNKNOWN:
             return  # leitura falhou; não conta para nenhum lado
         if state == CallState.IN_CALL:
@@ -77,6 +80,18 @@ class Daemon:
             self.positives = 0
             if self.active is not None and self.negatives >= self.stop_after:
                 self._finish_call()
+
+    def _watch_capturers(self) -> None:
+        """Avisa (uma vez por gravador) se um processo de captura morreu durante a chamada."""
+        assert self.active is not None
+        checks = (("teams-tap", self.container.process_capture, self.active.process_handle), ("microfone", self.container.mic_capture, self.active.mic_handle))
+        for name, capture, handle in checks:
+            key = f"{self.active.meeting.id}:{name}"
+            if key in self.warned_dead:
+                continue
+            if not capture.is_running(handle):
+                self.warned_dead.add(key)
+                log.warning("gravador %s (pid %s) morreu durante a chamada %s; veja data/log/capture.log", name, handle.pid, self.active.meeting.id)
 
     def _start_call(self, pid: int | None) -> None:
         if pid is None:
