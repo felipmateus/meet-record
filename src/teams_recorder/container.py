@@ -11,6 +11,7 @@ from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCaptu
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
+from teams_recorder.adapters.outbound.llm_claude_cli import ClaudeCliAnalyzer
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
@@ -90,11 +91,18 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         mic_capture=FfmpegMicCapture(log_path=capture_log),
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
-        analyzer=ClaudeAnalyzer(
-            prompt_path=settings.prompts_dir / "analyze_system.md",
-            model=settings.llm_model,
-            effort=settings.llm_effort,
-            max_tokens=settings.llm_max_tokens,
-            usage_log=settings.usage_log,
-        ),
+        analyzer=build_analyzer(settings),
+    )
+
+
+def build_analyzer(settings: Settings) -> MeetingAnalyzer:
+    prompt = settings.prompts_dir / "analyze_system.md"
+    if settings.llm_provider == "claude-code":
+        return ClaudeCliAnalyzer(prompt_path=prompt, model=settings.llm_cli_model, effort=settings.llm_effort, usage_log=settings.usage_log)
+    return ClaudeAnalyzer(
+        prompt_path=prompt,
+        model=settings.llm_model,
+        effort=settings.llm_effort,
+        max_tokens=settings.llm_max_tokens,
+        usage_log=settings.usage_log,
     )

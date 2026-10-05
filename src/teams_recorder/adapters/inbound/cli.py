@@ -85,17 +85,22 @@ def doctor() -> None:
         mark = "ok " if found else "FALTA"
         ok = ok and bool(found)
         typer.echo(f"[{mark}] {name}: {found or 'não encontrado'}")
+    claude_cli = shutil.which("claude")
+    typer.echo(f"[{'ok ' if claude_cli else 'info'}] claude (Claude Code CLI): {claude_cli or 'não encontrado'}  → provedor atual: {settings.llm_provider}")
     model_ok = settings.whisper_model_path.exists()
     ok = ok and model_ok
     typer.echo(f"[{'ok ' if model_ok else 'FALTA'}] modelo whisper: {settings.whisper_model_path}" + ("" if model_ok else "  → scripts/download-model.sh"))
-    typer.echo(f"[{'ok ' if settings.has_api_key else 'FALTA'}] ANTHROPIC_API_KEY no .env")
+    key_needed = settings.llm_provider == "api"
+    key_mark = "ok " if settings.has_api_key else ("FALTA" if key_needed else "info")
+    typer.echo(f"[{key_mark}] ANTHROPIC_API_KEY no .env" + ("" if key_needed else " (não exigida com provider = claude-code)"))
     env_file = settings.project_dir / ".env"
     if env_file.exists():
         mode = env_file.stat().st_mode & 0o777
         if mode & 0o077:
             typer.echo(f"[AVISO] .env com permissão {oct(mode)}; recomendado: chmod 600 .env")
     typer.echo(f"[info] dados em {settings.data_dir}")
-    raise typer.Exit(code=0 if ok and settings.has_api_key else 1)
+    llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
+    raise typer.Exit(code=0 if ok and llm_ok else 1)
 
 
 @app.command()
@@ -187,8 +192,10 @@ def analyze(
 ) -> None:
     """Extrai resumo, decisões, ações e prazos da transcrição com a Claude API."""
     settings = _settings()
-    if not settings.has_api_key:
-        _fail("ANTHROPIC_API_KEY ausente no .env")
+    if settings.llm_provider == "api" and not settings.has_api_key:
+        _fail("ANTHROPIC_API_KEY ausente no .env (ou use llm.provider = \"claude-code\")")
+    if settings.llm_provider == "claude-code" and shutil.which("claude") is None:
+        _fail("Claude Code (`claude`) não encontrado no PATH")
     c = build_container(settings, headless=True)
     if meeting_id:
         if not c.repo.exists(meeting_id):
@@ -199,6 +206,7 @@ def analyze(
         if not targets:
             typer.echo("Nenhuma reunião pendente de análise.")
             return
+    typer.echo(f"Provedor: {settings.llm_provider} ({settings.llm_cli_model if settings.llm_provider == 'claude-code' else settings.llm_model})")
     use_case = c.analyze_meeting()
     failures = 0
     for mid in targets:
