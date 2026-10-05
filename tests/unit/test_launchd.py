@@ -8,7 +8,7 @@ from teams_recorder.adapters.outbound.launchd import LABEL, LaunchAgent
 
 
 class Recorder:
-    """Simula launchctl. Após um bootout, `print` passa a responder 'não carregado'."""
+    """Simulates launchctl. After a bootout, `print` starts answering 'not loaded'."""
 
     def __init__(self, outputs=None):
         self.calls = []
@@ -21,9 +21,9 @@ class Recorder:
         if key == "bootout":
             self.booted_out = True
         if key == "print" and self.booted_out:
-            return subprocess.CompletedProcess(cmd, 113, stdout="", stderr="erro")
+            return subprocess.CompletedProcess(cmd, 113, stdout="", stderr="error")
         rc, out = self.outputs.get(key, (0, ""))
-        return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="erro" if rc else "")
+        return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr="error" if rc else "")
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def test_install_writes_plist_and_bootstraps(agent: LaunchAgent):
     with path.open("rb") as fh:
         assert plistlib.load(fh)["Label"] == LABEL
     subcommands = [c[1] for c in agent.runner.calls]
-    assert subcommands == ["print", "bootstrap"]  # não estava carregado → sem bootout
+    assert subcommands == ["print", "bootstrap"]  # was not loaded → no bootout
     assert agent.runner.calls[-1][2].startswith("gui/")
 
 
@@ -76,7 +76,7 @@ def test_bootstrap_failure_raises(tmp_path: Path, monkeypatch):
     ag = LaunchAgent(tmp_path / "p", tmp_path / "p" / "data", runner=Recorder({"print": (113, ""), "bootstrap": (5, "")}), sleep=lambda s: None)
     with pytest.raises(RuntimeError, match="bootstrap"):
         ag.install()
-    assert sum(1 for c in ag.runner.calls if c[1] == "bootstrap") == 10  # tentou repetidas vezes
+    assert sum(1 for c in ag.runner.calls if c[1] == "bootstrap") == 10  # retried several times
 
 
 def test_extra_env_is_merged(tmp_path: Path, monkeypatch):
@@ -84,3 +84,15 @@ def test_extra_env_is_merged(tmp_path: Path, monkeypatch):
     ag = LaunchAgent(tmp_path / "p", tmp_path / "p" / "data", extra_env={"TREC_LLM_PROVIDER": "claude-code"})
     env = ag.plist()["EnvironmentVariables"]
     assert env["TREC_LLM_PROVIDER"] == "claude-code" and "PATH" in env
+
+
+def test_planner_agent_is_scheduled_not_resident(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    ag = LaunchAgent.planner(tmp_path / "p", tmp_path / "p" / "data", hour=18, extra_env={"TREC_LLM_PROVIDER": "claude-code"})
+    pl = ag.plist()
+    assert pl["Label"] == "local.teams-recorder.planner"
+    assert pl["ProgramArguments"][1:] == ["plan", "--purge"]
+    assert "KeepAlive" not in pl and "RunAtLoad" not in pl
+    assert pl["StartCalendarInterval"] == [{"Hour": 18, "Minute": 0, "Weekday": wd} for wd in range(1, 6)]
+    assert pl["StandardOutPath"].endswith("planner.out.log")
+    assert ag.plist_path.name == "local.teams-recorder.planner.plist"

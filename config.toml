@@ -1,16 +1,17 @@
-# Configuração do teams-recorder. Sem segredos aqui; a chave da API fica no .env.
+# teams-recorder configuration. No secrets here; the API key lives in .env.
 
 [paths]
-# Deixe vazio para o padrão: ./data, ou ~/Library/Application Support/teams-recorder
-# quando a pasta do projeto estiver sincronizada com o iCloud.
+# Leave empty for the default: ./data when the project is outside Documents/Desktop/Downloads
+# and outside iCloud; otherwise ~/Library/Application Support/teams-recorder, because
+# macOS blocks background processes that access those folders.
 data_dir = ""
 
 [audio]
-# Microfone: "default" segue a entrada padrão do sistema (recomendado: funciona com headset),
-# ou o nome exato do dispositivo (ex.: "MacBook Air Microphone").
+# Microphone: "default" follows the system's default input (recommended: works with a headset),
+# or the exact device name (e.g. "MacBook Air Microphone").
 mic_device = "default"
-# Backend do microfone: "coreaudio" (teams-tap --mic, sobrevive à reconfiguração feita pelo Teams)
-# ou "ffmpeg" (avfoundation; parou de gravar segundos após o Teams abrir o microfone).
+# Microphone backend: "coreaudio" (teams-tap --mic, survives the reconfiguration done by Teams)
+# or "ffmpeg" (avfoundation; stopped recording seconds after Teams opened the microphone).
 mic_backend = "coreaudio"
 teams_process_name = "MSTeams"
 bitrate_kbps = 64
@@ -21,28 +22,28 @@ start_after_positive_polls = 2
 stop_after_negative_polls = 5
 
 [transcription]
-# Modelo ggml do whisper.cpp. "large-v3-turbo-q5_0" (574 MB) tem qualidade próxima do
-# large-v3-turbo completo (1,6 GB). Baixe com scripts/download-model.sh.
+# whisper.cpp ggml model. "large-v3-turbo-q5_0" (574 MB) has quality close to the full
+# large-v3-turbo (1.6 GB). Download it with scripts/download-model.sh.
 whisper_model = "large-v3-turbo-q5_0"
 language = "pt"
-# Pasta dos modelos; vazio = <data_dir>/models
+# Models folder; empty = <data_dir>/models
 models_dir = ""
-# Threads do whisper; 0 = automático (núcleos de desempenho)
+# whisper threads; 0 = automatic (performance cores)
 threads = 0
-# Detecção de voz (Silero) antes do whisper. Desligada por padrão: em teste com frases
-# curtas (2026-10-05) ela cortou trechos de fala e piorou o texto; a redução de ruído na
-# mixagem (audio.denoise) foi o que melhorou a transcrição. Para experimentar:
-# scripts/download-model.sh silero-v5.1.2 e vad = true.
+# Voice activity detection (Silero) before whisper. Off by default: in a test with short
+# phrases (2026-10-05) it cut off speech segments and made the text worse; the noise
+# reduction in the mix (audio.denoise) is what improved the transcription. To experiment:
+# scripts/download-model.sh silero-v5.1.2 and vad = true.
 vad = false
 vad_model = "silero-v5.1.2"
 
 [llm]
-# provider: "api" usa a Claude API com a chave do .env (pré-pago por uso);
-#           "claude-code" usa o Claude Code instalado, em modo headless, com a sua assinatura.
-# Pode ser sobrescrito pela variável de ambiente TREC_LLM_PROVIDER.
-provider = "api"
+# provider: "api" uses the Claude API with the key from .env (pay-as-you-go);
+#           "claude-code" uses the installed Claude Code, in headless mode, with your subscription.
+# Can be overridden by the TREC_LLM_PROVIDER environment variable.
+provider = "claude-code"
 model = "claude-opus-5-5"
-# Modelo quando provider = "claude-code" (aceita apelidos: opus, sonnet, fable)
+# Model when provider = "claude-code" (accepts aliases: opus, sonnet, fable)
 cli_model = "opus"
 effort = "high"
 max_tokens = 16000

@@ -1,7 +1,4 @@
-"""Composition root: único lugar que instancia adaptadores concretos.
-
-Adaptadores ainda não implementados ficam como None; a CLI informa a fase em que chegam.
-"""
+"""Composition root: the only place that instantiates concrete adapters."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +11,8 @@ from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.llm_claude_cli import ClaudeCliAnalyzer
+from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport, StructuredTransport
+from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
@@ -33,6 +32,7 @@ from teams_recorder.application.ports import (
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
+    BuildDailyPlan,
     CancelRecording,
     PurgeOldAudio,
     StartRecording,
@@ -57,8 +57,8 @@ class Container:
     mixer: AudioMixer
     transcriber: Transcriber
     analyzer: MeetingAnalyzer
+    planner: Planner
     detector: CallDetector | None = None
-    planner: Planner | None = None
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device)
@@ -78,6 +78,9 @@ class Container:
     def pipeline(self) -> Pipeline:
         return Pipeline(self.repo, self.notifier, self.stop_recording(), self.transcribe_meeting(), self.analyze_meeting())
 
+    def build_daily_plan(self) -> BuildDailyPlan:
+        return BuildDailyPlan(self.repo, self.planner, self.notifier)
+
     def purge_old_audio(self) -> PurgeOldAudio:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
 
@@ -95,8 +98,15 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads, vad_model_path=settings.vad_model_path),
         analyzer=build_analyzer(settings),
+        planner=ClaudePlanner(build_transport(settings), prompt_path=settings.prompts_dir / "plan_system.md"),
         detector=PmsetCallDetector(settings.teams_process_name),
     )
+
+
+def build_transport(settings: Settings) -> StructuredTransport:
+    if settings.llm_provider == "claude-code":
+        return ClaudeCodeTransport(model=settings.llm_cli_model, effort=settings.llm_effort, usage_log=settings.usage_log)
+    return ApiTransport(model=settings.llm_model, effort=settings.llm_effort, max_tokens=settings.llm_max_tokens, usage_log=settings.usage_log)
 
 
 def build_analyzer(settings: Settings) -> MeetingAnalyzer:

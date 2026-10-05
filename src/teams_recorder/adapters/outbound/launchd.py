@@ -1,4 +1,4 @@
-"""Instala o daemon como LaunchAgent do usuário (sobe no login, reinicia se cair)."""
+"""Installs the daemon as a user LaunchAgent (starts at login, restarts if it dies)."""
 from __future__ import annotations
 
 import os
@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LABEL = "local.teams-recorder.daemon"
+PLANNER_LABEL = "local.teams-recorder.planner"
 
 
 @dataclass
@@ -19,6 +20,8 @@ class LaunchAgent:
     runner: object = subprocess.run
     extra_env: dict[str, str] | None = None
     sleep: object = time.sleep
+    program_args: list[str] | None = None            # default: ["daemon"]
+    calendar: list[dict[str, int]] | None = None     # schedule (StartCalendarInterval) instead of KeepAlive
 
     @property
     def plist_path(self) -> Path:
@@ -28,18 +31,32 @@ class LaunchAgent:
         trec = self.project_dir / ".venv" / "bin" / "trec"
         home = str(Path.home())
         path = ":".join(["/opt/homebrew/bin", "/usr/local/bin", f"{home}/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
-        return {
+        plist: dict = {
             "Label": self.label,
-            "ProgramArguments": [str(trec), "daemon"],
-            "RunAtLoad": True,
-            "KeepAlive": True,
+            "ProgramArguments": [str(trec), *(self.program_args or ["daemon"])],
             "ProcessType": "Background",
             "WorkingDirectory": str(self.project_dir),
             "EnvironmentVariables": {"PATH": path, "TEAMS_RECORDER_DIR": str(self.project_dir), "HOME": home, **(self.extra_env or {})},
-            "StandardOutPath": str(self.data_dir / "log" / "daemon.out.log"),
-            "StandardErrorPath": str(self.data_dir / "log" / "daemon.err.log"),
+            "StandardOutPath": str(self.data_dir / "log" / f"{self._short}.out.log"),
+            "StandardErrorPath": str(self.data_dir / "log" / f"{self._short}.err.log"),
             "ThrottleInterval": 10,
         }
+        if self.calendar:
+            plist["StartCalendarInterval"] = self.calendar   # runs at the scheduled times; not resident
+        else:
+            plist["RunAtLoad"] = True
+            plist["KeepAlive"] = True
+        return plist
+
+    @property
+    def _short(self) -> str:
+        return self.label.rsplit(".", 1)[-1]
+
+    @classmethod
+    def planner(cls, project_dir: Path, data_dir: Path, hour: int, extra_env: dict[str, str] | None = None, **kw) -> "LaunchAgent":
+        """Scheduled agent: `trec plan --purge` at <hour>:00, Monday to Friday."""
+        return cls(project_dir, data_dir, label=PLANNER_LABEL, extra_env=extra_env, program_args=["plan", "--purge"],
+                   calendar=[{"Hour": hour, "Minute": 0, "Weekday": wd} for wd in range(1, 6)], **kw)
 
     def _domain(self) -> str:
         return f"gui/{os.getuid()}"
@@ -51,14 +68,14 @@ class LaunchAgent:
             self._bootout_and_wait()
         with self.plist_path.open("wb") as fh:
             plistlib.dump(self.plist(), fh)
-        # Logo após um bootout o launchd pode responder "Input/output error" (5) por alguns segundos.
+        # Right after a bootout, launchd may answer "Input/output error" (5) for a few seconds.
         last: subprocess.CompletedProcess | None = None
         for _ in range(10):
             last = self._launchctl("bootstrap", self._domain(), str(self.plist_path))
             if last.returncode == 0:
                 return self.plist_path
             self.sleep(1)  # type: ignore[operator]
-        raise RuntimeError(f"launchctl bootstrap falhou ({last.returncode}): {last.stderr.strip()}")  # type: ignore[union-attr]
+        raise RuntimeError(f"launchctl bootstrap failed ({last.returncode}): {last.stderr.strip()}")  # type: ignore[union-attr]
 
     def _bootout_and_wait(self, timeout: float = 15.0) -> None:
         self._launchctl("bootout", f"{self._domain()}/{self.label}")
@@ -94,5 +111,5 @@ class LaunchAgent:
     def _launchctl(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
         result = self.runner(["launchctl", *args], capture_output=True, text=True, check=False)  # type: ignore[operator]
         if check and result.returncode != 0:
-            raise RuntimeError(f"launchctl {' '.join(args)} falhou ({result.returncode}): {result.stderr.strip()}")
+            raise RuntimeError(f"launchctl {' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}")
         return result
