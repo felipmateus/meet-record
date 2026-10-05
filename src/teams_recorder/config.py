@@ -9,6 +9,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ENV_PROJECT_DIR = "TEAMS_RECORDER_DIR"
+ENV_LLM_PROVIDER = "TREC_LLM_PROVIDER"
+LLM_PROVIDERS = ("api", "claude-code")
 ICLOUD_MARKER = "Mobile Documents"
 
 
@@ -26,7 +28,9 @@ class Settings:
     language: str
     models_dir: Path
     whisper_threads: int
+    llm_provider: str
     llm_model: str
+    llm_cli_model: str
     llm_effort: str
     llm_max_tokens: int
     plan_hour: int
@@ -48,6 +52,13 @@ class Settings:
     @property
     def usage_log(self) -> Path:
         return self.data_dir / "log" / "llm_usage.jsonl"
+
+
+def _provider(value: object) -> str:
+    v = str(value).strip().lower()
+    if v not in LLM_PROVIDERS:
+        raise ValueError(f"llm.provider inválido: {value!r}; use um de {LLM_PROVIDERS}")
+    return v
 
 
 def default_project_dir() -> Path:
@@ -103,7 +114,9 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         language=str(transcription.get("language", "pt")),
         models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / "models",
         whisper_threads=int(transcription.get("threads", 0)),
+        llm_provider=_provider(os.environ.get(ENV_LLM_PROVIDER) or llm.get("provider", "api")),
         llm_model=str(llm.get("model", "claude-opus-5-5")),
+        llm_cli_model=str(llm.get("cli_model", "opus")),
         llm_effort=str(llm.get("effort", "high")),
         llm_max_tokens=int(llm.get("max_tokens", 16000)),
         plan_hour=int(planner.get("hour", 18)),

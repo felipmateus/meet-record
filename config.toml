@@ -27,7 +27,13 @@ models_dir = ""
 threads = 0
 
 [llm]
+# provider: "api" usa a Claude API com a chave do .env (pré-pago por uso);
+#           "claude-code" usa o Claude Code instalado, em modo headless, com a sua assinatura.
+# Pode ser sobrescrito pela variável de ambiente TREC_LLM_PROVIDER.
+provider = "api"
 model = "claude-opus-5-5"
+# Modelo quando provider = "claude-code" (aceita apelidos: opus, sonnet, fable)
+cli_model = "opus"
 effort = "high"
 max_tokens = 16000
 
