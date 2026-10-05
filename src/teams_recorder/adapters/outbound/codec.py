@@ -17,7 +17,10 @@ from teams_recorder.domain import (
     Deadline,
     Decision,
     Meeting,
+    MeetingType,
+    Priority,
     Segment,
+    Topic,
     Transcript,
 )
 
@@ -74,6 +77,8 @@ def action_to_dict(a: Action) -> dict[str, Any]:
         "source_meeting": a.source_meeting,
         "due": _d(a.due),
         "status": a.status.value,
+        "priority": a.priority.value if a.priority else None,
+        "at": a.at,
     }
 
 
@@ -84,8 +89,17 @@ def action_from_dict(d: dict[str, Any]) -> Action:
         owner=d["owner"],
         source_meeting=d["source_meeting"],
         due=_parse_d(d.get("due")),
-        status=ActionStatus(d.get("status", "open")),
+        status=ActionStatus(d.get("status", ActionStatus.OPEN)),
+        priority=Priority(d["priority"]) if d.get("priority") else None,
+        at=d.get("at"),
     )
+
+
+def _decision_from(value: Any) -> Decision:
+    # analyses written before 2026-10-05 stored decisions as plain strings
+    if isinstance(value, str):
+        return Decision(value)
+    return Decision(value["text"], value.get("at"))
 
 
 # Analysis
@@ -93,12 +107,18 @@ def analysis_to_dict(a: Analysis) -> dict[str, Any]:
     return {
         "meeting_id": a.meeting_id,
         "summary": a.summary,
-        "decisions": [dec.text for dec in a.decisions],
+        "title": a.title,
+        "purpose": a.purpose,
+        "meeting_type": a.meeting_type.value,
+        "participants": list(a.participants),
+        "topics": [{"title": t.title, "points": list(t.points)} for t in a.topics],
+        "decisions": [{"text": dec.text, "at": dec.at} for dec in a.decisions],
         "my_actions": [action_to_dict(x) for x in a.my_actions],
         "others_actions": [action_to_dict(x) for x in a.others_actions],
         "deadlines": [{"what": dl.what, "when": _d(dl.when), "who": dl.who} for dl in a.deadlines],
         "open_questions": list(a.open_questions),
         "next_meetings": list(a.next_meetings),
+        "risks": list(a.risks),
     }
 
 
@@ -106,12 +126,18 @@ def analysis_from_dict(d: dict[str, Any]) -> Analysis:
     return Analysis(
         meeting_id=d["meeting_id"],
         summary=d.get("summary", ""),
-        decisions=[Decision(t) for t in d.get("decisions", [])],
+        decisions=[_decision_from(x) for x in d.get("decisions", [])],
         my_actions=[action_from_dict(x) for x in d.get("my_actions", [])],
         others_actions=[action_from_dict(x) for x in d.get("others_actions", [])],
         deadlines=[Deadline(x["what"], _parse_d(x.get("when")), x.get("who", "")) for x in d.get("deadlines", [])],
         open_questions=list(d.get("open_questions", [])),
         next_meetings=list(d.get("next_meetings", [])),
+        title=d.get("title", ""),
+        purpose=d.get("purpose", ""),
+        meeting_type=MeetingType(d.get("meeting_type", MeetingType.OTHER)),
+        participants=list(d.get("participants", [])),
+        topics=[Topic(x["title"], list(x.get("points", []))) for x in d.get("topics", [])],
+        risks=list(d.get("risks", [])),
     )
 
 

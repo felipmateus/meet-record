@@ -64,6 +64,12 @@ def test_prompt_loaded_from_file(tmp_path: Path):
     assert transport.calls[0][0] == "PROMPT"
 
 
+def test_user_name_in_plan_message():
+    msg = build_user_message(date(2026, 10, 6), [], None, [], [], [], user_name="Felipe")
+    assert msg.startswith("User (recording owner): Felipe\n")
+    assert not build_user_message(date(2026, 10, 6), [], None, [], [], []).startswith("User")
+
+
 def test_previous_plan_is_truncated():
     prev = DailyPlan(date(2026, 10, 5), "x" * 10000)
     msg = build_user_message(date(2026, 10, 6), [], prev, [], [], [])

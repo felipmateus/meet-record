@@ -110,7 +110,7 @@ def test_claude_code_errors(monkeypatch, mode, match):
 def test_claude_code_falls_back_to_result_text(monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "no_structured")
     out = ScriptedCli(claude_bin=sys.executable).complete("SYS", "Transcript: x", AnalysisOut, tag="t")
-    assert out.decisions[0] == "Relatório até quarta."
+    assert out.decisions[0].text == "Relatório até quarta." and out.decisions[0].at == "00:00:03"
 
 
 def test_claude_code_missing_binary(tmp_path: Path):

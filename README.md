@@ -44,6 +44,8 @@ trec analyze                             # every transcribed meeting not yet ana
 trec analyze 2026-10-06_14-00-00         # one specific meeting
 ```
 
+Each analysis also writes `minutes.md` in the meeting folder: minutes in the structure of the `meeting-notes` skill (title, date, participants, type and purpose, summary, topics, decisions, an action table with owner, due date, priority and the transcript timestamp where it was said, risks, open questions, next steps), in Portuguese. Untitled automatic recordings take the title inferred by the model. `trec minutes [id] [--all]` re-renders minutes from existing analyses without calling the model. Set `[user] name` in `config.toml` so tasks addressed to you by name are attributed to you.
+
 Only the transcript text and the prompt leave the Mac. Model `claude-opus-5-5` with schema-validated structured output, system prompt in `prompts/analyze_system.md` with caching, and a server-side fallback for occasional refusals by the safety classifier. Each call logs tokens to `data/log/llm_usage.jsonl`. Typical cost: about US$ 0.10 per hour of meeting.
 
 ### Provider: API or Claude Code

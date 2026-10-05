@@ -97,7 +97,12 @@ class Cli:
     STOP_CMD_HELP = "Stop the recording in progress, mix the tracks and produce audio.m4a."
     TRANSCRIBE_CMD_HELP = "Transcribe the audio of a meeting (or of all pending ones) locally with whisper.cpp."
     CANCEL_CMD_HELP = "Discard the recording in progress without producing a file."
-    ANALYZE_CMD_HELP = "Extract summary, decisions, actions and deadlines from the transcript with the Claude API."
+    ANALYZE_CMD_HELP = "Extract summary, decisions, actions and deadlines from the transcript with Claude, and write minutes.md."
+    MINUTES_CMD_HELP = "Render minutes.md from an existing analysis (no LLM call). Without an argument: analyzed meetings that have no minutes yet."
+    MINUTES_ARG_HELP = "Meeting ID. Without an argument: every analyzed meeting without minutes.md."
+    MINUTES_ALL_HELP = "Re-render minutes for every analyzed meeting, even if minutes.md already exists."
+    NO_PENDING_MINUTES = "No analyzed meeting without minutes."
+    MINUTES_WRITTEN = "Minutes: {path}"
     DAEMON_CMD_HELP = "Watch Teams and record, transcribe and analyze meetings automatically. Used by the LaunchAgent."
     AGENT_INSTALL_CMD_HELP = "Register the daemon with launchd: starts at login and restarts if it dies."
     AGENT_UNINSTALL_CMD_HELP = "Stop the daemon and remove the LaunchAgent."
@@ -161,6 +166,8 @@ class Cli:
     ACTION_LINE = "  • {description}{due}"
     ACTION_DUE = " by {due}"
     FILE_PATH = "  File: {path}"
+    MINUTES_PATH = "  Minutes: {path}"
+    TITLE_LINE = "  Title: {title}"
     # daemon / agent
     DAEMON_ONCE_HELP = "Run a single detection iteration and exit (diagnostics)."
     DETECTOR_STATE = "detector ({name}): {state}; pid={pid}"
@@ -229,6 +236,7 @@ class Log:
 class Prompt:
     """Text the code adds around the data sent to the model (the system prompts live in prompts/*.md)."""
 
+    USER_NAME = "User (recording owner): {name}"
     MEETING_DATE = "Meeting date: {date} ({weekday})"
     MEETING_START = "Start: {time}"
     MEETING_TITLE = "Title: {title}"
@@ -247,6 +255,59 @@ class Prompt:
     FIELD_ACTION_OWNER = "Owner; '{self_owner}' for the recording owner; '{unknown}' when unknown"
     FIELD_DUE = "Due date in ISO format (YYYY-MM-DD) or null"
     FIELD_ISO_DATE = "ISO date or null"
+    FIELD_AT = "Transcript timestamp (HH:MM:SS) of the line where it was said, or null"
+    FIELD_PRIORITY = "high/medium/low only when urgency was stated or clearly implied; otherwise null"
+    FIELD_TITLE = "Short meeting title (max 8 words), inferred from the content"
+    FIELD_PURPOSE = "One sentence: why the meeting happened"
+    FIELD_MEETING_TYPE = "standup, client, project_review, one_on_one or other"
+    FIELD_PARTICIPANTS = "Names of people mentioned or addressed in the meeting (no guessing)"
+    FIELD_TOPICS = "Main discussion topics in order, each with its key points"
+    FIELD_RISKS = "Risks, blockers or issues raised"
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
     FIELD_PLAN_PRIORITIES = "3 to 5 priorities, one sentence each"
     FIELD_PLAN_COMPLETED = "ids of open actions that the day's analyses show as completed"
+
+
+class Minutes:
+    """Labels of minutes.md. Portuguese on purpose: it is a document for the user, written from
+    LLM content that is in Portuguese (same exception as the daily plan's section names)."""
+
+    TITLE = "# Ata: {title}"
+    DATE = "📅 **Data:** {date}, {start}–{end} ({minutes} min)"
+    DATE_NO_END = "📅 **Data:** {date}, {start}"
+    UNDER_A_MINUTE = "<1"
+    PARTICIPANTS = "👥 **Participantes:** {names}"
+    NO_PARTICIPANTS = "não identificados"
+    TYPE = "🏷️ **Tipo:** {label}"
+    PURPOSE = "🎯 **Objetivo:** {purpose}"
+    SUMMARY = "### 📋 Resumo"
+    TOPICS = "### 💡 Tópicos"
+    TOPIC_LINE = "{n}. **{title}**"
+    POINT_LINE = "   - {text}"
+    DECISIONS = "### ✅ Decisões"
+    DECISION_LINE = "- {text}{at}"
+    ACTIONS = "### 📌 Ações"
+    ACTIONS_HEADER = "| # | Ação | Responsável | Prazo | Prioridade | Dito em |\n|---|---|---|---|---|---|"
+    ACTION_ROW = "| {n} | {description} | {owner} | {due} | {priority} | {at} |"
+    NO_ACTIONS = "Nenhuma ação registrada."
+    RISKS = "### ⚠️ Riscos e bloqueios"
+    QUESTIONS = "### ❓ Perguntas em aberto"
+    NEXT_STEPS = "### 🔜 Próximos passos"
+    DEADLINE_LINE = "- {what}{when}{who}"
+    BULLET = "- {text}"
+    AT = " `[{at}]`"
+    WHEN = " — {date}"
+    WHO = " · {who}"
+    DASH = "—"
+    OWNER_SELF = "{name} (você)"
+    OWNER_SELF_NO_NAME = "você"
+    OWNER_UNKNOWN = "⚠️ sem responsável"
+    FOOTER = "---\n_Gerada automaticamente a partir da transcrição. Confira cada item no horário indicado antes de compartilhar._"
+    TYPE_LABELS = {
+        "standup": "Daily",
+        "client": "Reunião com cliente",
+        "project_review": "Revisão de projeto",
+        "one_on_one": "1:1",
+        "other": "Reunião",
+    }
+    PRIORITY_LABELS = {"high": "🔴 Alta", "medium": "🟡 Média", "low": "🟢 Baixa"}

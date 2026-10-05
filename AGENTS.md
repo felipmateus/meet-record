@@ -21,7 +21,7 @@ TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real
 scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)
 
-trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | purge
+trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | minutes [id] [--all] | plan [--date] | purge
 trec daemon --once                     # one detector reading
 trec status                            # also prints the data dir (paths.data_dir in config.toml; currently ./data)
 trec agent install|restart|status|uninstall   # LaunchAgent local.teams-recorder.daemon
@@ -58,6 +58,7 @@ Ports and their adapters (`application/ports.py`):
 | `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
 | `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process) |
 | `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock` |
+| `MinutesRenderer` | `minutes_markdown.MarkdownMinutesRenderer` (minutes.md from the analysis, no LLM call; labels in `messages.Minutes`) |
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 
 Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`) that wait for a readiness file instead of assuming startup time.
@@ -85,7 +86,7 @@ Key invariants:
 
 ## Working conventions
 
-- **English only.** Everything written into this repository is in English: code, identifiers, comments, docstrings, log messages, CLI output, notifications, tests, documentation, PRD, run logs and commit messages. The only Portuguese allowed is data: sample transcripts and analyses used as test fixtures, and the content the LLM produces for the user (meetings are held in Brazilian Portuguese, so prompts must keep asking for Portuguese output while being written in English). Commits before 2026-10-05 are in Portuguese and were not rewritten.
+- **English only.** Everything written into this repository is in English: code, identifiers, comments, docstrings, log messages, CLI output, notifications, tests, documentation, PRD, run logs and commit messages. The only Portuguese allowed is data and user-facing documents built from LLM content (the labels of `minutes.md` in `messages.Minutes` and the daily-plan section names in the prompt): sample transcripts and analyses used as test fixtures, and the content the LLM produces for the user (meetings are held in Brazilian Portuguese, so prompts must keep asking for Portuguese output while being written in English). Commits before 2026-10-05 are in Portuguese and were not rewritten.
 - **Ask before committing or pushing.** Edit, test and show the diff; commit only with explicit approval.
 - Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative English messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
 - Never commit `.env`, `data/`, `native/teams-tap/.build/` or `.venv/` (already ignored). `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.

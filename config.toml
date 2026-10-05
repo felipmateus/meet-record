@@ -53,6 +53,11 @@ cli_model = "opus"
 effort = "high"
 max_tokens = 16000
 
+[user]
+# Your name as people say it in meetings. Sent to the model so tasks addressed to you by
+# name ("Felipe, você fica com...") are attributed to you. Empty = not sent.
+name = "Felipe"
+
 [planner]
 hour = 18
 retention_days = 30

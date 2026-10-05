@@ -10,8 +10,14 @@ from teams_recorder.domain import AnalysisError, Meeting, Segment, Transcript
 
 SAMPLE_OUT = AnalysisOut.model_validate({
     "summary": "Revisão da sprint e definição de entregas.",  # Portuguese: model output is data
-    "decisions": ["Relatório até quarta."],
-    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08"}],
+    "title": "Revisão da sprint",
+    "purpose": "Definir as entregas da semana.",
+    "meeting_type": "project_review",
+    "participants": ["Felipe", "Mariana"],
+    "topics": [{"title": "Integração SAP", "points": ["Escopo em aberto", " "]}],
+    "decisions": [{"text": "Relatório até quarta.", "at": "00:00:03"}, {"text": "  ", "at": None}],
+    "risks": ["Escopo do SAP indefinido"],
+    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03"}],
     "others_actions": [{"description": "Revisar escopo do SAP", "owner": "Mariana", "due": None}],
     "deadlines": [{"what": "Relatório de integração", "when": "2026-10-08", "who": "usuário"}],
     "open_questions": ["Escopo final da integração?"],
@@ -98,5 +104,34 @@ def test_strict_schema_closes_objects_and_requires_all_fields():
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == set(schema["properties"])
     action = schema["$defs"]["ActionOut"]
-    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due"}
+    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due", "priority", "at"}
     assert "default" not in action["properties"]["due"]
+
+
+def test_new_fields_are_mapped(meeting, transcript):
+    from teams_recorder.domain import MeetingType, Priority
+    analysis = ClaudeAnalyzer(FakeTransport(), system_prompt="SYS", min_words=1).analyze(transcript, meeting)
+    assert analysis.title == "Revisão da sprint" and analysis.purpose.startswith("Definir")
+    assert analysis.meeting_type is MeetingType.PROJECT_REVIEW
+    assert analysis.participants == ["Felipe", "Mariana"]
+    assert analysis.topics[0].title == "Integração SAP" and analysis.topics[0].points == ["Escopo em aberto"]
+    assert [d.text for d in analysis.decisions] == ["Relatório até quarta."] and analysis.decisions[0].at == "00:00:03"
+    assert analysis.my_actions[0].priority is Priority.HIGH and analysis.my_actions[0].at == "00:00:03"
+    assert analysis.others_actions[0].priority is None
+    assert analysis.risks == ["Escopo do SAP indefinido"]
+
+
+def test_user_name_goes_first_in_the_message(meeting, transcript):
+    transport = FakeTransport()
+    ClaudeAnalyzer(transport, system_prompt="SYS", min_words=1, user_name="Felipe").analyze(transcript, meeting)
+    assert transport.calls[0]["user"].startswith("User (recording owner): Felipe\n")
+    assert "User (recording owner)" not in build_user_message(transcript, meeting)
+
+
+def test_schema_exposes_enums_and_timestamps():
+    schema = strict_schema(AnalysisOut)
+    props = schema["properties"]
+    for key in ("title", "purpose", "meeting_type", "participants", "topics", "risks"):
+        assert key in props and key in schema["required"]
+    action = schema["$defs"]["ActionOut"]
+    assert {"priority", "at"} <= set(action["required"])

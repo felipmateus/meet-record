@@ -31,6 +31,7 @@ class ClaudeAnalyzer:
     prompt_path: Path | None = None      # loaded on first use ...
     system_prompt: str | None = None     # ... or given directly (tests)
     min_words: int = MIN_WORDS
+    user_name: str = ""                  # recording owner's name, so the model can attribute tasks addressed to them
 
     def _system(self) -> str:
         if self.system_prompt is None:
@@ -44,7 +45,7 @@ class ClaudeAnalyzer:
         if trivial is not None:
             return trivial
         out = self.transport.complete(
-            self._system(), build_user_message(transcript, meeting), AnalysisOut,
+            self._system(), build_user_message(transcript, meeting, self.user_name), AnalysisOut,
             tag=f"analyze:{meeting.id}", extra={"meeting": meeting.id},
         )
         return to_domain(out, meeting)

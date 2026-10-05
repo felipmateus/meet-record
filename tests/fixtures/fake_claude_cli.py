@@ -16,9 +16,15 @@ user_message = sys.stdin.read()
 assert "Transcript" in user_message, user_message[:100]
 
 out = {
+    "title": "Revisão da sprint",
+    "purpose": "Definir as entregas da semana.",
+    "meeting_type": "project_review",
+    "participants": ["Felipe"],
     "summary": "Revisão da sprint com entregas definidas.",
-    "decisions": ["Relatório até quarta."],
-    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08"}],
+    "topics": [{"title": "Entregas", "points": ["Relatório até quarta."]}],
+    "decisions": [{"text": "Relatório até quarta.", "at": "00:00:03"}],
+    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03"}],
+    "risks": [],
     "others_actions": [],
     "deadlines": [],
     "open_questions": [],

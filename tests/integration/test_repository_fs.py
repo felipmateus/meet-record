@@ -127,3 +127,24 @@ def test_corrupt_json_raises_repository_error(fs: FsMeetingRepository):
     fs.path(m.id, META).write_text("{nope")
     with pytest.raises(RepositoryError):
         fs.load_meta(m.id)
+
+
+def test_analysis_v2_roundtrip_and_old_format_compat(fs: FsMeetingRepository):
+    from teams_recorder.domain import MeetingType, Priority
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    v2 = codec.analysis_from_dict(json.loads((FIXTURES / "sample_analysis_v2.json").read_text()))
+    fs.save_analysis(m.id, v2)
+    loaded = fs.load_analysis(m.id)
+    assert loaded == v2 and loaded.meeting_type is MeetingType.PROJECT_REVIEW
+    assert loaded.my_actions[0].priority is Priority.HIGH and loaded.decisions[0].at == "00:00:03"
+    # analyses written before the new fields still load, with defaults
+    old = codec.analysis_from_dict(json.loads((FIXTURES / "sample_analysis.json").read_text()))
+    assert old.title == "" and old.meeting_type is MeetingType.OTHER and old.decisions[0].at is None
+
+
+def test_save_minutes(fs: FsMeetingRepository):
+    from teams_recorder.domain.status import MINUTES
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.save_minutes(m.id, "# Ata\n")
+    assert fs.path(m.id, MINUTES).read_text() == "# Ata\n"
+    assert derive_status(fs.files(m.id)) == MeetingStatus.RECORDING  # minutes do not change status

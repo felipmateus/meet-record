@@ -28,7 +28,7 @@ from teams_recorder.domain import (
     RepositoryError,
     Transcript,
 )
-from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Err
 
 
@@ -183,6 +183,9 @@ class FsMeetingRepository:
 
     def load_analysis(self, meeting_id: str) -> Analysis:
         return codec.analysis_from_dict(_read_json(self._require(meeting_id) / ANALYSIS))
+
+    def save_minutes(self, meeting_id: str, markdown: str) -> None:
+        _write_atomic(self._require(meeting_id) / MINUTES, markdown)
 
     def mark_failed(self, meeting_id: str, message: str) -> None:
         _write_atomic(self._require(meeting_id) / ERROR, message + "\n")

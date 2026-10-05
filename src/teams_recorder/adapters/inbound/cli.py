@@ -20,7 +20,7 @@ from teams_recorder.config import Settings, load_settings
 from teams_recorder.constants import CLI_NAME, Audio, Bin, Env, Files, LlmProvider, Logging
 from teams_recorder.container import build_container, teams_tap_binary
 from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
-from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
 from teams_recorder.messages import Cli, Err, Step
 
 app = typer.Typer(
@@ -238,12 +238,40 @@ def analyze(
             continue
         c.repo.clear_failed(mid)
         typer.echo(Cli.ANALYZED_OK.format(decisions=len(analysis.decisions), mine=len(analysis.my_actions), others=len(analysis.others_actions)))
+        if analysis.title:
+            typer.echo(Cli.TITLE_LINE.format(title=analysis.title))
         typer.echo(Cli.SUMMARY.format(summary=analysis.summary))
         for a in analysis.my_actions:
             typer.echo(Cli.ACTION_LINE.format(description=a.description, due=Cli.ACTION_DUE.format(due=a.due.isoformat()) if a.due else ""))
         typer.echo(Cli.FILE_PATH.format(path=c.repo.path(mid, ANALYSIS)))
+        typer.echo(Cli.MINUTES_PATH.format(path=c.repo.path(mid, MINUTES)))
     if failures:
         raise typer.Exit(code=1)
+
+
+@app.command(help=Cli.MINUTES_CMD_HELP)
+def minutes(
+    meeting_id: str | None = typer.Argument(None, help=Cli.MINUTES_ARG_HELP),
+    all_meetings: bool = typer.Option(False, "--all", help=Cli.MINUTES_ALL_HELP),
+) -> None:
+    c = build_container(_settings(), headless=True)
+    if meeting_id:
+        if not c.repo.exists(meeting_id):
+            _fail(Cli.MEETING_MISSING.format(meeting_id=meeting_id))
+        targets = [meeting_id]
+    else:
+        analyzed = [m.id for m in c.repo.list_meetings() if ANALYSIS in c.repo.files(m.id)]
+        targets = analyzed if all_meetings else [mid for mid in analyzed if MINUTES not in c.repo.files(mid)]
+        if not targets:
+            typer.echo(Cli.NO_PENDING_MINUTES)
+            return
+    use_case = c.render_minutes()
+    for mid in targets:
+        try:
+            use_case.execute(mid)
+        except TeamsRecorderError as exc:
+            _fail(str(exc))
+        typer.echo(Cli.MINUTES_WRITTEN.format(path=c.repo.path(mid, MINUTES)))
 
 
 @app.command(help=Cli.DAEMON_CMD_HELP)

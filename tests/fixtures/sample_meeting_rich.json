@@ -1,0 +1,100 @@
+{
+  "language": "pt",
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 6.0,
+      "text": "Bom dia, pessoal. Felipe, Mariana e Rodrigo estão aí? Beleza, vamos começar."
+    },
+    {
+      "start": 6.0,
+      "end": 11.0,
+      "text": "Antes de tudo, alguém viu o jogo ontem? Foi bem disputado."
+    },
+    {
+      "start": 11.0,
+      "end": 18.0,
+      "text": "Vamos ao que interessa. A pauta é a integração com o SAP e a entrega para o cliente da Vale."
+    },
+    {
+      "start": 18.0,
+      "end": 23.0,
+      "text": "Mariana, como está o mapeamento dos campos de material?"
+    },
+    {
+      "start": 23.0,
+      "end": 31.0,
+      "text": "Está oitenta por cento pronto, mas dependemos do time do SAP liberar o acesso ao ambiente de homologação."
+    },
+    {
+      "start": 31.0,
+      "end": 37.0,
+      "text": "Isso está travado desde semana passada, então é um risco de atrasar a entrega."
+    },
+    {
+      "start": 37.0,
+      "end": 43.0,
+      "text": "Felipe, você consegue cobrar o acesso com o gestor do SAP ainda hoje? É urgente."
+    },
+    {
+      "start": 43.0,
+      "end": 49.0,
+      "text": "Pode deixar comigo, eu mando o e-mail hoje mesmo e ligo se não responderem."
+    },
+    {
+      "start": 49.0,
+      "end": 57.0,
+      "text": "Sobre o relatório de integração, fica decidido que ele sai na quarta-feira, mesmo sem o ambiente."
+    },
+    {
+      "start": 57.0,
+      "end": 62.0,
+      "text": "Combinado. Eu termino o relatório até quarta, então."
+    },
+    {
+      "start": 62.0,
+      "end": 66.0,
+      "text": "Rodrigo, você revisa o relatório na quinta de manhã?"
+    },
+    {
+      "start": 66.0,
+      "end": 70.0,
+      "text": "Reviso sim, quinta de manhã eu olho."
+    },
+    {
+      "start": 70.0,
+      "end": 77.0,
+      "text": "Talvez a gente devesse migrar o banco para a nuvem, mas vamos pensar nisso depois."
+    },
+    {
+      "start": 77.0,
+      "end": 83.0,
+      "text": "Uma dúvida que ficou: o cliente vai querer os dados históricos de 2023 também?"
+    },
+    {
+      "start": 83.0,
+      "end": 87.0,
+      "text": "Não sei, precisamos perguntar para eles."
+    },
+    {
+      "start": 87.0,
+      "end": 94.0,
+      "text": "Então vamos marcar uma reunião com o cliente na semana que vem, na terça, para alinhar o escopo."
+    },
+    {
+      "start": 94.0,
+      "end": 97.0,
+      "text": "Felipe, você agenda essa reunião?"
+    },
+    {
+      "start": 97.0,
+      "end": 100.0,
+      "text": "Agendo, sem problema."
+    },
+    {
+      "start": 100.0,
+      "end": 104.0,
+      "text": "Ótimo, acho que é isso. Obrigado a todos."
+    }
+  ]
+}
