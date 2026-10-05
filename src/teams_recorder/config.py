@@ -41,6 +41,14 @@ class Settings:
     def whisper_model_path(self) -> Path:
         return self.models_dir / f"ggml-{self.whisper_model}.bin"
 
+    @property
+    def prompts_dir(self) -> Path:
+        return self.project_dir / "prompts"
+
+    @property
+    def usage_log(self) -> Path:
+        return self.data_dir / "log" / "llm_usage.jsonl"
+
 
 def default_project_dir() -> Path:
     env = os.environ.get(ENV_PROJECT_DIR)
