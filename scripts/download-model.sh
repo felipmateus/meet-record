@@ -7,7 +7,11 @@ set -euo pipefail
 NAME="${1:-large-v3-turbo-q5_0}"
 DIR="${2:-$(cd "$(dirname "$0")/.." && pwd)/data/models}"
 FILE="ggml-${NAME}.bin"
-URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${FILE}"
+# Modelos de VAD (silero-*) ficam em outro repositório do mesmo projeto.
+case "$NAME" in
+  silero-*) URL="https://huggingface.co/ggml-org/whisper-vad/resolve/main/${FILE}" ;;
+  *)        URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${FILE}" ;;
+esac
 mkdir -p "$DIR"
 if [ -s "$DIR/$FILE" ]; then
   echo "já existe: $DIR/$FILE"

@@ -23,6 +23,7 @@ class Settings:
     mic_backend: str
     teams_process_name: str
     bitrate_kbps: int
+    denoise: bool
     poll_seconds: int
     start_after_positive_polls: int
     stop_after_negative_polls: int
@@ -30,6 +31,8 @@ class Settings:
     language: str
     models_dir: Path
     whisper_threads: int
+    vad: bool
+    vad_model: str
     llm_provider: str
     llm_model: str
     llm_cli_model: str
@@ -46,6 +49,10 @@ class Settings:
     @property
     def whisper_model_path(self) -> Path:
         return self.models_dir / f"ggml-{self.whisper_model}.bin"
+
+    @property
+    def vad_model_path(self) -> Path | None:
+        return (self.models_dir / f"ggml-{self.vad_model}.bin") if self.vad else None
 
     @property
     def prompts_dir(self) -> Path:
@@ -114,6 +121,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         mic_backend=str(audio.get("mic_backend", "coreaudio")),
         teams_process_name=os.environ.get(ENV_TEAMS_PROCESS) or str(audio.get("teams_process_name", "MSTeams")),
         bitrate_kbps=int(audio.get("bitrate_kbps", 64)),
+        denoise=bool(audio.get("denoise", True)),
         poll_seconds=int(detector.get("poll_seconds", 3)),
         start_after_positive_polls=int(detector.get("start_after_positive_polls", 2)),
         stop_after_negative_polls=int(detector.get("stop_after_negative_polls", 5)),
@@ -121,6 +129,8 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         language=str(transcription.get("language", "pt")),
         models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / "models",
         whisper_threads=int(transcription.get("threads", 0)),
+        vad=bool(transcription.get("vad", False)),
+        vad_model=str(transcription.get("vad_model", "silero-v5.1.2")),
         llm_provider=_provider(os.environ.get(ENV_LLM_PROVIDER) or llm.get("provider", "api")),
         llm_model=str(llm.get("model", "claude-opus-5-5")),
         llm_cli_model=str(llm.get("cli_model", "opus")),

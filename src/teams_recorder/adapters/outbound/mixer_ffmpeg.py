@@ -37,11 +37,19 @@ def probe(path: Path, ffmpeg: str = "ffmpeg") -> dict:
 
 
 class FfmpegMixer:
-    def __init__(self, ffmpeg: str = "ffmpeg", bitrate_kbps: int = 64, sample_rate: int = 48000, timeout: float = 600.0) -> None:
+    def __init__(self, ffmpeg: str = "ffmpeg", bitrate_kbps: int = 64, sample_rate: int = 48000, timeout: float = 600.0, denoise: bool = True) -> None:
         self.ffmpeg = ffmpeg
         self.bitrate_kbps = bitrate_kbps
         self.sample_rate = sample_rate  # loudnorm reamostra internamente; fixamos a saída
         self.timeout = timeout
+        self.denoise = denoise
+
+    # Por trilha: remove zumbido/ruído grave (ventilador, mesa) e reduz ruído de fundo
+    # estimando o piso de ruído continuamente. Depois da soma: normaliza loudness e limita
+    # picos a -1 dBTP, porque a soma de duas trilhas (voz do usuário perto do microfone +
+    # Teams) saturava o arquivo final (pico medido: +1,5 dB).
+    TRACK_FILTER = "highpass=f=80,afftdn=nf=-25:tn=1"
+    MASTER_FILTER = "loudnorm=I=-18:TP=-2:LRA=11,alimiter=limit=0.891:level=0"
 
     @staticmethod
     def usable_tracks(tracks: list[Path]) -> list[Path]:
@@ -51,12 +59,14 @@ class FfmpegMixer:
         cmd = [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
         for t in tracks:
             cmd += ["-i", str(t)]
+        pre = f"{self.TRACK_FILTER}," if self.denoise else ""
         if len(tracks) > 1:
-            inputs = "".join(f"[{i}:a]" for i in range(len(tracks)))
-            filt = f"{inputs}amix=inputs={len(tracks)}:duration=longest:dropout_transition=0:normalize=0,loudnorm=I=-18:TP=-2:LRA=11[a]"
+            chains = "".join(f"[{i}:a]{pre}anull[t{i}];" for i in range(len(tracks)))
+            inputs = "".join(f"[t{i}]" for i in range(len(tracks)))
+            filt = f"{chains}{inputs}amix=inputs={len(tracks)}:duration=longest:dropout_transition=0:normalize=0,{self.MASTER_FILTER}[a]"
             cmd += ["-filter_complex", filt, "-map", "[a]"]
         else:
-            cmd += ["-af", "loudnorm=I=-18:TP=-2:LRA=11"]
+            cmd += ["-af", f"{pre}{self.MASTER_FILTER}"]
         cmd += ["-ac", "1", "-ar", str(self.sample_rate), "-c:a", "aac", "-b:a", f"{self.bitrate_kbps}k", str(out)]
         return cmd
 

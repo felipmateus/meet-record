@@ -92,8 +92,8 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         process_capture=CoreAudioTapCapture(teams_tap_binary(settings.project_dir), log_path=capture_log),
         mic_capture=(FfmpegMicCapture(log_path=capture_log) if settings.mic_backend == "ffmpeg"
                      else CoreAudioMicCapture(teams_tap_binary(settings.project_dir), log_path=capture_log)),
-        mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
-        transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
+        mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
+        transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads, vad_model_path=settings.vad_model_path),
         analyzer=build_analyzer(settings),
         detector=PmsetCallDetector(settings.teams_process_name),
     )

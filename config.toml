@@ -29,6 +29,12 @@ language = "pt"
 models_dir = ""
 # Threads do whisper; 0 = automático (núcleos de desempenho)
 threads = 0
+# Detecção de voz (Silero) antes do whisper. Desligada por padrão: em teste com frases
+# curtas (2026-10-05) ela cortou trechos de fala e piorou o texto; a redução de ruído na
+# mixagem (audio.denoise) foi o que melhorou a transcrição. Para experimentar:
+# scripts/download-model.sh silero-v5.1.2 e vad = true.
+vad = false
+vad_model = "silero-v5.1.2"
 
 [llm]
 # provider: "api" usa a Claude API com a chave do .env (pré-pago por uso);

@@ -96,6 +96,9 @@ def doctor() -> None:
     model_ok = settings.whisper_model_path.exists()
     ok = ok and model_ok
     typer.echo(f"[{'ok ' if model_ok else 'FALTA'}] modelo whisper: {settings.whisper_model_path}" + ("" if model_ok else "  → scripts/download-model.sh"))
+    if settings.vad_model_path is not None:
+        vad_ok = settings.vad_model_path.exists()
+        typer.echo(f"[{'ok ' if vad_ok else 'info'}] modelo VAD: {settings.vad_model_path}" + ("" if vad_ok else "  → scripts/download-model.sh silero-v5.1.2 (sem ele a transcrição roda sem VAD)"))
     key_needed = settings.llm_provider == "api"
     key_mark = "ok " if settings.has_api_key else ("FALTA" if key_needed else "info")
     typer.echo(f"[{key_mark}] ANTHROPIC_API_KEY no .env" + ("" if key_needed else " (não exigida com provider = claude-code)"))

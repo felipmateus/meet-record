@@ -23,19 +23,21 @@ class WhisperCppTranscriber:
         ffmpeg: str = "ffmpeg",
         threads: int = 0,
         timeout: float = 3 * 3600,
+        vad_model_path: Path | None = None,
     ) -> None:
         self.model_path = Path(model_path)
         self.whisper_cli = whisper_cli
         self.ffmpeg = ffmpeg
         self.threads = threads or max(1, (os.cpu_count() or 4) // 2)
         self.timeout = timeout
+        self.vad_model_path = Path(vad_model_path) if vad_model_path else None
 
     # --- comandos (públicos para teste) -----------------------------------
     def convert_command(self, audio: Path, wav: Path) -> list[str]:
         return [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(audio), "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)]
 
     def whisper_command(self, wav: Path, language: str, out_prefix: Path) -> list[str]:
-        return [
+        cmd = [
             self.whisper_cli,
             "-m", str(self.model_path),
             "-f", str(wav),
@@ -45,6 +47,10 @@ class WhisperCppTranscriber:
             "-of", str(out_prefix),
             "-np",                 # sem prints de progresso
         ]
+        if self.vad_model_path is not None and self.vad_model_path.exists():
+            # Detecção de voz (Silero): só transcreve trechos com fala; reduz alucinações em silêncio.
+            cmd += ["--vad", "-vm", str(self.vad_model_path), "-vt", "0.5", "-vsd", "300", "-vp", "150"]
+        return cmd
 
     # --- porta Transcriber ------------------------------------------------
     def transcribe(self, audio: Path, language: str) -> Transcript:
