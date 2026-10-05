@@ -65,6 +65,10 @@ trec daemon --once                                   # diagnóstico: o detector 
 
 O daemon consulta `pmset -g assertions` a cada 3 s. O Teams, em chamada, impede o Mac de dormir, e essa asserção é o sinal: a gravação começa após 2 leituras positivas seguidas (~6 s) e termina após 5 negativas (~15 s), evitando falsos positivos em oscilações. Ao fim da chamada o pipeline roda em segundo plano (mixagem, transcrição, análise) enquanto o detector segue atento à próxima. Se o daemon cair no meio de uma gravação, ele finaliza a gravação órfã ao subir e retoma reuniões pendentes. Log em `data/log/teams-recorder.log`; `trec start/stop` manual continua funcionando e o daemon adota uma gravação manual em andamento.
 
+### Microfone e trilha do Teams
+
+O `teams-tap` cuida dos dois lados: `--pid` captura o Teams (o processo principal e os helpers que de fato emitem áudio) e `--mic default` grava o microfone pelo AVAudioEngine, seguindo a entrada padrão do sistema e sobrevivendo à reconfiguração que o Teams faz ao abrir o microfone. `teams-tap --list` mostra quem são os clientes de áudio no momento. O backend `ffmpeg` do microfone continua disponível em `config.toml` (`audio.mic_backend`).
+
 Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmpeg) e **Gravação de Tela e Áudio do Sistema** (para o teams-tap), em Ajustes do Sistema > Privacidade e Segurança. Sem a segunda, a trilha do Teams sai em silêncio.
 
 ## Desenvolvimento
