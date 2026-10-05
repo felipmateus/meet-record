@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "teams-recorder"
+version = "0.1.0"
+description = "Grava, transcreve e analisa reuniões do Microsoft Teams no macOS, gerando um plano diário de atividades."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Felipe Mateus de Carvalho" }]
+dependencies = [
+  "anthropic>=1.0",
+  "pydantic>=2.0",
+  "typer>=0.12",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[project.scripts]
+trec = "teams_recorder.adapters.inbound.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --cov=teams_recorder --cov-report=term-missing"
+markers = ["slow: testes que dependem de binários externos (whisper, ffmpeg)"]

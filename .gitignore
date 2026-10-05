@@ -1,0 +1,13 @@
+.env
+.venv/
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+native/teams-tap/.build/
+.DS_Store

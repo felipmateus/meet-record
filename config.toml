@@ -1,0 +1,30 @@
+# Configuração do teams-recorder. Sem segredos aqui; a chave da API fica no .env.
+
+[paths]
+# Deixe vazio para o padrão: ./data, ou ~/Library/Application Support/teams-recorder
+# quando a pasta do projeto estiver sincronizada com o iCloud.
+data_dir = ""
+
+[audio]
+# Nome (ou índice) do microfone como listado por: ffmpeg -f avfoundation -list_devices true -i ""
+mic_device = "MacBook Air Microphone"
+teams_process_name = "MSTeams"
+bitrate_kbps = 64
+
+[detector]
+poll_seconds = 3
+start_after_positive_polls = 2
+stop_after_negative_polls = 5
+
+[transcription]
+whisper_model = "large-v3-turbo"
+language = "pt"
+
+[llm]
+model = "claude-opus-5-5"
+effort = "high"
+max_tokens = 16000
+
+[planner]
+hour = 18
+retention_days = 30
