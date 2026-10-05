@@ -28,5 +28,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --cov=teams_recorder --cov-report=term-missing"
+# Cobertura é opt-in: `pytest --cov=teams_recorder --cov-report=term-missing`.
+# Com cobertura ligada na suíte inteira, o processo de teste fica pesado o bastante para
+# o macOS matar os subprocessos (ffmpeg, gravadores simulados) em máquinas com swap cheia.
+addopts = "-q"
 markers = ["slow: testes que dependem de binários externos (whisper, ffmpeg)"]
+
+[tool.coverage.run]
+source = ["teams_recorder"]
+branch = false

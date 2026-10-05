@@ -38,6 +38,8 @@ Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmp
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest
+pytest                                             # suíte rápida (sem cobertura)
+pytest --cov=teams_recorder --cov-report=term-missing   # com cobertura (alvo: 70%)
+TREC_REAL_WHISPER=1 pytest -m slow                 # inclui transcrição real com o modelo
 trec --help
 ```
