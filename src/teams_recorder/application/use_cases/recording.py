@@ -33,15 +33,16 @@ class StartRecording:
             raise RepositoryError(Err.RECORDING_IN_PROGRESS)
         meeting = Meeting.start(self.clock.now(), pid=pid, title=title)
         self.repo.create(meeting)
+        epoch = meeting.started_at.timestamp()  # both tracks are aligned to the meeting start
         try:
-            process_handle = self.process_capture.start(pid, self.repo.path(meeting.id, TAP_TRACK))
+            process_handle = self.process_capture.start(pid, self.repo.path(meeting.id, TAP_TRACK), epoch)
         except Exception as exc:
             self.repo.delete_meeting(meeting.id)
             if isinstance(exc, CaptureError):
                 raise
             raise CaptureError(Err.TEAMS_CAPTURE_START.format(error=exc)) from exc
         try:
-            mic_handle = self.mic_capture.start(self.mic_device, self.repo.path(meeting.id, MIC_TRACK))
+            mic_handle = self.mic_capture.start(self.mic_device, self.repo.path(meeting.id, MIC_TRACK), epoch)
         except Exception as exc:
             self.process_capture.stop(process_handle)
             self.repo.delete_meeting(meeting.id)

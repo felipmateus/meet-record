@@ -158,8 +158,8 @@ class Parse:
 # --- detection -------------------------------------------------------------------
 class Detector:
     TEAMS_PROCESS = "MSTeams"
-    POLL_SECONDS = 3
-    START_AFTER = 2
+    POLL_SECONDS = 1     # pmset is cheap; 1 s keeps the start/stop lag at ~1-2 s / ~5 s
+    START_AFTER = 1      # Teams' call assertion is reliable; short false starts are dropped by the 20-word cut
     STOP_AFTER = 5
     CALL_ASSERTIONS = ("PreventUserIdleDisplaySleep", "PreventUserIdleSystemSleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion")
     PMSET_TIMEOUT = 10.0

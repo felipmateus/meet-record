@@ -32,7 +32,7 @@ def wait_for(path: Path, timeout: float = 60.0) -> None:
 class ScriptedTap(CoreAudioTapCapture):
     """Same adapter, but the 'binary' is the fake Python script."""
 
-    def command(self, pid: int, out: Path) -> list[str]:
+    def command(self, pid: int, out: Path, epoch: float | None = None) -> list[str]:
         return [sys.executable, str(FAKE), "--out", str(out)]
 
 
@@ -111,7 +111,7 @@ def test_terminate_escalates_to_sigkill(tmp_path: Path):
 
 
 class ScriptedCoreAudioMic(CoreAudioMicCapture):
-    def command(self, device: str, out: Path) -> list[str]:
+    def command(self, device: str, out: Path, epoch: float | None = None) -> list[str]:
         return [sys.executable, str(FAKE), "--out", str(out)]
 
 
@@ -166,3 +166,12 @@ def test_spawn_does_not_retry_permanent_errors(tmp_path: Path, monkeypatch):
 def test_warmup_runs_binary(tmp_path: Path):
     cap = ScriptedTap(binary=FAKE)
     assert cap.warmup() in (True, False)  # the fake does not accept --list, but warm-up never raises
+
+
+def test_epoch_is_passed_to_teams_tap(tmp_path: Path):
+    tap = CoreAudioTapCapture(binary=tmp_path / "teams-tap")
+    assert tap.command(1, tmp_path / "t.wav")[-2:] != ["--epoch", "1.000"]
+    assert tap.command(1, tmp_path / "t.wav", 1759690000.5)[-2:] == ["--epoch", "1759690000.500"]
+    mic = CoreAudioMicCapture(binary=tmp_path / "teams-tap")
+    assert mic.command("default", tmp_path / "m.wav", 2.0)[-2:] == ["--epoch", "2.000"]
+    assert "--epoch" not in mic.command("default", tmp_path / "m.wav")

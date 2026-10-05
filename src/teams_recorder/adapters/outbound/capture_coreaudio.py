@@ -28,16 +28,17 @@ class CoreAudioTapCapture:
         self.wait_audio = wait_audio  # seconds teams-tap waits for the process to become an audio client
         self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
-    def command(self, pid: int, out: Path) -> list[str]:
-        return [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
+    def command(self, pid: int, out: Path, epoch: float | None = None) -> list[str]:
+        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
+        return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def warmup(self) -> bool:
         return self.binary.exists() and process_control.warmup(self.binary, ["--list"])
 
-    def start(self, pid: int, out: Path) -> CaptureHandle:
+    def start(self, pid: int, out: Path, epoch: float | None = None) -> CaptureHandle:
         if not self.binary.exists():
             raise CaptureError(Err.BINARY_MISSING.format(path=self.binary, script=Files.BUILD_NATIVE_SCRIPT))
-        proc = process_control.spawn(self.command(pid, out), self.log_path, self.startup_grace)
+        proc = process_control.spawn(self.command(pid, out, epoch), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)
 

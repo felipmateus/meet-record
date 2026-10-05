@@ -48,13 +48,15 @@ class FakeProcessCapture:
         self.fail_on_start = fail_on_start
         self.handles: list[CaptureHandle] = []
         self.stopped: list[int] = []
+        self.epochs: list[float | None] = []
 
-    def start(self, pid: int, out: Path) -> CaptureHandle:
+    def start(self, pid: int, out: Path, epoch: float | None = None) -> CaptureHandle:
         if self.fail_on_start:
             raise RuntimeError("tap unavailable")
         FakeProcessCapture._next_pid += 1
         h = CaptureHandle(pid=FakeProcessCapture._next_pid, out=out)
         self.handles.append(h)
+        self.epochs.append(epoch)
         return h
 
     def stop(self, handle: CaptureHandle) -> Path:
@@ -72,8 +74,8 @@ class FakeProcessCapture:
 
 
 class FakeMicCapture(FakeProcessCapture):
-    def start(self, device: str, out: Path) -> CaptureHandle:  # type: ignore[override]
-        return super().start(0, out)
+    def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:  # type: ignore[override]
+        return super().start(0, out, epoch)
 
 
 class FakeMixer:

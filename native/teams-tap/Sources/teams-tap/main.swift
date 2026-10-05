@@ -2,7 +2,7 @@
 // Core Audio Process Tap (macOS 14.2+) and records it to WAV until it receives
 // SIGINT/SIGTERM or until the target process exits.
 //
-// Usage: teams-tap --pid <pid> --out <file.wav> [--verbose]
+// Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--verbose]
 // Output: exit code 0 on success; error messages on stderr.
 
 import AVFoundation
@@ -34,6 +34,7 @@ struct Arguments {
     var list = false                    // only list the audio client processes and exit
     var includeDescendants = true       // include the target's child processes (Teams plays audio through a helper)
     var mic: String?                    // microphone mode: "default" (follows the default input) or a device name
+    var epoch: Double?                  // shared start instant (Unix seconds): both tracks are aligned to it
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -58,9 +59,13 @@ struct Arguments {
             case "--mic":
                 guard let v = it.next() else { fail("--mic requires 'default' or a device name") }
                 args.mic = v
+            case "--epoch":
+                guard let v = it.next(), let e = Double(v) else { fail("--epoch requires Unix seconds") }
+                args.epoch = e
             case "--help", "-h":
-                print("Usage: teams-tap --pid <pid> --out <file.wav> [--wait-audio <s>] [--no-descendants] [--verbose]")
-                print("       teams-tap --mic <default|name> --out <file.wav> [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
+                print("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--no-descendants] [--verbose]")
+                print("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
+                print("       --epoch aligns the file to a shared start instant; time without audio is written as silence")
                 print("       teams-tap --list        lists the processes that are audio clients (pid, parent, bundle, emitting?)")
                 exit(0)
             default:
@@ -139,6 +144,90 @@ func listAudioProcesses() {
     }
 }
 
+// MARK: - Timeline writer
+
+/// Writes audio buffers keeping the file aligned to wall-clock time.
+///
+/// Core Audio delivers buffers with the host time of their first sample. When delivery
+/// pauses (observed on a real call: ~17 s missing with no error), a plain writer would glue
+/// what comes after onto what came before, so speech looks cut and the Teams and microphone
+/// tracks drift apart. Here every buffer is placed at its timestamp: missing time is filled
+/// with silence and logged. With `epoch`, the timeline starts at that shared instant, so both
+/// recorders produce tracks aligned to the same origin.
+final class TimelineWriter {
+    let file: AVAudioFile
+    let format: AVAudioFormat
+    private let startHostNanos: UInt64
+    private let epochOffset: Double          // seconds from epoch to this writer's start
+    private let lock = NSLock()
+    private(set) var framesWritten: Int64 = 0
+    private(set) var paddedSeconds: Double = 0
+    private(set) var gaps = 0
+    static let minPadSeconds = 0.2           // jitter below this is ignored
+    static let logGapSeconds = 0.5           // gaps from this size up are logged
+
+    init(file: AVAudioFile, format: AVAudioFormat, epoch: Double?) {
+        self.file = file
+        self.format = format
+        startHostNanos = AudioConvertHostTimeToNanos(AudioGetCurrentHostTime())
+        epochOffset = epoch.map { max(0, Date().timeIntervalSince1970 - $0) } ?? 0
+    }
+
+    private func expectedFrame(hostTime: UInt64) -> Int64 {
+        let nanos = AudioConvertHostTimeToNanos(hostTime)
+        let elapsed = nanos > startHostNanos ? Double(nanos - startHostNanos) / 1e9 : 0
+        return Int64((epochOffset + elapsed) * format.sampleRate)
+    }
+
+    func write(_ buffer: AVAudioPCMBuffer, hostTime: UInt64?) {
+        lock.lock(); defer { lock.unlock() }
+        if let hostTime { padLocked(to: expectedFrame(hostTime: hostTime)) }
+        do {
+            try file.write(from: buffer)
+            framesWritten += Int64(buffer.frameLength)
+        } catch {
+            log("teams-tap: error writing audio: \(error)")
+        }
+    }
+
+    /// Pads the end of the file up to "now" (call after capture has stopped).
+    func finish() {
+        lock.lock(); defer { lock.unlock() }
+        padLocked(to: expectedFrame(hostTime: AudioGetCurrentHostTime()))
+    }
+
+    private func padLocked(to target: Int64) {
+        let missing = target - framesWritten
+        guard Double(missing) / format.sampleRate >= Self.minPadSeconds else { return }
+        let seconds = Double(missing) / format.sampleRate
+        let at = Double(framesWritten) / format.sampleRate
+        if framesWritten == 0 {
+            log(String(format: "teams-tap: start offset %.1f s (padded with silence)", seconds))
+        } else if seconds >= Self.logGapSeconds {
+            gaps += 1
+            log(String(format: "teams-tap: gap of %.1f s at %.1f s (padded with silence)", seconds, at))
+        }
+        var remaining = missing
+        let chunk = AVAudioFrameCount(format.sampleRate)          // one second per write
+        while remaining > 0 {
+            let n = AVAudioFrameCount(min(Int64(chunk), remaining))
+            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: n) else { return }
+            silence.frameLength = n
+            for b in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
+                if let data = b.mData { memset(data, 0, Int(b.mDataByteSize)) }
+            }
+            do { try file.write(from: silence) } catch { log("teams-tap: error writing silence: \(error)"); return }
+            framesWritten += Int64(n)
+            remaining -= Int64(n)
+        }
+        if framesWritten > 0 && seconds >= Self.minPadSeconds && at > 0 { paddedSeconds += seconds }
+    }
+
+    var summary: String {
+        String(format: "%.1f s written, %d gap(s), %.1f s of silence padded", Double(framesWritten) / format.sampleRate, gaps, paddedSeconds)
+    }
+}
+
 // MARK: - Recorder
 
 final class ProcessTapRecorder {
@@ -147,22 +236,23 @@ final class ProcessTapRecorder {
     let verbose: Bool
     let waitAudioSeconds: Double
     let includeDescendants: Bool
+    let epoch: Double?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
-    private var file: AVAudioFile?
+    private var writer: TimelineWriter?
     private var format: AVAudioFormat?
     private let queue = DispatchQueue(label: "local.teams-recorder.teams-tap.io")
-    private(set) var framesWritten: Int64 = 0
     private var stopped = false
 
-    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool) {
+    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool, epoch: Double?) {
         self.pid = pid
         self.url = url
         self.verbose = verbose
         self.waitAudioSeconds = waitAudioSeconds
         self.includeDescendants = includeDescendants
+        self.epoch = epoch
     }
 
     func start() {
@@ -209,20 +299,17 @@ final class ProcessTapRecorder {
             AVLinearPCMIsNonInterleaved: false,
         ]
         do {
-            file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
+            writer = TimelineWriter(file: file, format: fmt, epoch: epoch)
         } catch {
             fail("could not create \(url.path): \(error)")
         }
 
-        let status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, queue) { [weak self] _, inInputData, _, _, _ in
-            guard let self, let file = self.file, let fmt = self.format else { return }
+        let status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, queue) { [weak self] _, inInputData, inInputTime, _, _ in
+            guard let self, let writer = self.writer, let fmt = self.format else { return }
             guard let buffer = AVAudioPCMBuffer(pcmFormat: fmt, bufferListNoCopy: inInputData, deallocator: nil) else { return }
-            do {
-                try file.write(from: buffer)
-                self.framesWritten += Int64(buffer.frameLength)
-            } catch {
-                log("teams-tap: error writing audio: \(error)")
-            }
+            let ts = inInputTime.pointee
+            writer.write(buffer, hostTime: ts.mFlags.contains(.hostTimeValid) ? ts.mHostTime : nil)
         }
         check(status, "create IOProc")
         check(AudioDeviceStart(aggregateID, ioProcID), "start capture")
@@ -238,9 +325,9 @@ final class ProcessTapRecorder {
         }
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
-        file = nil
-        let seconds = format.map { Double(framesWritten) / $0.sampleRate } ?? 0
-        log(String(format: "teams-tap: stopped, %.1f s recorded", seconds))
+        writer?.finish()                        // pad the tail up to the stop instant
+        log("teams-tap: stopped, " + (writer?.summary ?? "nothing written"))
+        writer = nil
     }
 
     // MARK: Core Audio helpers
@@ -312,19 +399,20 @@ final class MicRecorder {
     let url: URL
     let deviceName: String
     let verbose: Bool
+    let epoch: Double?
     private let engine = AVAudioEngine()
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
-    private var file: AVAudioFile?
+    private var writer: TimelineWriter?
     private var converter: AVAudioConverter?
     private var observer: NSObjectProtocol?
-    private(set) var framesWritten: Int64 = 0
     private var restarts = 0
     private var stopped = false
 
-    init(url: URL, deviceName: String, verbose: Bool) {
+    init(url: URL, deviceName: String, verbose: Bool, epoch: Double?) {
         self.url = url
         self.deviceName = deviceName
         self.verbose = verbose
+        self.epoch = epoch
     }
 
     func start() {
@@ -333,7 +421,8 @@ final class MicRecorder {
             AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false,
         ]
         do {
-            file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            writer = TimelineWriter(file: file, format: outFormat, epoch: epoch)
         } catch {
             fail("could not create \(url.path): \(error)")
         }
@@ -366,8 +455,8 @@ final class MicRecorder {
         guard let conv = AVAudioConverter(from: inFormat, to: outFormat) else { fail("could not create audio converter") }
         converter = conv
         let outFormat = self.outFormat
-        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
-            guard let self, let file = self.file, let converter = self.converter else { return }
+        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, when in
+            guard let self, let writer = self.writer, let converter = self.converter else { return }
             let ratio = outFormat.sampleRate / inFormat.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
             guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
@@ -380,12 +469,7 @@ final class MicRecorder {
                 return buffer
             }
             guard status != .error, out.frameLength > 0 else { return }
-            do {
-                try file.write(from: out)
-                self.framesWritten += Int64(out.frameLength)
-            } catch {
-                log("teams-tap: error writing microphone: \(error)")
-            }
+            writer.write(out, hostTime: when.isHostTimeValid ? when.hostTime : nil)
         }
         do {
             engine.prepare()
@@ -438,8 +522,9 @@ final class MicRecorder {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        file = nil
-        log(String(format: "teams-tap: microphone stopped, %.1f s recorded, %d restart(s)", Double(framesWritten) / outFormat.sampleRate, restarts))
+        writer?.finish()                        // pad the tail up to the stop instant
+        log("teams-tap: microphone stopped, " + (writer?.summary ?? "nothing written") + ", \(restarts) restart(s)")
+        writer = nil
     }
 }
 
@@ -455,11 +540,11 @@ if args.list {
 var stopAll: () -> Void = {}
 
 if let micName = args.mic {
-    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose)
+    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose, epoch: args.epoch)
     mic.start()
     stopAll = { mic.stop() }
 } else {
-    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants)
+    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants, epoch: args.epoch)
     recorder.start()
     stopAll = { recorder.stop() }
 }
