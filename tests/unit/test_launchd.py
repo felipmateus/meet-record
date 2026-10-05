@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from teams_recorder.adapters.outbound.launchd import LABEL, LaunchAgent
+from teams_recorder.adapters.outbound.launchd import LABEL, AgentStatus, LaunchAgent
 
 
 class Recorder:
@@ -65,7 +65,7 @@ def test_status_and_uninstall(tmp_path: Path, monkeypatch):
     ag.plist_path.parent.mkdir(parents=True)
     ag.plist_path.write_bytes(b"x")
     info = ag.status()
-    assert info == {"loaded": True, "plist": str(ag.plist_path), "plist_exists": True, "pid": 42, "state": "running"}
+    assert info == AgentStatus(loaded=True, plist=ag.plist_path, plist_exists=True, pid=42, state="running")
     assert ag.uninstall() is True
     assert not ag.plist_path.exists()
     assert "bootout" in [c[1] for c in ag.runner.calls]

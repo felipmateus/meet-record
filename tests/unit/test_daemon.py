@@ -1,5 +1,7 @@
 """Daemon state machine with all ports faked."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +23,7 @@ class FakeContainer:
     clock: object
     proc: FakeProcessCapture
     mic: FakeMicCapture
+    settings: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(capture_log=Path("/fake/log/capture.log")))
 
     @property
     def process_capture(self):

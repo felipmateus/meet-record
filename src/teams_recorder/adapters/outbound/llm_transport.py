@@ -20,12 +20,14 @@ from typing import Any, Protocol, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from teams_recorder.adapters.outbound.llm_schema import strict_schema
+from teams_recorder.constants import Bin, Effort, Env, Llm, LlmProvider
 from teams_recorder.domain import AnalysisError
+from teams_recorder.messages import Err, Log
 
 log = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
+FALLBACK_BETA = Llm.FALLBACK_BETA  # module alias kept for callers and tests
 
 
 class StructuredTransport(Protocol):
@@ -41,7 +43,7 @@ def claude_code_env() -> dict[str, str]:
     Code bills the API instead of using the subscription — that is what broke the analysis
     of the first real meeting with the claude-code provider.
     """
-    return {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
+    return {k: v for k, v in os.environ.items() if not k.startswith(Env.ANTHROPIC_PREFIX)}
 
 
 def _log_usage(path: Path | None, entry: dict[str, Any]) -> None:
@@ -52,27 +54,27 @@ def _log_usage(path: Path | None, entry: dict[str, Any]) -> None:
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **entry}, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001 - usage logging never breaks a call
-        log.warning("could not record LLM usage", exc_info=True)
+        log.warning(Log.USAGE_LOG_FAILED, exc_info=True)
 
 
 def _validate(schema: type[T], data: Any, *, from_json: bool) -> T:
     try:
         return schema.model_validate_json(data) if from_json else schema.model_validate(data)
     except ValidationError as exc:
-        raise AnalysisError(f"output does not match the schema: {exc.errors()[:3]}") from exc
+        raise AnalysisError(Err.SCHEMA_MISMATCH.format(errors=exc.errors()[:3])) from exc
 
 
 @dataclass
 class ApiTransport:
     """Claude API via the official SDK: structured output, cached system prompt, server-side fallback."""
 
-    model: str = "claude-opus-5-5"
-    effort: str = "high"
-    max_tokens: int = 16000
+    model: str = Llm.DEFAULT_API_MODEL
+    effort: str = Effort.HIGH  # Effort is a StrEnum, so plain strings are accepted too
+    max_tokens: int = Llm.DEFAULT_MAX_TOKENS
     usage_log: Path | None = None
     client: Any = None
     use_fallbacks: bool = True
-    name: str = "api"
+    name: str = LlmProvider.API
 
     def _client(self) -> Any:
         if self.client is None:
@@ -98,13 +100,13 @@ class ApiTransport:
             else:
                 response = client.messages.create(**kwargs)
         except anthropic.AuthenticationError as exc:
-            raise AnalysisError("invalid or missing API key (ANTHROPIC_API_KEY in .env)") from exc
+            raise AnalysisError(Err.API_KEY_INVALID) from exc
         except anthropic.RateLimitError as exc:
-            raise AnalysisError(f"rate limit reached; try again shortly ({exc.message})") from exc
+            raise AnalysisError(Err.RATE_LIMIT.format(message=exc.message)) from exc
         except anthropic.APIStatusError as exc:
-            raise AnalysisError(f"API error ({exc.status_code}): {exc.message}") from exc
+            raise AnalysisError(Err.API_ERROR.format(status=exc.status_code, message=exc.message)) from exc
         except anthropic.APIConnectionError as exc:
-            raise AnalysisError(f"no connection to the API: {exc}") from exc
+            raise AnalysisError(Err.NO_CONNECTION.format(error=exc)) from exc
 
         u = getattr(response, "usage", None)
         _log_usage(self.usage_log, {
@@ -115,13 +117,13 @@ class ApiTransport:
         })
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
-            why = f" ({details.category}: {details.explanation})" if details else ""
-            raise AnalysisError(f"the API refused the request ({tag}){why}")
+            why = Err.REFUSED_WHY.format(category=details.category, explanation=details.explanation) if details else ""
+            raise AnalysisError(Err.REFUSED.format(tag=tag, why=why))
         if response.stop_reason == "max_tokens":
-            raise AnalysisError(f"response truncated at {self.max_tokens} tokens; increase llm.max_tokens")
+            raise AnalysisError(Err.TRUNCATED.format(max_tokens=self.max_tokens))
         text = next((b.text for b in response.content if b.type == "text"), None)
         if text is None:
-            raise AnalysisError("response has no text block")
+            raise AnalysisError(Err.NO_TEXT_BLOCK)
         return _validate(schema, text, from_json=True)
 
 
@@ -133,12 +135,12 @@ class ClaudeCodeTransport:
     depends on a logged-in Claude Code session on the Mac (relevant for the launchd daemon).
     """
 
-    model: str = "opus"
-    effort: str = "high"
-    claude_bin: str = "claude"
-    timeout: float = 900.0
+    model: str = Llm.DEFAULT_CLI_MODEL
+    effort: str = Effort.HIGH
+    claude_bin: str = Bin.CLAUDE
+    timeout: float = Llm.CLAUDE_CODE_TIMEOUT
     usage_log: Path | None = None
-    name: str = "claude-code"
+    name: str = LlmProvider.CLAUDE_CODE
 
     def command(self, system: str, schema: type[BaseModel]) -> list[str]:
         return [
@@ -152,27 +154,28 @@ class ClaudeCodeTransport:
 
     def complete(self, system: str, user: str, schema: type[T], *, tag: str, extra: dict[str, Any] | None = None) -> T:
         if shutil.which(self.claude_bin) is None and not Path(self.claude_bin).exists():
-            raise AnalysisError(f"Claude Code not found ({self.claude_bin}); install it or set llm.provider = \"api\"")
+            raise AnalysisError(Err.CLAUDE_CODE_MISSING_HINT.format(binary=self.claude_bin))
         try:
             result = subprocess.run(
                 self.command(system, schema), input=user, capture_output=True, text=True,
                 timeout=self.timeout, check=False, env=claude_code_env(),
             )
         except FileNotFoundError as exc:
-            raise AnalysisError(f"Claude Code not found ({self.claude_bin})") from exc
+            raise AnalysisError(Err.CLAUDE_CODE_MISSING.format(binary=self.claude_bin)) from exc
         except subprocess.TimeoutExpired as exc:
-            raise AnalysisError(f"Claude Code did not respond within {self.timeout:.0f}s") from exc
+            raise AnalysisError(Err.CLAUDE_CODE_TIMEOUT.format(seconds=self.timeout)) from exc
         if result.returncode != 0 and not result.stdout.strip():
-            raise AnalysisError(f"Claude Code failed (code {result.returncode}): {result.stderr.strip()[-500:]}")
+            raise AnalysisError(Err.CLAUDE_CODE_FAILED.format(code=result.returncode, tail=result.stderr.strip()[-500:]))
         try:
             envelope = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
-            raise AnalysisError(f"Claude Code response is not JSON: {result.stdout[:200]!r}") from exc
+            raise AnalysisError(Err.CLAUDE_CODE_NOT_JSON.format(text=result.stdout[:200])) from exc
         if not isinstance(envelope, dict):
-            raise AnalysisError("Claude Code response has an unexpected format")
+            raise AnalysisError(Err.CLAUDE_CODE_BAD_FORMAT)
 
-        usage = envelope.get("usage") if isinstance(envelope.get("usage"), dict) else {}
-        model_usage = envelope.get("modelUsage") if isinstance(envelope.get("modelUsage"), dict) else {}
+        raw_usage, raw_model_usage = envelope.get("usage"), envelope.get("modelUsage")
+        usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+        model_usage: dict[str, Any] = raw_model_usage if isinstance(raw_model_usage, dict) else {}
         _log_usage(self.usage_log, {
             "tag": tag, **(extra or {}), "provider": self.name, "model": ",".join(model_usage.keys()) or self.model,
             "input": usage.get("input_tokens"), "output": usage.get("output_tokens"),
@@ -180,12 +183,12 @@ class ClaudeCodeTransport:
             "cost_usd_equiv": envelope.get("total_cost_usd"), "stop": envelope.get("subtype"), "session_id": envelope.get("session_id"),
         })
         if envelope.get("is_error") or envelope.get("subtype") != "success":
-            raise AnalysisError(f"Claude Code returned an error ({envelope.get('subtype')}): {str(envelope.get('result', ''))[:300]}")
+            raise AnalysisError(Err.CLAUDE_CODE_ERROR.format(subtype=envelope.get("subtype"), result=str(envelope.get("result", ""))[:300]))
         data = envelope.get("structured_output")
         if data is None:
             # some schema failures leave only the text in `result`
             try:
                 data = json.loads(envelope.get("result") or "")
             except json.JSONDecodeError as exc:
-                raise AnalysisError("Claude Code did not return structured output") from exc
+                raise AnalysisError(Err.CLAUDE_CODE_NO_STRUCTURED) from exc
         return _validate(schema, data, from_json=False)

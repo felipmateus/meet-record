@@ -18,16 +18,18 @@ from pydantic import BaseModel, Field
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.llm_schema import load_prompt
 from teams_recorder.adapters.outbound.llm_transport import StructuredTransport
+from teams_recorder.constants import Llm
 from teams_recorder.domain import Action, Analysis, DailyPlan
+from teams_recorder.messages import Err, Prompt
 
-WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-MAX_PREVIOUS_CHARS = 6000
+WEEKDAYS = Prompt.WEEKDAYS  # module alias kept for callers
+MAX_PREVIOUS_CHARS = Llm.MAX_PREVIOUS_PLAN_CHARS  # module alias kept for callers and tests
 
 
 class PlanOut(BaseModel):
-    markdown: str = Field(description="Full plan in Markdown, with the requested sections")
-    priorities: list[str] = Field(default_factory=list, description="3 to 5 priorities, one sentence each")
-    completed_action_ids: list[str] = Field(default_factory=list, description="ids of open actions that the day's analyses show as completed")
+    markdown: str = Field(description=Prompt.FIELD_PLAN_MARKDOWN)
+    priorities: list[str] = Field(default_factory=list, description=Prompt.FIELD_PLAN_PRIORITIES)
+    completed_action_ids: list[str] = Field(default_factory=list, description=Prompt.FIELD_PLAN_COMPLETED)
 
 
 @dataclass
@@ -39,7 +41,7 @@ class ClaudePlanner:
     def _system(self) -> str:
         if self.system_prompt is None:
             if self.prompt_path is None:
-                raise ValueError("ClaudePlanner has no prompt")
+                raise ValueError(Err.NO_SYSTEM_PROMPT.format(who=type(self).__name__))
             self.system_prompt = load_prompt(self.prompt_path)
         return self.system_prompt
 
@@ -49,7 +51,7 @@ class ClaudePlanner:
         overdue_ids = [a.id for a in open_actions if a.is_overdue_on(day)]
 
         if not analyses and not open_actions:
-            return DailyPlan(day=day, markdown=f"# Plan {day.isoformat()}\n\nNo analyzed meetings and no open actions.\n")
+            return DailyPlan(day=day, markdown=Err.EMPTY_PLAN.format(day=day.isoformat()))
 
         out = self.transport.complete(self._system(), build_user_message(day, analyses, previous_plan, open_actions, new_actions, overdue_ids), PlanOut, tag=f"plan:{day.isoformat()}", extra={"day": day.isoformat()})
         valid_ids = known | {a.id for a in new_actions}
@@ -65,14 +67,14 @@ class ClaudePlanner:
 
 
 def build_user_message(day: date, analyses: list[Analysis], previous: DailyPlan | None, open_actions: list[Action], new_actions: list[Action], overdue_ids: list[str]) -> str:
-    parts = [f"Plan date: {day.isoformat()} ({WEEKDAYS[day.weekday()]}). The plan is for the next business day."]
-    parts.append("\n## Meetings analyzed today (JSON)\n" + json.dumps([codec.analysis_to_dict(a) for a in analyses], ensure_ascii=False, indent=1))
-    parts.append("\n## Accumulated open actions (JSON; use these ids in completed_action_ids)\n" + json.dumps([codec.action_to_dict(a) for a in open_actions], ensure_ascii=False, indent=1))
-    parts.append("\n## New actions from today (already identified; include them in the 'Ações novas' section)\n" + json.dumps([codec.action_to_dict(a) for a in new_actions], ensure_ascii=False, indent=1))
-    parts.append("\n## Ids already overdue on the plan date (include them in the 'Vencidas' section)\n" + json.dumps(overdue_ids))
+    parts = [Prompt.PLAN_DATE.format(date=day.isoformat(), weekday=WEEKDAYS[day.weekday()])]
+    parts.append(Prompt.PLAN_MEETINGS + json.dumps([codec.analysis_to_dict(a) for a in analyses], ensure_ascii=False, indent=1))
+    parts.append(Prompt.PLAN_OPEN_ACTIONS + json.dumps([codec.action_to_dict(a) for a in open_actions], ensure_ascii=False, indent=1))
+    parts.append(Prompt.PLAN_NEW_ACTIONS + json.dumps([codec.action_to_dict(a) for a in new_actions], ensure_ascii=False, indent=1))
+    parts.append(Prompt.PLAN_OVERDUE + json.dumps(overdue_ids))
     if previous is not None:
         prev = previous.markdown.strip()
         if len(prev) > MAX_PREVIOUS_CHARS:
-            prev = prev[:MAX_PREVIOUS_CHARS] + "\n…(truncated)"
-        parts.append(f"\n## Previous plan ({previous.day.isoformat()})\n{prev}")
+            prev = prev[:MAX_PREVIOUS_CHARS] + Prompt.TRUNCATED
+        parts.append(Prompt.PLAN_PREVIOUS.format(date=previous.day.isoformat(), markdown=prev))
     return "\n".join(parts)

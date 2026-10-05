@@ -7,17 +7,26 @@ from pathlib import Path
 
 from teams_recorder.adapters.outbound import process_control
 from teams_recorder.application.ports import CaptureHandle
+from teams_recorder.constants import Audio, Files, Proc
 from teams_recorder.domain import CaptureError
+from teams_recorder.messages import Err
 
 
 class CoreAudioTapCapture:
-    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = 10.0, startup_grace: float = 1.0, wait_audio: float = 20.0) -> None:
+    def __init__(
+        self,
+        binary: Path,
+        log_path: Path | None = None,
+        stop_timeout: float = Proc.STOP_TIMEOUT,
+        startup_grace: float = Proc.TAP_STARTUP_GRACE,
+        wait_audio: float = Audio.WAIT_AUDIO_SECONDS,
+    ) -> None:
         self.binary = Path(binary)
         self.log_path = log_path
         self.stop_timeout = stop_timeout
         self.startup_grace = startup_grace
         self.wait_audio = wait_audio  # seconds teams-tap waits for the process to become an audio client
-        self._procs: dict[int, subprocess.Popen] = {}
+        self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
     def command(self, pid: int, out: Path) -> list[str]:
         return [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
@@ -27,7 +36,7 @@ class CoreAudioTapCapture:
 
     def start(self, pid: int, out: Path) -> CaptureHandle:
         if not self.binary.exists():
-            raise CaptureError(f"teams-tap binary not found at {self.binary}. Build it with: scripts/build-native.sh")
+            raise CaptureError(Err.BINARY_MISSING.format(path=self.binary, script=Files.BUILD_NATIVE_SCRIPT))
         proc = process_control.spawn(self.command(pid, out), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)

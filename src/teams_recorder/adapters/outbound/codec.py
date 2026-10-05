@@ -8,6 +8,7 @@ from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any
 
+from teams_recorder.constants import Audio
 from teams_recorder.domain import (
     Action,
     ActionStatus,
@@ -45,7 +46,7 @@ def meeting_to_dict(m: Meeting) -> dict[str, Any]:
 def meeting_from_dict(d: dict[str, Any]) -> Meeting:
     return Meeting(
         id=d["id"],
-        started_at=_parse_dt(d["started_at"]),  # type: ignore[arg-type]
+        started_at=datetime.fromisoformat(d["started_at"]),
         ended_at=_parse_dt(d.get("ended_at")),
         pid=d.get("pid"),
         title=d.get("title"),
@@ -59,7 +60,7 @@ def transcript_to_dict(t: Transcript) -> dict[str, Any]:
 
 def transcript_from_dict(d: dict[str, Any]) -> Transcript:
     return Transcript(
-        language=d.get("language", "pt"),
+        language=d.get("language", Audio.DEFAULT_LANGUAGE),
         segments=[Segment(float(s["start"]), float(s["end"]), s["text"]) for s in d.get("segments", [])],
     )
 

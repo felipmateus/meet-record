@@ -12,35 +12,37 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from teams_recorder.constants import Llm
 from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Decision, Meeting, Transcript
+from teams_recorder.messages import Err, Prompt
 
-MIN_WORDS = 20  # below this an LLM call is not worth it (silence, noise, whisper hallucination)
+MIN_WORDS = Llm.MIN_WORDS  # module alias kept for callers and tests
 
 
 def trivial_analysis(transcript: Transcript, meeting: Meeting, min_words: int = MIN_WORDS) -> Analysis | None:
     """Local analysis for empty or too-short transcripts; None when it is worth analyzing."""
     words = len(transcript.text.split())
     if words == 0:
-        return Analysis(meeting_id=meeting.id, summary="Empty transcript: no speech recognized.")
+        return Analysis(meeting_id=meeting.id, summary=Err.EMPTY_TRANSCRIPT)
     if words < min_words:
         return Analysis(
             meeting_id=meeting.id,
-            summary=f"Transcript too short ({words} words) to analyze: \"{transcript.text.strip()[:120]}\"",
+            summary=Err.SHORT_TRANSCRIPT.format(words=words, text=transcript.text.strip()[:120]),
         )
     return None
 
 
 # --- output schema ----------------------------------------------------------
 class ActionOut(BaseModel):
-    description: str = Field(description="Task, starting with a verb in the infinitive")
-    owner: str = Field(description="Owner; 'usuário' for the recording owner; 'indefinido' when unknown")
-    due: str | None = Field(default=None, description="Due date in ISO format (YYYY-MM-DD) or null")
+    description: str = Field(description=Prompt.FIELD_ACTION_DESCRIPTION)
+    owner: str = Field(description=Prompt.FIELD_ACTION_OWNER.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN))
+    due: str | None = Field(default=None, description=Prompt.FIELD_DUE)
 
 
 class DeadlineOut(BaseModel):
     what: str
-    when: str | None = Field(default=None, description="ISO date or null")
-    who: str = "indefinido"
+    when: str | None = Field(default=None, description=Prompt.FIELD_ISO_DATE)
+    who: str = Llm.OWNER_UNKNOWN
 
 
 class AnalysisOut(BaseModel):
@@ -70,9 +72,9 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
         meeting_id=meeting.id,
         summary=out.summary.strip(),
         decisions=[Decision(d.strip()) for d in out.decisions if d.strip()],
-        my_actions=[act(a, "usuário") for a in out.my_actions],
+        my_actions=[act(a, Llm.OWNER_SELF) for a in out.my_actions],
         others_actions=[act(a) for a in out.others_actions],
-        deadlines=[Deadline(d.what.strip(), _parse_date(d.when), d.who.strip() or "indefinido") for d in out.deadlines],
+        deadlines=[Deadline(d.what.strip(), _parse_date(d.when), d.who.strip() or Llm.OWNER_UNKNOWN) for d in out.deadlines],
         open_questions=[q.strip() for q in out.open_questions if q.strip()],
         next_meetings=[m.strip() for m in out.next_meetings if m.strip()],
     )
@@ -80,19 +82,18 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
 
 def build_user_message(transcript: Transcript, meeting: Meeting) -> str:
     header = [
-        f"Meeting date: {meeting.started_at.date().isoformat()} ({_weekday(meeting.started_at)})",
-        f"Start: {meeting.started_at.strftime('%H:%M')}",
+        Prompt.MEETING_DATE.format(date=meeting.started_at.date().isoformat(), weekday=_weekday(meeting.started_at)),
+        Prompt.MEETING_START.format(time=meeting.started_at.strftime("%H:%M")),
     ]
     if meeting.title:
-        header.append(f"Title: {meeting.title}")
+        header.append(Prompt.MEETING_TITLE.format(title=meeting.title))
     if meeting.duration_seconds:
-        header.append(f"Duration: {int(meeting.duration_seconds // 60)} min")
-    return "\n".join(header) + "\n\nTranscript (with timestamps):\n\n" + transcript.as_timestamped_text()
+        header.append(Prompt.MEETING_DURATION.format(minutes=int(meeting.duration_seconds // 60)))
+    return "\n".join(header) + Prompt.TRANSCRIPT_HEADER + transcript.as_timestamped_text()
 
 
 def _weekday(dt: datetime) -> str:
-    return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][dt.weekday()]
-
+    return Prompt.WEEKDAYS[dt.weekday()]
 
 
 def strict_schema(model: type[BaseModel]) -> dict[str, Any]:
@@ -116,5 +117,4 @@ def load_prompt(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError as exc:
-        raise AnalysisError(f"prompt not found: {path}") from exc
-
+        raise AnalysisError(Err.PROMPT_MISSING.format(path=path)) from exc

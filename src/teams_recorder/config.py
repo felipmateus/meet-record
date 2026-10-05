@@ -4,20 +4,31 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from typing import Any, TypeVar
 
 from dotenv import load_dotenv
 
-ENV_PROJECT_DIR = "TEAMS_RECORDER_DIR"
-ENV_LLM_PROVIDER = "TREC_LLM_PROVIDER"
-ENV_TEAMS_PROCESS = "TREC_TEAMS_PROCESS"   # for tests: simulate Teams with another process
-LLM_PROVIDERS = ("api", "claude-code")
-ICLOUD_MARKER = "Mobile Documents"
-# Folders protected by macOS TCC: background processes (launchd) touching files in them
-# trigger permission prompts they cannot answer; observed as "[Errno 11] Resource deadlock
-# avoided" when executing binaries and writing logs.
-PROTECTED_FOLDERS = ("Documents", "Desktop", "Downloads")
-APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "teams-recorder"
+from teams_recorder.constants import (
+    Audio,
+    Detector,
+    Effort,
+    Env,
+    Files,
+    Llm,
+    LlmProvider,
+    MicBackend,
+    Planner,
+    ggml_model_file,
+)
+from teams_recorder.messages import Err
+
+# Backwards-compatible names: the CLI and the tests import these from here.
+ENV_PROJECT_DIR = Env.PROJECT_DIR
+APP_SUPPORT_DIR = Files.APP_SUPPORT_DIR
+
+E = TypeVar("E", bound=StrEnum)
 
 
 @dataclass(frozen=True)
@@ -25,7 +36,7 @@ class Settings:
     project_dir: Path
     data_dir: Path
     mic_device: str
-    mic_backend: str
+    mic_backend: MicBackend
     teams_process_name: str
     bitrate_kbps: int
     denoise: bool
@@ -38,10 +49,10 @@ class Settings:
     whisper_threads: int
     vad: bool
     vad_model: str
-    llm_provider: str
+    llm_provider: LlmProvider
     llm_model: str
     llm_cli_model: str
-    llm_effort: str
+    llm_effort: Effort
     llm_max_tokens: int
     plan_hour: int
     retention_days: int
@@ -53,34 +64,44 @@ class Settings:
 
     @property
     def whisper_model_path(self) -> Path:
-        return self.models_dir / f"ggml-{self.whisper_model}.bin"
+        return self.models_dir / ggml_model_file(self.whisper_model)
 
     @property
     def vad_model_path(self) -> Path | None:
-        return (self.models_dir / f"ggml-{self.vad_model}.bin") if self.vad else None
+        return (self.models_dir / ggml_model_file(self.vad_model)) if self.vad else None
 
     @property
     def prompts_dir(self) -> Path:
-        return self.project_dir / "prompts"
+        return self.project_dir / Files.PROMPTS_DIR
+
+    @property
+    def log_dir(self) -> Path:
+        return self.data_dir / Files.LOG_DIR
 
     @property
     def usage_log(self) -> Path:
-        return self.data_dir / "log" / "llm_usage.jsonl"
+        return self.log_dir / Files.LLM_USAGE_LOG
 
     @property
     def daemon_log(self) -> Path:
-        return self.data_dir / "log" / "teams-recorder.log"
+        return self.log_dir / Files.DAEMON_LOG
+
+    @property
+    def capture_log(self) -> Path:
+        return self.log_dir / Files.CAPTURE_LOG
 
 
-def _provider(value: object) -> str:
-    v = str(value).strip().lower()
-    if v not in LLM_PROVIDERS:
-        raise ValueError(f"invalid llm.provider: {value!r}; use one of {LLM_PROVIDERS}")
-    return v
+def _parse_enum(kind: type[E], value: object, template: str) -> E:
+    """Parse a config value into a StrEnum member; `template` is the Err message on failure."""
+    try:
+        return kind(str(value).strip().lower())
+    except ValueError:
+        options = tuple(member.value for member in kind)
+        raise ValueError(template.format(value=value, options=options)) from None
 
 
 def default_project_dir() -> Path:
-    env = os.environ.get(ENV_PROJECT_DIR)
+    env = os.environ.get(Env.PROJECT_DIR)
     if env:
         return Path(env).expanduser()
     return Path(__file__).resolve().parents[2]
@@ -89,32 +110,37 @@ def default_project_dir() -> Path:
 def is_icloud_synced(path: Path) -> bool:
     """Heuristic: paths under ~/Library/Mobile Documents are synced with iCloud."""
     try:
-        return ICLOUD_MARKER in str(path.resolve())
+        return Files.ICLOUD_MARKER in str(path.resolve())
     except OSError:
         return False
 
 
 def is_tcc_protected(path: Path) -> bool:
-    """True when the path is under ~/Documents, ~/Desktop or ~/Downloads."""
+    """True when the path is under ~/Documents, ~/Desktop or ~/Downloads.
+
+    Background processes (launchd) touching files in these TCC-protected folders trigger
+    permission prompts they cannot answer; observed as "[Errno 11] Resource deadlock
+    avoided" when executing binaries and writing logs.
+    """
     try:
         rel = path.resolve().relative_to(Path.home())
     except (ValueError, OSError):
         return False
-    return bool(rel.parts) and rel.parts[0] in PROTECTED_FOLDERS
+    return bool(rel.parts) and rel.parts[0] in Files.TCC_PROTECTED_FOLDERS
 
 
 def default_data_dir(project_dir: Path) -> Path:
     if is_icloud_synced(project_dir) or is_tcc_protected(project_dir):
-        return APP_SUPPORT_DIR
-    return project_dir / "data"
+        return Files.APP_SUPPORT_DIR
+    return project_dir / Files.LOCAL_DATA_DIR
 
 
 def load_settings(project_dir: Path | None = None) -> Settings:
     project_dir = (project_dir or default_project_dir()).resolve()
-    load_dotenv(project_dir / ".env", override=False)
+    load_dotenv(project_dir / Files.DOTENV, override=False)
 
-    cfg_path = project_dir / "config.toml"
-    raw: dict = {}
+    cfg_path = project_dir / Files.CONFIG
+    raw: dict[str, Any] = {}
     if cfg_path.exists():
         with cfg_path.open("rb") as fh:
             raw = tomllib.load(fh)
@@ -131,26 +157,26 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     return Settings(
         project_dir=project_dir,
         data_dir=data_dir,
-        mic_device=str(audio.get("mic_device", "default")),
-        mic_backend=str(audio.get("mic_backend", "coreaudio")),
-        teams_process_name=os.environ.get(ENV_TEAMS_PROCESS) or str(audio.get("teams_process_name", "MSTeams")),
-        bitrate_kbps=int(audio.get("bitrate_kbps", 64)),
+        mic_device=str(audio.get("mic_device", Audio.DEFAULT_MIC_DEVICE)),
+        mic_backend=_parse_enum(MicBackend, audio.get("mic_backend", MicBackend.COREAUDIO), Err.INVALID_MIC_BACKEND),
+        teams_process_name=os.environ.get(Env.TEAMS_PROCESS) or str(audio.get("teams_process_name", Detector.TEAMS_PROCESS)),
+        bitrate_kbps=int(audio.get("bitrate_kbps", Audio.DEFAULT_BITRATE_KBPS)),
         denoise=bool(audio.get("denoise", True)),
-        poll_seconds=int(detector.get("poll_seconds", 3)),
-        start_after_positive_polls=int(detector.get("start_after_positive_polls", 2)),
-        stop_after_negative_polls=int(detector.get("stop_after_negative_polls", 5)),
-        whisper_model=str(transcription.get("whisper_model", "large-v3-turbo-q5_0")),
-        language=str(transcription.get("language", "pt")),
-        models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / "models",
-        whisper_threads=int(transcription.get("threads", 0)),
+        poll_seconds=int(detector.get("poll_seconds", Detector.POLL_SECONDS)),
+        start_after_positive_polls=int(detector.get("start_after_positive_polls", Detector.START_AFTER)),
+        stop_after_negative_polls=int(detector.get("stop_after_negative_polls", Detector.STOP_AFTER)),
+        whisper_model=str(transcription.get("whisper_model", Audio.DEFAULT_WHISPER_MODEL)),
+        language=str(transcription.get("language", Audio.DEFAULT_LANGUAGE)),
+        models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / Files.MODELS_DIR,
+        whisper_threads=int(transcription.get("threads", Audio.DEFAULT_WHISPER_THREADS)),
         vad=bool(transcription.get("vad", False)),
-        vad_model=str(transcription.get("vad_model", "silero-v5.1.2")),
-        llm_provider=_provider(os.environ.get(ENV_LLM_PROVIDER) or llm.get("provider", "api")),
-        llm_model=str(llm.get("model", "claude-opus-5-5")),
-        llm_cli_model=str(llm.get("cli_model", "opus")),
-        llm_effort=str(llm.get("effort", "high")),
-        llm_max_tokens=int(llm.get("max_tokens", 16000)),
-        plan_hour=int(planner.get("hour", 18)),
-        retention_days=int(planner.get("retention_days", 30)),
-        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+        vad_model=str(transcription.get("vad_model", Audio.DEFAULT_VAD_MODEL)),
+        llm_provider=_parse_enum(LlmProvider, os.environ.get(Env.LLM_PROVIDER) or llm.get("provider", LlmProvider.API), Err.INVALID_PROVIDER),
+        llm_model=str(llm.get("model", Llm.DEFAULT_API_MODEL)),
+        llm_cli_model=str(llm.get("cli_model", Llm.DEFAULT_CLI_MODEL)),
+        llm_effort=_parse_enum(Effort, llm.get("effort", Effort.HIGH), Err.INVALID_EFFORT),
+        llm_max_tokens=int(llm.get("max_tokens", Llm.DEFAULT_MAX_TOKENS)),
+        plan_hour=int(planner.get("hour", Planner.DEFAULT_HOUR)),
+        retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
+        anthropic_api_key=os.environ.get(Env.API_KEY) or None,
     )

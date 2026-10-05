@@ -11,11 +11,12 @@ from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport, StructuredTransport
-from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
+from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
+from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.ports import (
     AudioMixer,
     CallDetector,
@@ -28,7 +29,6 @@ from teams_recorder.application.ports import (
     ProcessAudioCapture,
     Transcriber,
 )
-from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
     BuildDailyPlan,
@@ -39,10 +39,11 @@ from teams_recorder.application.use_cases import (
     TranscribeMeeting,
 )
 from teams_recorder.config import Settings
+from teams_recorder.constants import Files, LlmProvider, MicBackend
 
 
 def teams_tap_binary(project_dir: Path) -> Path:
-    return project_dir / "native" / "teams-tap" / ".build" / "release" / "teams-tap"
+    return project_dir / Files.NATIVE_BINARY
 
 
 @dataclass
@@ -57,7 +58,7 @@ class Container:
     transcriber: Transcriber
     analyzer: MeetingAnalyzer
     planner: Planner
-    detector: CallDetector | None = None
+    detector: CallDetector
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device)
@@ -85,26 +86,30 @@ class Container:
 
 
 def build_container(settings: Settings, *, headless: bool = False) -> Container:
-    capture_log = settings.data_dir / "log" / "capture.log"
+    capture_log = settings.capture_log
+    binary = teams_tap_binary(settings.project_dir)
     transport = build_transport(settings)  # shared by analyzer and planner
+    mic_capture: MicCapture = (
+        FfmpegMicCapture(log_path=capture_log)
+        if settings.mic_backend is MicBackend.FFMPEG
+        else CoreAudioMicCapture(binary, log_path=capture_log)
+    )
     return Container(
         settings=settings,
         repo=FsMeetingRepository(settings.data_dir),
         clock=SystemClock(),
         notifier=LogNotifier() if headless else MacOSNotifier(),
-        process_capture=CoreAudioTapCapture(teams_tap_binary(settings.project_dir), log_path=capture_log),
-        mic_capture=(FfmpegMicCapture(log_path=capture_log) if settings.mic_backend == "ffmpeg"
-                     else CoreAudioMicCapture(teams_tap_binary(settings.project_dir), log_path=capture_log)),
+        process_capture=CoreAudioTapCapture(binary, log_path=capture_log),
+        mic_capture=mic_capture,
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads, vad_model_path=settings.vad_model_path),
-        analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / "analyze_system.md"),
-        planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / "plan_system.md"),
+        analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT),
+        planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT),
         detector=PmsetCallDetector(settings.teams_process_name),
     )
 
 
 def build_transport(settings: Settings) -> StructuredTransport:
-    if settings.llm_provider == "claude-code":
+    if settings.llm_provider is LlmProvider.CLAUDE_CODE:
         return ClaudeCodeTransport(model=settings.llm_cli_model, effort=settings.llm_effort, usage_log=settings.usage_log)
     return ApiTransport(model=settings.llm_model, effort=settings.llm_effort, max_tokens=settings.llm_max_tokens, usage_log=settings.usage_log)
-

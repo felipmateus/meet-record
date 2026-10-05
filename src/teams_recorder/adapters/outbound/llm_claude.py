@@ -22,6 +22,7 @@ from teams_recorder.adapters.outbound.llm_schema import (  # noqa: F401 - re-exp
 )
 from teams_recorder.adapters.outbound.llm_transport import FALLBACK_BETA, StructuredTransport  # noqa: F401
 from teams_recorder.domain import Analysis, AnalysisError, Meeting, Transcript
+from teams_recorder.messages import Err
 
 
 @dataclass
@@ -34,7 +35,7 @@ class ClaudeAnalyzer:
     def _system(self) -> str:
         if self.system_prompt is None:
             if self.prompt_path is None:
-                raise AnalysisError("ClaudeAnalyzer has no system prompt (system_prompt or prompt_path)")
+                raise AnalysisError(Err.NO_SYSTEM_PROMPT.format(who=type(self).__name__))
             self.system_prompt = load_prompt(self.prompt_path)
         return self.system_prompt
 

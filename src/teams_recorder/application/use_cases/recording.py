@@ -14,6 +14,7 @@ from teams_recorder.application.ports import (
 )
 from teams_recorder.domain import CaptureError, Meeting, RepositoryError
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK
+from teams_recorder.messages import Err, Notify
 
 __all__ = ["ActiveRecording", "StartRecording", "StopRecording", "CancelRecording"]
 
@@ -29,7 +30,7 @@ class StartRecording:
 
     def execute(self, pid: int, title: str | None = None) -> ActiveRecording:
         if self.repo.load_active() is not None:
-            raise RepositoryError("a recording is already in progress; use `trec stop` or `trec cancel`")
+            raise RepositoryError(Err.RECORDING_IN_PROGRESS)
         meeting = Meeting.start(self.clock.now(), pid=pid, title=title)
         self.repo.create(meeting)
         try:
@@ -38,16 +39,16 @@ class StartRecording:
             self.repo.delete_meeting(meeting.id)
             if isinstance(exc, CaptureError):
                 raise
-            raise CaptureError(f"failed to start the Teams capture: {exc}") from exc
+            raise CaptureError(Err.TEAMS_CAPTURE_START.format(error=exc)) from exc
         try:
             mic_handle = self.mic_capture.start(self.mic_device, self.repo.path(meeting.id, MIC_TRACK))
         except Exception as exc:
             self.process_capture.stop(process_handle)
             self.repo.delete_meeting(meeting.id)
-            raise CaptureError(f"failed to start the microphone: {exc}") from exc
+            raise CaptureError(Err.MIC_START.format(error=exc)) from exc
         active = ActiveRecording(meeting, process_handle, mic_handle)
         self.repo.save_active(active)
-        self.notifier.notify("Recording started", f"Meeting {meeting.id}")
+        self.notifier.notify(Notify.RECORDING_STARTED, Notify.RECORDING_STARTED_BODY.format(meeting_id=meeting.id))
         return active
 
 
@@ -71,7 +72,7 @@ class StopRecording:
         self.repo.save_meta(meeting)
         self.repo.clear_active()
         minutes = int((meeting.duration_seconds or 0) // 60)
-        self.notifier.notify("Recording stopped", f"{minutes} min. Transcribing…")
+        self.notifier.notify(Notify.RECORDING_STOPPED, Notify.RECORDING_STOPPED_BODY.format(minutes=minutes))
         return meeting
 
 
@@ -90,4 +91,4 @@ class CancelRecording:
                 pass
         self.repo.delete_meeting(active.meeting.id)
         self.repo.clear_active()
-        self.notifier.notify("Recording cancelled", f"Meeting {active.meeting.id} discarded")
+        self.notifier.notify(Notify.RECORDING_CANCELLED, Notify.RECORDING_CANCELLED_BODY.format(meeting_id=active.meeting.id))

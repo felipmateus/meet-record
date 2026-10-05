@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from teams_recorder.config import APP_SUPPORT_DIR, default_data_dir, is_icloud_synced, is_tcc_protected, load_settings
+from teams_recorder.constants import Effort, LlmProvider, MicBackend
 
 
 def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
@@ -70,6 +71,24 @@ def test_mic_backend_from_toml(tmp_path: Path):
     (tmp_path / "config.toml").write_text('[audio]\nmic_backend = "ffmpeg"\n')
     assert load_settings(tmp_path).mic_backend == "ffmpeg"
     assert load_settings(tmp_path).mic_device == "default"
+
+
+def test_settings_use_enums(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    s = load_settings(tmp_path)
+    assert s.llm_provider is LlmProvider.API
+    assert s.mic_backend is MicBackend.COREAUDIO
+    assert s.llm_effort is Effort.HIGH
+
+
+def test_invalid_mic_backend_and_effort(tmp_path: Path):
+    import pytest
+    (tmp_path / "config.toml").write_text('[audio]\nmic_backend = "pulseaudio"\n')
+    with pytest.raises(ValueError, match="audio.mic_backend"):
+        load_settings(tmp_path)
+    (tmp_path / "config.toml").write_text('[llm]\neffort = "ultra"\n')
+    with pytest.raises(ValueError, match="llm.effort"):
+        load_settings(tmp_path)
 
 
 def test_denoise_and_vad_settings(tmp_path: Path):

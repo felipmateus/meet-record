@@ -81,7 +81,8 @@ def test_probe_reports_duration_and_levels(tmp_path: Path):
     from teams_recorder.adapters.outbound.mixer_ffmpeg import probe
     t = tmp_path / "t.wav"; _tone(t, 440, 2.0)
     info = probe(t)
-    assert 1.9 <= info["duration"] <= 2.1 and info["max_db"] is not None and info["mean_db"] is not None
+    assert info.duration is not None and 1.9 <= info.duration <= 2.1
+    assert info.max_db is not None and info.mean_db is not None
 
 
 @pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")

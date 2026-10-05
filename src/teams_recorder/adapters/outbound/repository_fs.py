@@ -13,10 +13,11 @@ import shutil
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator, cast
 
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.application.ports import ActiveRecording, CaptureHandle
+from teams_recorder.constants import Files
 from teams_recorder.domain import (
     Action,
     Analysis,
@@ -27,14 +28,12 @@ from teams_recorder.domain import (
     Transcript,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
-
-OPEN_ACTIONS = "open_actions.json"
-ACTIVE_RECORDING = "current_recording.json"
+from teams_recorder.messages import Err
 
 
 def _write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(path.name + Files.TMP_SUFFIX)
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
 
@@ -43,20 +42,34 @@ def _write_json(path: Path, data: object) -> None:
     _write_atomic(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
-def _read_json(path: Path) -> object:
+def _load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise RepositoryError(f"file not found: {path}") from exc
+        raise RepositoryError(Err.FILE_MISSING.format(path=path)) from exc
     except json.JSONDecodeError as exc:
-        raise RepositoryError(f"invalid JSON in {path}: {exc}") from exc
+        raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    data = _load_json(path)
+    if not isinstance(data, dict):
+        raise RepositoryError(Err.BAD_JSON.format(path=path, error=type(data).__name__))
+    return cast(dict[str, Any], data)
+
+
+def _read_json_list(path: Path) -> list[Any]:
+    data = _load_json(path)
+    if not isinstance(data, list):
+        raise RepositoryError(Err.BAD_JSON.format(path=path, error=type(data).__name__))
+    return data
 
 
 class FsMeetingRepository:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = Path(data_dir)
-        self.recordings = self.data_dir / "recordings"
-        self.plans = self.data_dir / "plans"
+        self.recordings = self.data_dir / Files.RECORDINGS_DIR
+        self.plans = self.data_dir / Files.PLANS_DIR
         self.recordings.mkdir(parents=True, exist_ok=True)
         self.plans.mkdir(parents=True, exist_ok=True)
 
@@ -73,7 +86,7 @@ class FsMeetingRepository:
     def create(self, meeting: Meeting) -> None:
         d = self._dir(meeting.id)
         if d.exists():
-            raise RepositoryError(f"meeting already exists: {meeting.id}")
+            raise RepositoryError(Err.MEETING_EXISTS.format(meeting_id=meeting.id))
         d.mkdir(parents=True)
         self.save_meta(meeting)
 
@@ -81,10 +94,10 @@ class FsMeetingRepository:
         _write_json(self._require(meeting.id) / META, codec.meeting_to_dict(meeting))
 
     def load_meta(self, meeting_id: str) -> Meeting:
-        return codec.meeting_from_dict(_read_json(self._require(meeting_id) / META))  # type: ignore[arg-type]
+        return codec.meeting_from_dict(_read_json(self._require(meeting_id) / META))
 
     def list_meetings(self) -> list[Meeting]:
-        meetings = []
+        meetings: list[Meeting] = []
         for d in sorted(self.recordings.iterdir()):
             if d.is_dir() and (d / META).exists():
                 meetings.append(self.load_meta(d.name))
@@ -95,7 +108,7 @@ class FsMeetingRepository:
 
     # --- files ----------------------------------------------------------
     def files(self, meeting_id: str) -> set[str]:
-        return {p.name for p in self._require(meeting_id).iterdir() if not p.name.endswith(".tmp")}
+        return {p.name for p in self._require(meeting_id).iterdir() if not p.name.endswith(Files.TMP_SUFFIX)}
 
     def path(self, meeting_id: str, filename: str) -> Path:
         return self._require(meeting_id) / filename
@@ -114,7 +127,7 @@ class FsMeetingRepository:
     def lock(self, meeting_id: str) -> Iterator[None]:
         lock = self._require(meeting_id) / LOCK
         if lock.exists():
-            raise RepositoryError(f"meeting {meeting_id} is already being processed")
+            raise RepositoryError(Err.MEETING_LOCKED.format(meeting_id=meeting_id))
         lock.write_text(str(os.getpid()))
         try:
             yield
@@ -124,7 +137,7 @@ class FsMeetingRepository:
     # --- active recording -----------------------------------------------
     @property
     def _active_path(self) -> Path:
-        return self.data_dir / ACTIVE_RECORDING
+        return self.data_dir / Files.ACTIVE_RECORDING
 
     def save_active(self, active: ActiveRecording) -> None:
         _write_json(self._active_path, {
@@ -138,15 +151,19 @@ class FsMeetingRepository:
             return None
         data = _read_json(self._active_path)
         try:
-            meeting = self.load_meta(data["meeting_id"])  # type: ignore[index]
+            meeting = self.load_meta(str(data["meeting_id"]))
         except MeetingNotFound:
             self.clear_active()  # orphan pointer: the meeting folder is gone
             return None
         return ActiveRecording(
             meeting=meeting,
-            process_handle=CaptureHandle(int(data["process_handle"]["pid"]), Path(data["process_handle"]["out"])),  # type: ignore[index]
-            mic_handle=CaptureHandle(int(data["mic_handle"]["pid"]), Path(data["mic_handle"]["out"])),  # type: ignore[index]
+            process_handle=self._handle_from_dict(data["process_handle"]),
+            mic_handle=self._handle_from_dict(data["mic_handle"]),
         )
+
+    @staticmethod
+    def _handle_from_dict(d: dict[str, Any]) -> CaptureHandle:
+        return CaptureHandle(int(d["pid"]), Path(d["out"]))
 
     def clear_active(self) -> None:
         self._active_path.unlink(missing_ok=True)
@@ -158,13 +175,13 @@ class FsMeetingRepository:
         _write_atomic(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
 
     def load_transcript(self, meeting_id: str) -> Transcript:
-        return codec.transcript_from_dict(_read_json(self._require(meeting_id) / TRANSCRIPT_JSON))  # type: ignore[arg-type]
+        return codec.transcript_from_dict(_read_json(self._require(meeting_id) / TRANSCRIPT_JSON))
 
     def save_analysis(self, meeting_id: str, analysis: Analysis) -> None:
         _write_json(self._require(meeting_id) / ANALYSIS, codec.analysis_to_dict(analysis))
 
     def load_analysis(self, meeting_id: str) -> Analysis:
-        return codec.analysis_from_dict(_read_json(self._require(meeting_id) / ANALYSIS))  # type: ignore[arg-type]
+        return codec.analysis_from_dict(_read_json(self._require(meeting_id) / ANALYSIS))
 
     def mark_failed(self, meeting_id: str, message: str) -> None:
         _write_atomic(self._require(meeting_id) / ERROR, message + "\n")
@@ -174,28 +191,31 @@ class FsMeetingRepository:
 
     # --- plans ----------------------------------------------------------
     def _plan_json(self, day: date) -> Path:
-        return self.plans / f"{day.isoformat()}.json"
+        return self.plans / Files.PLAN_JSON.format(day=day.isoformat())
+
+    def _plan_md(self, day: date) -> Path:
+        return self.plans / Files.PLAN_MARKDOWN.format(day=day.isoformat())
 
     def save_plan(self, plan: DailyPlan) -> None:
         _write_json(self._plan_json(plan.day), codec.plan_to_dict(plan))
-        _write_atomic(self.plans / f"{plan.day.isoformat()}.md", plan.markdown)
+        _write_atomic(self._plan_md(plan.day), plan.markdown)
 
     def load_plan(self, day: date) -> DailyPlan | None:
         p = self._plan_json(day)
-        return codec.plan_from_dict(_read_json(p)) if p.exists() else None  # type: ignore[arg-type]
+        return codec.plan_from_dict(_read_json(p)) if p.exists() else None
 
     def latest_plan_before(self, day: date) -> DailyPlan | None:
         candidates = sorted(
-            (p for p in self.plans.glob("????-??-??.json") if date.fromisoformat(p.stem) < day),
+            (p for p in self.plans.glob(Files.PLAN_GLOB) if date.fromisoformat(p.stem) < day),
             reverse=True,
         )
-        return codec.plan_from_dict(_read_json(candidates[0])) if candidates else None  # type: ignore[arg-type]
+        return codec.plan_from_dict(_read_json(candidates[0])) if candidates else None
 
     def load_open_actions(self) -> list[Action]:
-        p = self.plans / OPEN_ACTIONS
+        p = self.plans / Files.OPEN_ACTIONS
         if not p.exists():
             return []
-        return [codec.action_from_dict(x) for x in _read_json(p)]  # type: ignore[union-attr]
+        return [codec.action_from_dict(x) for x in _read_json_list(p)]
 
     def save_open_actions(self, actions: list[Action]) -> None:
-        _write_json(self.plans / OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])
+        _write_json(self.plans / Files.OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])

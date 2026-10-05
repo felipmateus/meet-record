@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from teams_recorder.application.ports import Clock, MeetingRepository, Notifier, Planner
+from teams_recorder.constants import Planner as PlannerDefaults
 from teams_recorder.domain import DailyPlan, MeetingStatus, derive_status, merge_open_actions
 from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
+from teams_recorder.messages import Notify
 
 
 @dataclass
@@ -27,7 +29,10 @@ class BuildDailyPlan:
         plan.day = day
         self.repo.save_plan(plan)
         self.repo.save_open_actions(merge_open_actions(open_actions, plan))
-        self.notifier.notify("Daily plan ready", f"{len(analyses)} meeting(s), {len(plan.new_actions)} new action(s)")
+        self.notifier.notify(
+            Notify.PLAN_READY,
+            Notify.PLAN_READY_BODY.format(meetings=len(analyses), new_actions=len(plan.new_actions)),
+        )
         return plan
 
 
@@ -35,7 +40,7 @@ class BuildDailyPlan:
 class PurgeOldAudio:
     repo: MeetingRepository
     clock: Clock
-    retention_days: int = 30
+    retention_days: int = PlannerDefaults.RETENTION_DAYS
 
     def execute(self) -> list[str]:
         cutoff = self.clock.now() - timedelta(days=self.retention_days)

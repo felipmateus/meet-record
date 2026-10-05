@@ -4,6 +4,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from teams_recorder.adapters.inbound.cli import app
+from teams_recorder.adapters.outbound.launchd import AgentStatus
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.config import ENV_PROJECT_DIR
 from teams_recorder.domain import Meeting
@@ -81,7 +82,7 @@ def test_agent_status_when_not_installed(tmp_path: Path, monkeypatch):
     # does not depend on the machine's real launchd (the agent may actually be installed)
     monkeypatch.setattr(
         "teams_recorder.adapters.inbound.cli.LaunchAgent.status",
-        lambda self: {"loaded": False, "plist": str(self.plist_path), "plist_exists": False, "pid": None, "state": None},
+        lambda self: AgentStatus(loaded=False, plist=self.plist_path, plist_exists=False, pid=None, state=None),
     )
     result = runner.invoke(app, ["agent", "status"])
     assert result.exit_code == 1 and "loaded: no" in result.output and "not scheduled" in result.output

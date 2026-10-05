@@ -5,39 +5,59 @@ import logging
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+from teams_recorder.constants import Audio, Bin, Files, Parse, Proc
 from teams_recorder.domain import CaptureError
+from teams_recorder.messages import Err, Log
 
 log = logging.getLogger(__name__)
 
-MIN_TRACK_BYTES = 1024  # a WAV header without samples is 44 bytes; under 1 KB is garbage
-ANOMALY_RATIO = 0.5     # a track shorter than half the longest one is an anomaly
-DEBUG_DIR = "debug"     # raw tracks are preserved here when there is an anomaly
+# Module-level aliases kept for callers and tests.
+MIN_TRACK_BYTES = Audio.MIN_TRACK_BYTES
+ANOMALY_RATIO = Audio.ANOMALY_RATIO
+DEBUG_DIR = Files.DEBUG_DIR
 
 
-def probe(path: Path, ffmpeg: str = "ffmpeg") -> dict:
+@dataclass(frozen=True)
+class TrackInfo:
+    """What ffmpeg's volumedetect reports about one track; None when a value could not be read."""
+
+    duration: float | None = None
+    mean_db: float | None = None
+    max_db: float | None = None
+
+
+def probe(path: Path, ffmpeg: str = Bin.FFMPEG) -> TrackInfo:
     """Duration (s) and mean/peak volume (dB) of a track, via ffmpeg volumedetect."""
-    info: dict = {"duration": None, "mean_db": None, "max_db": None}
     try:
-        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=600, check=False)
+        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=Proc.FFMPEG_TIMEOUT, check=False)
     except (OSError, subprocess.TimeoutExpired):
-        return info
+        return TrackInfo()
     out = r.stderr
-    m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", out)
+    duration = mean_db = max_db = None
+    m = re.search(Parse.FFMPEG_DURATION, out)
     if m:
-        info["duration"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
-    m = re.search(r"mean_volume: (-?[\d.]+) dB", out)
+        duration = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    m = re.search(Parse.FFMPEG_MEAN_VOLUME, out)
     if m:
-        info["mean_db"] = float(m.group(1))
-    m = re.search(r"max_volume: (-?[\d.]+) dB", out)
+        mean_db = float(m.group(1))
+    m = re.search(Parse.FFMPEG_MAX_VOLUME, out)
     if m:
-        info["max_db"] = float(m.group(1))
-    return info
+        max_db = float(m.group(1))
+    return TrackInfo(duration=duration, mean_db=mean_db, max_db=max_db)
 
 
 class FfmpegMixer:
-    def __init__(self, ffmpeg: str = "ffmpeg", bitrate_kbps: int = 64, sample_rate: int = 48000, timeout: float = 600.0, denoise: bool = True) -> None:
+    def __init__(
+        self,
+        ffmpeg: str = Bin.FFMPEG,
+        bitrate_kbps: int = Audio.DEFAULT_BITRATE_KBPS,
+        sample_rate: int = Audio.SAMPLE_RATE,
+        timeout: float = Proc.FFMPEG_TIMEOUT,
+        denoise: bool = True,
+    ) -> None:
         self.ffmpeg = ffmpeg
         self.bitrate_kbps = bitrate_kbps
         self.sample_rate = sample_rate  # loudnorm resamples internally; we pin the output rate
@@ -48,8 +68,8 @@ class FfmpegMixer:
     # by continuously estimating the noise floor. After summing: normalizes loudness and
     # limits peaks to -1 dBTP, because summing two tracks (user's voice close to the
     # microphone + Teams) was clipping the final file (measured peak: +1.5 dB).
-    TRACK_FILTER = "highpass=f=80,afftdn=nf=-25:tn=1"
-    MASTER_FILTER = "loudnorm=I=-18:TP=-2:LRA=11,alimiter=limit=0.891:level=0"
+    TRACK_FILTER = Audio.TRACK_FILTER
+    MASTER_FILTER = Audio.MASTER_FILTER
 
     @staticmethod
     def usable_tracks(tracks: list[Path]) -> list[Path]:
@@ -84,7 +104,7 @@ class FfmpegMixer:
         for t in tracks:
             if t.exists():
                 shutil.copy2(t, debug / t.name)
-        log.warning("track anomaly (%s); raw copies kept in %s", ", ".join(f"{t.name}={durations.get(t, 0):.1f}s" for t in tracks), debug)
+        log.warning(Log.TRACK_ANOMALY, ", ".join(f"{t.name}={durations.get(t, 0):.1f}s" for t in tracks), debug)
 
     def mix(self, tracks: list[Path], out: Path) -> Path:
         usable = self.usable_tracks(tracks)
@@ -93,18 +113,18 @@ class FfmpegMixer:
             size = t.stat().st_size if t.exists() else 0
             if t in usable:
                 info = probe(t, self.ffmpeg)
-                if info["duration"] is not None:
-                    durations[t] = info["duration"]
-                log.info("track %s: %.1f MB, %.1f s, mean %s dB, peak %s dB", t.name, size / 1e6, info["duration"] or 0.0, info["mean_db"], info["max_db"])
+                if info.duration is not None:
+                    durations[t] = info.duration
+                log.info(Log.TRACK_INFO, t.name, size / 1e6, info.duration or 0.0, info.mean_db, info.max_db)
             else:
-                log.info("track %s: %.1f MB (discarded)", t.name, size / 1e6)
+                log.info(Log.TRACK_DISCARDED, t.name, size / 1e6)
         self._preserve_if_anomalous(tracks, durations, out.parent)
         if not usable:
-            raise CaptureError("no usable audio track to mix: " + ", ".join(str(t) for t in tracks))
+            raise CaptureError(Err.NO_USABLE_TRACK.format(tracks=", ".join(str(t) for t in tracks)))
         try:
             result = subprocess.run(self.command(usable, out), capture_output=True, text=True, timeout=self.timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise CaptureError(f"ffmpeg failed to mix: {exc}") from exc
+            raise CaptureError(Err.MIX_FAILED.format(error=exc)) from exc
         if result.returncode != 0 or not out.exists():
-            raise CaptureError(f"ffmpeg failed to mix (code {result.returncode}): {result.stderr.strip()[-500:]}")
+            raise CaptureError(Err.MIX_FAILED_CODE.format(code=result.returncode, tail=result.stderr.strip()[-500:]))
         return out

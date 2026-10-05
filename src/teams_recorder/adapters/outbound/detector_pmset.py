@@ -11,18 +11,17 @@ from __future__ import annotations
 import re
 import subprocess
 from dataclasses import dataclass, field
+from typing import Callable
 
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.application.ports import CallState
+from teams_recorder.constants import Bin, Detector
 
-CALL_ASSERTIONS = (
-    "PreventUserIdleDisplaySleep",
-    "PreventUserIdleSystemSleep",
-    "NoIdleSleepAssertion",
-    "NoDisplaySleepAssertion",
-)
+CALL_ASSERTIONS = Detector.CALL_ASSERTIONS
 
 _LINE = re.compile(r"^\s*pid\s+(\d+)\(([^)]+)\):.*?\b(" + "|".join(CALL_ASSERTIONS) + r")\b")
+
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 def parse_assertions(text: str, process_name: str) -> list[int]:
@@ -40,12 +39,12 @@ def parse_assertions(text: str, process_name: str) -> list[int]:
 @dataclass
 class PmsetCallDetector:
     process_name: str
-    runner: object = subprocess.run
+    runner: Runner = subprocess.run
     last_pids: list[int] = field(default_factory=list)
 
     def poll(self) -> CallState:
         try:
-            result = self.runner(["pmset", "-g", "assertions"], capture_output=True, text=True, check=False, timeout=10)  # type: ignore[operator]
+            result = self.runner([Bin.PMSET, "-g", "assertions"], capture_output=True, text=True, check=False, timeout=Detector.PMSET_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired):
             return CallState.UNKNOWN
         if result.returncode != 0:

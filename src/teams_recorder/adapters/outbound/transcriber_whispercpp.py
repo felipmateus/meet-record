@@ -11,18 +11,21 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
+from teams_recorder.constants import Audio, Bin, Files, Proc
 from teams_recorder.domain import Segment, Transcript, TranscriptionError
+from teams_recorder.messages import Err
 
 
 class WhisperCppTranscriber:
     def __init__(
         self,
         model_path: Path,
-        whisper_cli: str = "whisper-cli",
-        ffmpeg: str = "ffmpeg",
+        whisper_cli: str = Bin.WHISPER_CLI,
+        ffmpeg: str = Bin.FFMPEG,
         threads: int = 0,
-        timeout: float = 3 * 3600,
+        timeout: float = Proc.WHISPER_TIMEOUT,
         vad_model_path: Path | None = None,
     ) -> None:
         self.model_path = Path(model_path)
@@ -34,7 +37,7 @@ class WhisperCppTranscriber:
 
     # --- commands (public for testing) ------------------------------------
     def convert_command(self, audio: Path, wav: Path) -> list[str]:
-        return [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(audio), "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)]
+        return [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(audio), "-ac", "1", "-ar", str(Audio.WHISPER_SAMPLE_RATE), "-c:a", "pcm_s16le", str(wav)]
 
     def whisper_command(self, wav: Path, language: str, out_prefix: Path) -> list[str]:
         cmd = [
@@ -49,44 +52,42 @@ class WhisperCppTranscriber:
         ]
         if self.vad_model_path is not None and self.vad_model_path.exists():
             # Voice activity detection (Silero): only transcribes speech segments; reduces hallucinations in silence.
-            cmd += ["--vad", "-vm", str(self.vad_model_path), "-vt", "0.5", "-vsd", "300", "-vp", "150"]
+            cmd += ["--vad", "-vm", str(self.vad_model_path), *Audio.VAD_ARGS]
         return cmd
 
     # --- Transcriber port -------------------------------------------------
     def transcribe(self, audio: Path, language: str) -> Transcript:
         if not self.model_path.exists():
-            raise TranscriptionError(
-                f"model not found at {self.model_path}. Download it with scripts/download-model.sh"
-            )
+            raise TranscriptionError(Err.MODEL_MISSING.format(path=self.model_path, script=Files.DOWNLOAD_MODEL_SCRIPT))
         if not audio.exists():
-            raise TranscriptionError(f"audio not found: {audio}")
+            raise TranscriptionError(Err.AUDIO_MISSING.format(path=audio))
         with tempfile.TemporaryDirectory(prefix="trec-whisper-") as tmp:
             wav = Path(tmp) / "audio16k.wav"
             prefix = Path(tmp) / "out"
-            self._run(self.convert_command(audio, wav), "conversion to 16 kHz WAV")
-            self._run(self.whisper_command(wav, language, prefix), "whisper-cli")
+            self._run(self.convert_command(audio, wav), Err.STEP_CONVERT_WAV)
+            self._run(self.whisper_command(wav, language, prefix), Bin.WHISPER_CLI)
             json_path = prefix.with_suffix(".json")
             if not json_path.exists():
-                raise TranscriptionError("whisper-cli finished without producing the JSON output")
+                raise TranscriptionError(Err.WHISPER_NO_JSON)
             try:
                 data = json.loads(json_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
-                raise TranscriptionError(f"invalid whisper JSON: {exc}") from exc
+                raise TranscriptionError(Err.WHISPER_BAD_JSON.format(error=exc)) from exc
         return parse_whisper_json(data, language)
 
     def _run(self, command: list[str], what: str) -> None:
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout, check=False)
         except FileNotFoundError as exc:
-            raise TranscriptionError(f"{what}: executable not found ({command[0]}). Install with: brew install whisper-cpp") from exc
+            raise TranscriptionError(Err.EXECUTABLE_MISSING.format(what=what, command=command[0])) from exc
         except subprocess.TimeoutExpired as exc:
-            raise TranscriptionError(f"{what}: timed out after {self.timeout:.0f}s") from exc
+            raise TranscriptionError(Err.TIMED_OUT.format(what=what, seconds=self.timeout)) from exc
         if result.returncode != 0:
             tail = (result.stderr or result.stdout).strip()[-800:]
-            raise TranscriptionError(f"{what} failed (code {result.returncode}): {tail}")
+            raise TranscriptionError(Err.STEP_FAILED_CODE.format(what=what, code=result.returncode, tail=tail))
 
 
-def parse_whisper_json(data: dict, language: str) -> Transcript:
+def parse_whisper_json(data: dict[str, Any], language: str) -> Transcript:
     """Converts whisper-cli's JSON (`-oj`) into a Transcript.
 
     Format: {"transcription": [{"timestamps": {...}, "offsets": {"from": ms, "to": ms}, "text": "..."}], ...}

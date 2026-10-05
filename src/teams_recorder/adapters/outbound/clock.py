@@ -1,3 +1,6 @@
+"""Wall-clock implementation of the Clock port (second precision: timestamps become file names)."""
+from __future__ import annotations
+
 from datetime import datetime
 
 

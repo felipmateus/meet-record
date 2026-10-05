@@ -13,6 +13,7 @@ source .venv/bin/activate              # venv lives in the repo (ignored by git)
 pytest                                 # fast suite, no coverage (~10 s warm)
 pytest --cov=teams_recorder --cov-report=term-missing   # coverage is opt-in (target 70%)
 pytest tests/unit/test_daemon.py -k hysteresis           # single test
+mypy                                   # type check (config in pyproject.toml); keep it clean
 TREC_REAL_WHISPER=1 pytest -m slow tests/integration/test_transcriber_whispercpp.py   # real whisper (loads the model)
 TREC_REAL_CLAUDE=1 pytest -m slow tests/integration/test_llm_claude_real.py           # real API call (spends credit)
 TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real.py   # real Claude Code headless call
@@ -60,6 +61,12 @@ Ports and their adapters (`application/ports.py`):
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 
 Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`) that wait for a readiness file instead of assuming startup time.
+
+Strings and identifiers live in two modules, never inline:
+- `src/teams_recorder/messages.py` — every user-facing text: CLI output and help (`Cli`), notifications (`Notify`), exception messages (`Err`), log templates (`Log`, printf-style). Tests assert on these constants, so changing a wording is a one-line change.
+- `src/teams_recorder/constants.py` — enums (`LlmProvider`, `MicBackend`, `Effort`), environment variables (`Env`), external binaries (`Bin`), file/folder names (`Files`), launchd labels, LLM/audio/detector/process defaults. Meeting file names stay in `domain/status.py` (they are the domain's state).
+Add to these modules instead of writing a new literal. Prefer `StrEnum` over free strings for closed sets.
+This is enforced: `tests/unit/test_no_hardcoded_strings.py` fails on any prose-like string literal (or f-string with literal text) outside `messages.py`, `constants.py` and `domain/status.py`. Docstrings are exempt; a literal that genuinely belongs inline (an external tool's flag, a protocol keyword) needs `# literal-ok: <reason>` on its line.
 
 Key invariants:
 - `CaptureHandle` is a concrete dataclass (pid + path), not a Protocol, because `trec stop` in another process must stop recorders started by `trec start`.

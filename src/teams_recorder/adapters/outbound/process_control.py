@@ -8,8 +8,11 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+from typing import IO
 
+from teams_recorder.constants import Proc
 from teams_recorder.domain import CaptureError
+from teams_recorder.messages import Err, Log
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +20,9 @@ log = logging.getLogger(__name__)
 # the first run of teams-tap by a freshly started daemon, 4 times in 10 s, and then went
 # away. EAGAIN/ETXTBSY belong to the same family. Worth retrying before giving up.
 TRANSIENT_ERRNOS = {errno.EDEADLK, errno.EAGAIN, errno.ETXTBSY}
-SPAWN_RETRIES = 12
-SPAWN_RETRY_DELAY = 0.5
+# Module attributes (not read from Proc at call time) so tests can monkeypatch them.
+SPAWN_RETRIES = Proc.SPAWN_RETRIES
+SPAWN_RETRY_DELAY = Proc.SPAWN_RETRY_DELAY
 
 
 def is_running(pid: int) -> bool:
@@ -31,28 +35,28 @@ def is_running(pid: int) -> bool:
     return True
 
 
-def spawn(command: list[str], log_path: Path | None, startup_grace: float) -> subprocess.Popen:
+def spawn(command: list[str], log_path: Path | None, startup_grace: float) -> subprocess.Popen[bytes]:
     """Starts the command and fails early if it dies within the grace period."""
     if log_path:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr = open(log_path, "ab") if log_path else subprocess.DEVNULL  # noqa: SIM115
+    stderr: IO[bytes] | int = open(log_path, "ab") if log_path else subprocess.DEVNULL  # noqa: SIM115
     try:
         proc = _popen_with_retry(command, stderr)
     except OSError as exc:
-        raise CaptureError(f"could not execute {command[0]}: {exc}") from exc
+        raise CaptureError(Err.EXEC_FAILED.format(command=command[0], error=exc)) from exc
     finally:
-        if log_path:
+        if not isinstance(stderr, int):
             stderr.close()  # the child has already inherited the descriptor
     deadline = time.monotonic() + startup_grace
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             tail = _tail(log_path) if log_path else ""
-            raise CaptureError(f"{Path(command[0]).name} exited right after starting (code {proc.returncode}). {tail}".strip())
+            raise CaptureError(Err.EXITED_EARLY.format(name=Path(command[0]).name, code=proc.returncode, tail=tail).strip())
         time.sleep(0.05)
     return proc
 
 
-def _popen_with_retry(command: list[str], stderr) -> subprocess.Popen:
+def _popen_with_retry(command: list[str], stderr: IO[bytes] | int) -> subprocess.Popen[bytes]:
     last: OSError | None = None
     for attempt in range(1, SPAWN_RETRIES + 1):
         try:
@@ -61,23 +65,23 @@ def _popen_with_retry(command: list[str], stderr) -> subprocess.Popen:
             if exc.errno not in TRANSIENT_ERRNOS:
                 raise
             last = exc
-            log.warning("exec of %s failed (%s); attempt %d/%d", Path(command[0]).name, exc.strerror, attempt, SPAWN_RETRIES)
+            log.warning(Log.EXEC_RETRY, Path(command[0]).name, exc.strerror, attempt, SPAWN_RETRIES)
             time.sleep(SPAWN_RETRY_DELAY)
     assert last is not None
     raise last
 
 
-def warmup(binary: Path, args: list[str], timeout: float = 15.0) -> bool:
+def warmup(binary: Path, args: list[str], timeout: float = Proc.WARMUP_TIMEOUT) -> bool:
     """Runs the binary once (in a harmless mode) to trigger any system evaluation early."""
     try:
         subprocess.run([str(binary), *args], capture_output=True, timeout=timeout, check=False)
         return True
     except (OSError, subprocess.TimeoutExpired) as exc:
-        log.warning("warm-up of %s failed: %s", binary.name, exc)
+        log.warning(Log.WARMUP_BINARY_FAILED, binary.name, exc)
         return False
 
 
-def terminate(pid: int, sig: signal.Signals, timeout: float, known: dict[int, subprocess.Popen]) -> None:
+def terminate(pid: int, sig: signal.Signals, timeout: float, known: dict[int, subprocess.Popen[bytes]]) -> None:
     """Sends `sig` and waits for the process to exit; escalates to SIGKILL on timeout."""
     proc = known.pop(pid, None)
     if proc is not None:
@@ -86,7 +90,7 @@ def terminate(pid: int, sig: signal.Signals, timeout: float, known: dict[int, su
             try:
                 proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                log.warning("process %s did not exit within %.0fs; SIGKILL", pid, timeout)
+                log.warning(Log.SIGKILL, pid, timeout)
                 proc.kill()
                 proc.wait(timeout=5)
         return
@@ -101,7 +105,7 @@ def terminate(pid: int, sig: signal.Signals, timeout: float, known: dict[int, su
         if not is_running(pid):
             return
         time.sleep(0.1)
-    log.warning("process %s did not exit within %.0fs; SIGKILL", pid, timeout)
+    log.warning(Log.SIGKILL, pid, timeout)
     try:
         os.kill(pid, signal.SIGKILL)
     except ProcessLookupError:

@@ -13,23 +13,25 @@ from pathlib import Path
 
 from teams_recorder.adapters.outbound import process_control
 from teams_recorder.application.ports import CaptureHandle
+from teams_recorder.constants import Audio, Files, Proc
 from teams_recorder.domain import CaptureError
+from teams_recorder.messages import Err
 
 
 class CoreAudioMicCapture:
-    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = 10.0, startup_grace: float = 1.5) -> None:
+    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = Proc.STOP_TIMEOUT, startup_grace: float = Proc.MIC_STARTUP_GRACE) -> None:
         self.binary = Path(binary)
         self.log_path = log_path
         self.stop_timeout = stop_timeout
         self.startup_grace = startup_grace
-        self._procs: dict[int, subprocess.Popen] = {}
+        self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
     def command(self, device: str, out: Path) -> list[str]:
-        return [str(self.binary), "--mic", device or "default", "--out", str(out)]
+        return [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out)]
 
     def start(self, device: str, out: Path) -> CaptureHandle:
         if not self.binary.exists():
-            raise CaptureError(f"teams-tap binary not found at {self.binary}. Build it with: scripts/build-native.sh")
+            raise CaptureError(Err.BINARY_MISSING.format(path=self.binary, script=Files.BUILD_NATIVE_SCRIPT))
         proc = process_control.spawn(self.command(device, out), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)
