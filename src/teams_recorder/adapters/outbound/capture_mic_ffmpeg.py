@@ -35,7 +35,8 @@ class FfmpegMicCapture:
             str(out),
         ]
 
-    def start(self, device: str, out: Path) -> CaptureHandle:
+    def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:
+        # ffmpeg cannot align to a shared epoch; the parameter is accepted for the port and ignored.
         proc = process_control.spawn(self.command(device, out), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)

@@ -114,7 +114,7 @@ Every port has a fake adapter in `tests/fakes/` so tests run without hardware or
 
 ### 5.4 Inbound adapters (`adapters/inbound/`)
 
-- `daemon.py`: detection loop every 3 s; starts recording after 2 consecutive positive readings and stops after 5 negative ones (15 s), avoiding false positives from flapping.
+- `daemon.py`: detection loop every 1 s (was 3 s); starts recording on the first positive reading (was 2) and stops after 5 negative ones (~5 s, was ~15 s), avoiding false positives from flapping.
 - `cli.py` (Typer): `trec start|stop|cancel|transcribe|analyze|plan|purge|status|doctor`.
 - Scheduler: launchd entry that calls `trec plan` at the configured time.
 
@@ -301,4 +301,11 @@ teams-recorder/
 ### Project moved out of ~/Documents (2026-10-05)
 
 - With `data/` back inside the project and the project in `~/Documents`, TCC stopped being intermittent: on a test call at 17:51 the daemon failed to execute `teams-tap` 48 times in a row and the call was not recorded; tracebacks even lacked source lines because Python could not read its own files. User decision: keep the data inside the project and move the project to `~/Projetos/Pessoal/teams-recorder` (outside TCC-protected folders, not in iCloud). The virtualenv was recreated, `teams-tap` rebuilt and both LaunchAgents reinstalled with the new paths. The retry helpers stay as defense in depth.
+
+### Recording gaps and latency (2026-10-05)
+
+- Listening to the first real calls showed speech that seemed cut. Measured on the 18:54 call: the recorders ran ~56 s but the tracks held 37.5 s (Teams) and 40.2 s (microphone) with no error logged — Core Audio paused buffer delivery and the writers glued what came after onto what came before, also misaligning the two tracks. Plus a 6–10 s start lag (3 s polling × 2 confirmations + recorder start-up) and a ~15 s stop lag.
+- `teams-tap` now writes through `TimelineWriter`: every buffer is placed at its host-time position relative to a shared `--epoch` (the meeting start, passed by `StartRecording` to both recorders through the capture ports); missing time is padded with silence and logged; `stop()` pads the tail up to the stop instant. Verified with a forced 4 s `SIGSTOP` on the microphone recorder: `gap of 2.5 s at 5.9 s`, file length equal to wall time.
+- Detector defaults: `poll_seconds = 1`, `start_after_positive_polls = 1`, `stop_after_negative_polls = 5`. Short false starts are absorbed by the 20-word analysis cut.
+- Still open: the root cause of the delivery pauses, now visible in `capture.log`; per-track transcription with speaker labels and merging short whisper segments (proposed, not implemented).
 

@@ -37,6 +37,9 @@ Lets the user record a Teams call under their own control, without relying on th
 - **Trigger:** the user runs the command.
 - **Behavior:** shuts down the recorders (best effort), deletes the meeting folder and the pointer; notifies "Recording cancelled". No files are kept.
 
+## Aligned tracks
+Both recorders receive the meeting start as a shared epoch (`--epoch`). Each audio buffer is written at its Core Audio host-time position; missing time (recorder start-up, or delivery pausing during the call) is filled with silence and logged as `gap of X s at Y s`, so the Teams and microphone tracks keep the real call duration and stay in sync.
+
 ## Integrations
 | Integration | Use | Notes |
 |---|---|---|

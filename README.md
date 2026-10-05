@@ -66,9 +66,11 @@ trec agent status | restart | uninstall
 trec daemon --once                                   # diagnostic: does the detector see Teams in a call?
 ```
 
-The daemon polls `pmset -g assertions` every 3 s. Teams, while in a call, keeps the Mac from sleeping, and that assertion is the signal: recording starts after 2 consecutive positive readings (~6 s) and stops after 5 negative ones (~15 s), avoiding false positives from flickering. When the call ends, the pipeline runs in the background (mixing, transcription, analysis) while the detector keeps watching for the next one. If the daemon crashes in the middle of a recording, it finalizes the orphaned recording on startup and resumes pending meetings. Log in `data/log/teams-recorder.log`; manual `trec start/stop` keeps working, and the daemon adopts a manual recording already in progress.
+The daemon polls `pmset -g assertions` every second. Teams, while in a call, keeps the Mac from sleeping, and that assertion is the signal: recording starts on the first confirmation (~1-2 s after the call starts) and stops after 5 readings without a call (~5 s after hanging up). If the daemon crashes in the middle of a recording, it finalizes the orphaned recording on startup and resumes pending meetings. Log in `data/log/teams-recorder.log`; manual `trec start/stop` keeps working, and the daemon adopts a manual recording already in progress.
 
 ### Microphone and Teams track
+
+Both tracks are aligned to the meeting start: `teams-tap` places every audio buffer at its Core Audio timestamp, so time without audio (start-up, or the system pausing delivery mid-call) is written as silence instead of being dropped. Each padded gap is logged in `data/log/capture.log` as `gap of X s at Y s`.
 
 `teams-tap` handles both sides: `--pid` captures Teams (the main process and the helpers that actually emit audio) and `--mic default` records the microphone through AVAudioEngine, following the system default input and surviving the reconfiguration Teams performs when it opens the microphone. `teams-tap --list` shows who the current audio clients are. The `ffmpeg` microphone backend remains available in `config.toml` (`audio.mic_backend`).
 

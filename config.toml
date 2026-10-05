@@ -19,8 +19,11 @@ teams_process_name = "MSTeams"
 bitrate_kbps = 64
 
 [detector]
-poll_seconds = 3
-start_after_positive_polls = 2
+# Reads `pmset -g assertions` every poll_seconds. Recording starts after start_after_positive_polls
+# confirmations (~1-2 s after the call starts) and stops after stop_after_negative_polls readings
+# without a call (~5 s after hanging up).
+poll_seconds = 1
+start_after_positive_polls = 1
 stop_after_negative_polls = 5
 
 [transcription]

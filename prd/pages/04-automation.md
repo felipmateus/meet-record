@@ -7,8 +7,8 @@
 This is the heart of the product: a background process that notices when a Teams call starts and ends, records it, and at the end chains transcription and analysis, without the user touching the keyboard. The LaunchAgent ensures it starts at login and comes back if it crashes.
 
 ## Detection
-- **Signal:** every 3 s it reads `pmset -g assertions`. While in a call, Teams creates assertions that keep the Mac from sleeping (`PreventUserIdleDisplaySleep`, `PreventUserIdleSystemSleep`, `NoIdleSleepAssertion`, `NoDisplaySleepAssertion`). Lines for the `MSTeams` process carrying these assertions mean "in a call"; the Teams PID comes from the line itself.
-- **Hysteresis:** recording starts after 2 consecutive positive readings (~6 s); it stops after 5 consecutive negative ones (~15 s). Failed readings are neutral.
+- **Signal:** every second it reads `pmset -g assertions`. While in a call, Teams creates assertions that keep the Mac from sleeping (`PreventUserIdleDisplaySleep`, `PreventUserIdleSystemSleep`, `NoIdleSleepAssertion`, `NoDisplaySleepAssertion`). Lines for the `MSTeams` process carrying these assertions mean "in a call"; the Teams PID comes from the line itself.
+- **Hysteresis:** recording starts on the first positive reading (~1-2 s after the call starts); it stops after 5 consecutive negative ones (~5 s after hanging up). Failed readings are neutral.
 - **Configuration:** `[detector] poll_seconds`, `start_after_positive_polls`, `stop_after_negative_polls`; `[audio] teams_process_name`.
 
 ## Interactions

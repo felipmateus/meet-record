@@ -26,13 +26,14 @@ class CoreAudioMicCapture:
         self.startup_grace = startup_grace
         self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
-    def command(self, device: str, out: Path) -> list[str]:
-        return [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out)]
+    def command(self, device: str, out: Path, epoch: float | None = None) -> list[str]:
+        cmd = [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out)]
+        return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
-    def start(self, device: str, out: Path) -> CaptureHandle:
+    def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:
         if not self.binary.exists():
             raise CaptureError(Err.BINARY_MISSING.format(path=self.binary, script=Files.BUILD_NATIVE_SCRIPT))
-        proc = process_control.spawn(self.command(device, out), self.log_path, self.startup_grace)
+        proc = process_control.spawn(self.command(device, out, epoch), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)
 

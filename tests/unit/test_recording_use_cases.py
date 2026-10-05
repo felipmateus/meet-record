@@ -22,6 +22,8 @@ def test_start_recording_creates_meeting_and_starts_both_captures(repo, notifier
     assert active.meeting.pid == 4242 and active.meeting.title == "Daily"
     assert proc.handles[0].out.name == TAP_TRACK
     assert mic.handles[0].out.name == MIC_TRACK
+    # both recorders get the same epoch: the meeting start, so the tracks line up
+    assert proc.epochs == mic.epochs == [active.meeting.started_at.timestamp()]
     assert notifier.messages[0][0] == "Recording started"
 
 
