@@ -48,9 +48,22 @@ def test_status_shows_meetings_and_next_step(tmp_path: Path, monkeypatch):
 
 def test_future_commands_report_phase(tmp_path: Path, monkeypatch):
     _project(tmp_path, monkeypatch)
-    result = runner.invoke(app, ["analyze"])
+    result = runner.invoke(app, ["daemon"])
     assert result.exit_code == 2
-    assert "fase 4" in result.output
+    assert "fase 5" in result.output
+
+
+def test_analyze_requires_api_key(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["analyze"])
+    assert result.exit_code == 1 and "ANTHROPIC_API_KEY" in result.output
+
+
+def test_analyze_nothing_pending(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = runner.invoke(app, ["analyze"])
+    assert result.exit_code == 0 and "Nenhuma reunião pendente de análise" in result.output
 
 
 def test_transcribe_nothing_pending(tmp_path: Path, monkeypatch):
