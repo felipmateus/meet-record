@@ -11,15 +11,16 @@ from teams_recorder.domain import CaptureError
 
 
 class CoreAudioTapCapture:
-    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = 10.0, startup_grace: float = 1.0) -> None:
+    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = 10.0, startup_grace: float = 1.0, wait_audio: float = 20.0) -> None:
         self.binary = Path(binary)
         self.log_path = log_path
         self.stop_timeout = stop_timeout
         self.startup_grace = startup_grace
+        self.wait_audio = wait_audio  # segundos que o teams-tap espera o processo virar cliente de áudio
         self._procs: dict[int, subprocess.Popen] = {}
 
     def command(self, pid: int, out: Path) -> list[str]:
-        return [str(self.binary), "--pid", str(pid), "--out", str(out)]
+        return [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
 
     def start(self, pid: int, out: Path) -> CaptureHandle:
         if not self.binary.exists():

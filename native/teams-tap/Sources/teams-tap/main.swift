@@ -30,6 +30,7 @@ struct Arguments {
     var pid: pid_t = 0
     var out: URL?
     var verbose = false
+    var waitAudioSeconds: Double = 20   // tempo para o processo alvo virar cliente de áudio
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -44,8 +45,11 @@ struct Arguments {
                 args.out = URL(fileURLWithPath: v)
             case "--verbose", "-v":
                 args.verbose = true
+            case "--wait-audio":
+                guard let v = it.next(), let secs = Double(v) else { fail("--wait-audio exige segundos") }
+                args.waitAudioSeconds = secs
             case "--help", "-h":
-                print("Uso: teams-tap --pid <pid> --out <arquivo.wav> [--verbose]")
+                print("Uso: teams-tap --pid <pid> --out <arquivo.wav> [--wait-audio <s>] [--verbose]")
                 exit(0)
             default:
                 fail("argumento desconhecido: \(a)")
@@ -63,6 +67,7 @@ final class ProcessTapRecorder {
     let pid: pid_t
     let url: URL
     let verbose: Bool
+    let waitAudioSeconds: Double
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -73,14 +78,15 @@ final class ProcessTapRecorder {
     private(set) var framesWritten: Int64 = 0
     private var stopped = false
 
-    init(pid: pid_t, url: URL, verbose: Bool) {
+    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double) {
         self.pid = pid
         self.url = url
         self.verbose = verbose
+        self.waitAudioSeconds = waitAudioSeconds
     }
 
     func start() {
-        let processObject = translatePID(pid)
+        let processObject = waitForAudioClient()
         if verbose { log("processo \(pid) → AudioObjectID \(processObject)") }
 
         let tapDescription = CATapDescription(stereoMixdownOfProcesses: [processObject])
@@ -159,7 +165,24 @@ final class ProcessTapRecorder {
 
     // MARK: Core Audio helpers
 
-    private func translatePID(_ pid: pid_t) -> AudioObjectID {
+    /// O Teams pode levar alguns segundos entre o início da chamada (asserção de energia)
+    /// e a inicialização do áudio; até lá o PID não tem objeto de áudio. Tenta de novo.
+    private func waitForAudioClient() -> AudioObjectID {
+        let deadline = Date().addingTimeInterval(waitAudioSeconds)
+        var attempt = 0
+        while true {
+            attempt += 1
+            if kill(pid, 0) != 0 { fail("processo \(pid) não existe") }
+            if let object = translatePID(pid) { 
+                if attempt > 1 { log("teams-tap: processo \(pid) virou cliente de áudio após \(attempt) tentativas") }
+                return object
+            }
+            if Date() >= deadline { fail("processo \(pid) não emite áudio (sem objeto de áudio após \(Int(waitAudioSeconds)) s)") }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    private func translatePID(_ pid: pid_t) -> AudioObjectID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -175,8 +198,7 @@ final class ProcessTapRecorder {
             )
         }
         check(status, "traduzir PID \(pid) para objeto de áudio")
-        guard object != kAudioObjectUnknown else { fail("processo \(pid) não existe ou não emite áudio") }
-        return object
+        return object == kAudioObjectUnknown ? nil : object
     }
 
     private func defaultOutputDeviceUID() -> String {
@@ -216,7 +238,7 @@ final class ProcessTapRecorder {
 
 let args = Arguments.parse(CommandLine.arguments)
 
-let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose)
+let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds)
 recorder.start()
 
 // Encerramento limpo por sinal.
