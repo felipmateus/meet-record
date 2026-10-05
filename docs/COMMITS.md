@@ -24,3 +24,5 @@ deixar a árvore importável; os testes podem só passar ao fim da onda.
 | 2 | 2 | teams-tap (Swift), captura e mixagem, CLI start/stop/cancel, testes de adaptadores |
 | 3 | 3 | Config de transcrição, transcritor whisper.cpp e download do modelo, CLI transcribe, testes, docs |
 | 4 | 4 | Prompts, analisador Claude com saída estruturada, CLI analyze e pipeline no container, testes, docs |
+| 4b | 4 | Provedor alternativo via Claude Code headless, seleção por config, testes, docs |
+| 5 | 5 | Detector pmset, daemon com histerese e recuperação, LaunchAgent, CLI daemon/agent, espera de áudio no teams-tap, testes, docs |

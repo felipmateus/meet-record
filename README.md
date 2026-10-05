@@ -10,7 +10,8 @@ Documentação de requisitos e arquitetura: `docs/REQUISITOS-E-ARQUITETURA.md`.
 - Fase 2 concluída: captura do áudio do Teams via Core Audio Process Tap (binário Swift `teams-tap`), captura do microfone e mixagem com ffmpeg, comandos `trec start`, `trec stop` e `trec cancel`.
 - Fase 3 concluída: transcrição local em português com whisper.cpp (`trec transcribe`), modelo `large-v3-turbo-q5_0`.
 - Fase 4 concluída: análise da transcrição com a Claude API (`trec analyze`): resumo, decisões, ações, prazos e perguntas em aberto em `analysis.json`.
-- Próximas fases: detector automático e launchd (5), planejador diário (6), instalador (7).
+- Fase 5 concluída: detector de chamada, daemon e LaunchAgent (`trec agent install`). Gravação, transcrição e análise acontecem sozinhas.
+- Próximas fases: planejador diário (6), instalador (7).
 
 ## Gravação manual (fase 2)
 
@@ -52,6 +53,17 @@ Em `config.toml`, `llm.provider` escolhe o transporte:
 | `claude-code` | Claude Code instalado, em modo headless (`claude -p`) | Assinatura do Claude Code | Exige sessão logada no Mac; sem fallback de recusa; modelo por apelido em `llm.cli_model` |
 
 A variável de ambiente `TREC_LLM_PROVIDER` sobrescreve o arquivo, útil para testar: `TREC_LLM_PROVIDER=claude-code trec analyze`.
+
+## Automático (fase 5)
+
+```bash
+trec agent install                                   # sobe no login, reinicia se cair
+trec agent install --env TREC_LLM_PROVIDER=claude-code   # idem, analisando pela assinatura
+trec agent status | restart | uninstall
+trec daemon --once                                   # diagnóstico: o detector vê o Teams em chamada?
+```
+
+O daemon consulta `pmset -g assertions` a cada 3 s. O Teams, em chamada, impede o Mac de dormir, e essa asserção é o sinal: a gravação começa após 2 leituras positivas seguidas (~6 s) e termina após 5 negativas (~15 s), evitando falsos positivos em oscilações. Ao fim da chamada o pipeline roda em segundo plano (mixagem, transcrição, análise) enquanto o detector segue atento à próxima. Se o daemon cair no meio de uma gravação, ele finaliza a gravação órfã ao subir e retoma reuniões pendentes. Log em `data/log/teams-recorder.log`; `trec start/stop` manual continua funcionando e o daemon adota uma gravação manual em andamento.
 
 Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmpeg) e **Gravação de Tela e Áudio do Sistema** (para o teams-tap), em Ajustes do Sistema > Privacidade e Segurança. Sem a segunda, a trilha do Teams sai em silêncio.
 

@@ -265,7 +265,7 @@ teams-recorder/
 | 2 | `teams-tap` em Swift + `CoreAudioTapCapture` + `FfmpegMicCapture` + `FfmpegMixer`; `trec start/stop` manual | Chamada de teste gera `audio.m4a` audível com os dois lados | Concluída em 2026-10-04. Pendente do usuário: conceder "Gravação de Áudio do Sistema" ao `teams-tap` |
 | 3 | `WhisperCppTranscriber`; `trec transcribe` | Transcrição em português do áudio da fase 2 com erros aceitáveis | Concluída em 2026-10-04. Fala sintetizada (voz Luciana) transcrita sem erros com `large-v3-turbo-q5_0` |
 | 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | `analysis.json` válido com ações reais da reunião de teste | Concluída em 2026-10-05 |
-| 5 | `PmsetCallDetector` + daemon + launchd + notificações | Reunião real gravada sem toque no teclado | |
+| 5 | `PmsetCallDetector` + daemon + launchd + notificações | Reunião real gravada sem toque no teclado | Concluída em 2026-10-05 com chamada simulada (processo que segura asserção de energia e é cliente de áudio) sob o launchd. Validação com Teams real pendente da próxima reunião |
 | 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Plano Markdown gerado às 18h com ações acumuladas | |
 | 7 | `install.sh`, `trec doctor/status`, README | Instalação do zero em outro usuário do Mac funciona | |
 
