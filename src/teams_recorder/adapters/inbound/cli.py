@@ -1,13 +1,17 @@
 """CLI `trec`. Comandos de fases futuras existem, mas informam que ainda não estão disponíveis."""
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import os
 import shutil
+import signal
 from pathlib import Path
 
 import typer
 
 from teams_recorder import __version__
+from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.config import ENV_PROJECT_DIR, load_settings
 from teams_recorder.container import build_container, teams_tap_binary
@@ -21,9 +25,11 @@ app = typer.Typer(
 )
 
 PHASES = {
-    "daemon": 5,
     "plan": 6,
 }
+
+agent_app = typer.Typer(help="Instala, remove e inspeciona o LaunchAgent que mantém o daemon rodando.", no_args_is_help=True)
+app.add_typer(agent_app, name="agent")
 
 
 def _settings():
@@ -227,6 +233,87 @@ def analyze(
         typer.echo(f"  Arquivo: {c.repo.path(mid, 'analysis.json')}")
     if failures:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def daemon(
+    once: bool = typer.Option(False, "--once", help="Executa uma única iteração de detecção e sai (diagnóstico)."),
+) -> None:
+    """Observa o Teams e grava, transcreve e analisa as reuniões automaticamente. Usado pelo LaunchAgent."""
+    from teams_recorder.adapters.inbound.daemon import Daemon
+
+    settings = _settings()
+    _setup_logging(settings.daemon_log)
+    c = build_container(settings)
+    d = Daemon(c, poll_seconds=settings.poll_seconds, start_after=settings.start_after_positive_polls, stop_after=settings.stop_after_negative_polls)
+    if once:
+        state = c.detector.poll()  # type: ignore[union-attr]
+        typer.echo(f"detector ({settings.teams_process_name}): {state.value}; pid={c.detector.teams_pid()}")  # type: ignore[union-attr]
+        return
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: d.request_stop())
+    typer.echo(f"daemon observando {settings.teams_process_name}; log em {settings.daemon_log}")
+    d.run()
+
+
+def _setup_logging(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = logging.handlers.TimedRotatingFileHandler(path, when="midnight", backupCount=30, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    root.addHandler(logging.StreamHandler())
+
+
+def _agent(extra_env: dict[str, str] | None = None) -> LaunchAgent:
+    s = _settings()
+    return LaunchAgent(s.project_dir, s.data_dir, extra_env=extra_env)
+
+
+@agent_app.command("install")
+def agent_install(
+    env: list[str] = typer.Option([], "--env", help="Variável extra para o daemon, no formato CHAVE=VALOR (ex.: TREC_LLM_PROVIDER=claude-code). Repetível."),
+) -> None:
+    """Registra o daemon no launchd: sobe no login e reinicia se cair."""
+    extra: dict[str, str] = {}
+    for item in env:
+        if "=" not in item:
+            _fail(f"--env espera CHAVE=VALOR, recebi {item!r}")
+        k, v = item.split("=", 1)
+        extra[k.strip()] = v
+    try:
+        path = _agent(extra or None).install()
+    except RuntimeError as exc:
+        _fail(str(exc))
+    typer.echo(f"LaunchAgent instalado e iniciado: {path}")
+    typer.echo("Na primeira gravação o macOS vai pedir permissão de Microfone e de Gravação de Áudio do Sistema.")
+
+
+@agent_app.command("uninstall")
+def agent_uninstall() -> None:
+    """Para o daemon e remove o LaunchAgent."""
+    existed = _agent().uninstall()
+    typer.echo("LaunchAgent removido." if existed else "Nenhum LaunchAgent instalado.")
+
+
+@agent_app.command("restart")
+def agent_restart() -> None:
+    """Reinicia o daemon (por exemplo após mudar config.toml)."""
+    try:
+        _agent().restart()
+    except RuntimeError as exc:
+        _fail(str(exc))
+    typer.echo("daemon reiniciado.")
+
+
+@agent_app.command("status")
+def agent_status() -> None:
+    """Mostra se o daemon está carregado e rodando."""
+    info = _agent().status()
+    typer.echo(f"plist: {info['plist']} ({'existe' if info['plist_exists'] else 'ausente'})")
+    typer.echo(f"carregado: {'sim' if info['loaded'] else 'não'}" + (f"  pid={info['pid']}  estado={info['state']}" if info["loaded"] else ""))
+    raise typer.Exit(code=0 if info["loaded"] else 1)
 
 
 @app.command()

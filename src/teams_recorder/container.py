@@ -10,6 +10,7 @@ from pathlib import Path
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
+from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.llm_claude_cli import ClaudeCliAnalyzer
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
@@ -92,6 +93,7 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
         analyzer=build_analyzer(settings),
+        detector=PmsetCallDetector(settings.teams_process_name),
     )
 
 
