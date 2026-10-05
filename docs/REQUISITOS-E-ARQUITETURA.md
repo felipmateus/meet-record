@@ -263,7 +263,7 @@ teams-recorder/
 |------|---------|--------------------|--------|
 | 1 | Esqueleto do pacote, domínio, portas, fakes, CLI vazio, testes de domínio | `pytest` verde; `trec --help` funciona | Concluída em 2026-10-04 (casos de uso e repositório em arquivos entraram nesta fase) |
 | 2 | `teams-tap` em Swift + `CoreAudioTapCapture` + `FfmpegMicCapture` + `FfmpegMixer`; `trec start/stop` manual | Chamada de teste gera `audio.m4a` audível com os dois lados | Concluída em 2026-10-04. Pendente do usuário: conceder "Gravação de Áudio do Sistema" ao `teams-tap` |
-| 3 | `WhisperCppTranscriber`; `trec transcribe` | Transcrição em português do áudio da fase 2 com erros aceitáveis | |
+| 3 | `WhisperCppTranscriber`; `trec transcribe` | Transcrição em português do áudio da fase 2 com erros aceitáveis | Concluída em 2026-10-04. Fala sintetizada (voz Luciana) transcrita sem erros com `large-v3-turbo-q5_0` |
 | 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | `analysis.json` válido com ações reais da reunião de teste | |
 | 5 | `PmsetCallDetector` + daemon + launchd + notificações | Reunião real gravada sem toque no teclado | |
 | 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Plano Markdown gerado às 18h com ações acumuladas | |
@@ -275,3 +275,10 @@ teams-recorder/
 - O `teams-tap` embute um `Info.plist` (via linker) com `NSAudioCaptureUsageDescription`, para que o TCC identifique o utilitário ao pedir permissão.
 - Teste de ponta a ponta (tom de teste + microfone) gerou `audio.m4a` mono AAC 48 kHz. A trilha do Teams sai em silêncio enquanto a permissão de áudio do sistema não for concedida; a mixagem tolera trilhas vazias.
 - O ambiente mostra lentidão na primeira abertura de arquivos novos (antivírus corporativo); testes com subprocessos esperam sinal de prontidão em vez de assumir tempo de inicialização.
+
+### Notas da fase 3
+
+- Modelo padrão trocado de `large-v3-turbo` (1,6 GB) para `large-v3-turbo-q5_0` (574 MB, quantizado): o disco do Mac de destino estava com 3,8 GB livres. A qualidade em português se mostrou equivalente no teste; o nome do modelo é configurável em `config.toml`.
+- O whisper-cli lê WAV/FLAC/MP3/OGG; o adaptador converte o M4A para WAV 16 kHz mono com ffmpeg em pasta temporária antes de transcrever.
+- Saída via `-oj`: segmentos com `offsets` em milissegundos. Segmentos em branco são descartados.
+- `trec transcribe` sem argumento processa todas as reuniões em estado RECORDED; falhas viram `error.txt` e não interrompem as demais (RNF05).

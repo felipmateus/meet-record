@@ -8,7 +8,8 @@ Documentação de requisitos e arquitetura: `docs/REQUISITOS-E-ARQUITETURA.md`.
 
 - Fase 1 concluída: domínio, portas, casos de uso, repositório em arquivos, CLI (`trec status`, `trec doctor`) e testes.
 - Fase 2 concluída: captura do áudio do Teams via Core Audio Process Tap (binário Swift `teams-tap`), captura do microfone e mixagem com ffmpeg, comandos `trec start`, `trec stop` e `trec cancel`.
-- Próximas fases: transcrição (3), análise com Claude (4), detector automático e launchd (5), planejador diário (6), instalador (7).
+- Fase 3 concluída: transcrição local em português com whisper.cpp (`trec transcribe`), modelo `large-v3-turbo-q5_0`.
+- Próximas fases: análise com Claude (4), detector automático e launchd (5), planejador diário (6), instalador (7).
 
 ## Gravação manual (fase 2)
 
@@ -18,6 +19,17 @@ trec start --title "Daily"       # Teams precisa estar aberto; ou use --pid
 trec status                      # mostra a gravação em andamento
 trec stop                        # mixa e gera data/recordings/<id>/audio.m4a
 ```
+
+## Transcrição (fase 3)
+
+```bash
+brew install whisper-cpp
+scripts/download-model.sh            # ggml-large-v3-turbo-q5_0.bin (574 MB) em data/models/
+trec transcribe                      # todas as reuniões gravadas e ainda não transcritas
+trec transcribe 2026-10-06_14-00-00  # uma reunião específica
+```
+
+Gera `transcript.txt` (com marcação de tempo) e `transcript.json` na pasta da reunião. Tudo roda localmente; o áudio não sai do Mac. Em um MacBook Air M1, 15 s de fala levam cerca de 30 s incluindo a carga do modelo; reuniões longas ficam próximas de 1:4 (uma hora em 15 min).
 
 Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmpeg) e **Gravação de Tela e Áudio do Sistema** (para o teams-tap), em Ajustes do Sistema > Privacidade e Segurança. Sem a segunda, a trilha do Teams sai em silêncio.
 
