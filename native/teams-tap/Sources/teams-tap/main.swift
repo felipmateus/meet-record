@@ -33,6 +33,7 @@ struct Arguments {
     var waitAudioSeconds: Double = 20   // tempo para o processo alvo virar cliente de áudio
     var list = false                    // só lista os processos clientes de áudio e sai
     var includeDescendants = true       // inclui processos filhos do alvo (Teams toca áudio por um helper)
+    var mic: String?                    // modo microfone: "default" (segue a entrada padrão) ou nome do dispositivo
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -54,8 +55,12 @@ struct Arguments {
                 args.list = true
             case "--no-descendants":
                 args.includeDescendants = false
+            case "--mic":
+                guard let v = it.next() else { fail("--mic exige 'default' ou o nome do dispositivo") }
+                args.mic = v
             case "--help", "-h":
                 print("Uso: teams-tap --pid <pid> --out <arquivo.wav> [--wait-audio <s>] [--no-descendants] [--verbose]")
+                print("     teams-tap --mic <default|nome> --out <arquivo.wav> [--verbose]   grava o microfone (48 kHz mono), sobrevivendo a mudanças de formato/dispositivo")
                 print("     teams-tap --list        lista os processos que são clientes de áudio (pid, pai, bundle, emitindo?)")
                 exit(0)
             default:
@@ -63,6 +68,10 @@ struct Arguments {
             }
         }
         if args.list { return args }
+        if args.mic != nil {
+            guard args.out != nil else { fail("--out é obrigatório") }
+            return args
+        }
         guard args.pid > 0 else { fail("--pid é obrigatório") }
         guard args.out != nil else { fail("--out é obrigatório") }
         return args
@@ -293,6 +302,147 @@ final class ProcessTapRecorder {
     }
 }
 
+// MARK: - Microfone (AVAudioEngine)
+
+/// Grava o microfone em WAV 48 kHz mono Float32. Usa AVAudioEngine porque ele notifica
+/// mudanças de configuração (o Teams reconfigura o dispositivo de entrada ao abrir o
+/// microfone; captura via ffmpeg/avfoundation parava de receber quadros nesse momento) e
+/// porque segue a entrada padrão do sistema quando o usuário troca para um headset.
+final class MicRecorder {
+    let url: URL
+    let deviceName: String
+    let verbose: Bool
+    private let engine = AVAudioEngine()
+    private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+    private var file: AVAudioFile?
+    private var converter: AVAudioConverter?
+    private var observer: NSObjectProtocol?
+    private(set) var framesWritten: Int64 = 0
+    private var restarts = 0
+    private var stopped = false
+
+    init(url: URL, deviceName: String, verbose: Bool) {
+        self.url = url
+        self.deviceName = deviceName
+        self.verbose = verbose
+    }
+
+    func start() {
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48000.0, AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false,
+        ]
+        do {
+            file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        } catch {
+            fail("não consegui criar \(url.path): \(error)")
+        }
+        if deviceName != "default" {
+            selectInputDevice(named: deviceName)
+        }
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self, !self.stopped else { return }
+            self.restarts += 1
+            log("teams-tap: configuração de áudio mudou (\(self.restarts)); reiniciando captura do microfone")
+            self.engine.inputNode.removeTap(onBus: 0)
+            self.installTapAndRun(retrying: true)
+        }
+        installTapAndRun(retrying: false)
+        log("teams-tap: gravando microfone (\(deviceName)) em \(url.path)")
+    }
+
+    private func installTapAndRun(retrying: Bool) {
+        let input = engine.inputNode
+        let inFormat = input.inputFormat(forBus: 0)
+        guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
+            if retrying {
+                log("teams-tap: entrada sem formato válido; tentando de novo em 1 s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.installTapAndRun(retrying: true) }
+                return
+            }
+            fail("dispositivo de entrada sem formato válido (microfone indisponível ou sem permissão)")
+        }
+        if verbose { log("microfone: \(inFormat.sampleRate) Hz, \(inFormat.channelCount) canais") }
+        guard let conv = AVAudioConverter(from: inFormat, to: outFormat) else { fail("não consegui criar conversor de áudio") }
+        converter = conv
+        let outFormat = self.outFormat
+        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+            guard let self, let file = self.file, let converter = self.converter else { return }
+            let ratio = outFormat.sampleRate / inFormat.sampleRate
+            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
+            guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
+            var consumed = false
+            var error: NSError?
+            let status = converter.convert(to: out, error: &error) { _, outStatus in
+                if consumed { outStatus.pointee = .noDataNow; return nil }
+                consumed = true
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            guard status != .error, out.frameLength > 0 else { return }
+            do {
+                try file.write(from: out)
+                self.framesWritten += Int64(out.frameLength)
+            } catch {
+                log("teams-tap: erro ao escrever microfone: \(error)")
+            }
+        }
+        do {
+            engine.prepare()
+            try engine.start()
+        } catch {
+            if retrying {
+                log("teams-tap: falha ao reiniciar o motor de áudio (\(error)); tentando em 1 s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.installTapAndRun(retrying: true) }
+                return
+            }
+            fail("não consegui iniciar a captura do microfone: \(error)")
+        }
+    }
+
+    private func selectInputDevice(named name: String) {
+        guard let deviceID = inputDeviceID(named: name) else {
+            log("teams-tap: microfone '\(name)' não encontrado; usando a entrada padrão")
+            return
+        }
+        var id = deviceID
+        let status = AudioUnitSetProperty(engine.inputNode.audioUnit!, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status != noErr { log("teams-tap: não consegui selecionar '\(name)' (OSStatus \(status)); usando a entrada padrão") }
+    }
+
+    private func inputDeviceID(named name: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return nil }
+        var devices = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &devices) == noErr else { return nil }
+        for dev in devices {
+            var nameAddr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            var cfName: CFString = "" as CFString
+            var nameSize = UInt32(MemoryLayout<CFString>.size)
+            let ok = withUnsafeMutablePointer(to: &cfName) { AudioObjectGetPropertyData(dev, &nameAddr, 0, nil, &nameSize, $0) }
+            guard ok == noErr, (cfName as String) == name else { continue }
+            // tem canais de entrada?
+            var inAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreamConfiguration, mScope: kAudioDevicePropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+            var inSize: UInt32 = 0
+            if AudioObjectGetPropertyDataSize(dev, &inAddr, 0, nil, &inSize) == noErr, inSize > 0 {
+                return dev
+            }
+        }
+        return nil
+    }
+
+    func stop() {
+        guard !stopped else { return }
+        stopped = true
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        file = nil
+        log(String(format: "teams-tap: microfone encerrado, %.1f s gravados, %d reinício(s)", Double(framesWritten) / outFormat.sampleRate, restarts))
+    }
+}
+
 // MARK: - main
 
 let args = Arguments.parse(CommandLine.arguments)
@@ -302,8 +452,17 @@ if args.list {
     exit(0)
 }
 
-let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants)
-recorder.start()
+var stopAll: () -> Void = {}
+
+if let micName = args.mic {
+    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose)
+    mic.start()
+    stopAll = { mic.stop() }
+} else {
+    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants)
+    recorder.start()
+    stopAll = { recorder.stop() }
+}
 
 // Encerramento limpo por sinal.
 signal(SIGINT, SIG_IGN)
@@ -311,23 +470,25 @@ signal(SIGTERM, SIG_IGN)
 let signalSources: [DispatchSourceSignal] = [SIGINT, SIGTERM].map { sig in
     let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
     source.setEventHandler {
-        recorder.stop()
+        stopAll()
         exit(0)
     }
     source.resume()
     return source
 }
 
-// Encerra sozinho se o processo alvo morrer.
+// Encerra sozinho se o processo alvo morrer (só no modo tap).
 let watchdog = DispatchSource.makeTimerSource(queue: .main)
-watchdog.schedule(deadline: .now() + 1, repeating: 1)
-watchdog.setEventHandler {
-    if kill(args.pid, 0) != 0 {
-        log("teams-tap: processo \(args.pid) encerrou")
-        recorder.stop()
-        exit(0)
+if args.mic == nil {
+    watchdog.schedule(deadline: .now() + 1, repeating: 1)
+    watchdog.setEventHandler {
+        if kill(args.pid, 0) != 0 {
+            log("teams-tap: processo \(args.pid) encerrou")
+            stopAll()
+            exit(0)
+        }
     }
+    watchdog.resume()
 }
-watchdog.resume()
 
 dispatchMain()
