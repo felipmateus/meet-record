@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compila o binário teams-tap (Core Audio Process Tap) em modo release.
+# Builds the teams-tap binary (Core Audio Process Tap) in release mode.
 set -euo pipefail
 cd "$(dirname "$0")/../native/teams-tap"
 swift build -c release
-echo "binário: $(pwd)/.build/release/teams-tap"
+echo "binary: $(pwd)/.build/release/teams-tap"

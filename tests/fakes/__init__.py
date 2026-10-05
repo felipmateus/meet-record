@@ -1,4 +1,4 @@
-"""Um fake por porta. Todos em memória, sem hardware, sem rede."""
+"""One fake per port. All in memory, no hardware, no network."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -51,7 +51,7 @@ class FakeProcessCapture:
 
     def start(self, pid: int, out: Path) -> CaptureHandle:
         if self.fail_on_start:
-            raise RuntimeError("tap indisponível")
+            raise RuntimeError("tap unavailable")
         FakeProcessCapture._next_pid += 1
         h = CaptureHandle(pid=FakeProcessCapture._next_pid, out=out)
         self.handles.append(h)
@@ -91,7 +91,7 @@ class FakeTranscriber:
     def transcribe(self, audio: Path, language: str) -> Transcript:
         self.calls.append((audio, language))
         if self.fail:
-            raise RuntimeError("whisper explodiu")
+            raise RuntimeError("whisper blew up")
         return self.transcript
 
 
@@ -103,12 +103,12 @@ class FakeAnalyzer:
     def analyze(self, transcript: Transcript, meeting: Meeting) -> Analysis:
         self.calls.append((transcript, meeting))
         if self.fail:
-            raise RuntimeError("API fora do ar")
+            raise RuntimeError("API is down")
         return Analysis(
             meeting_id="",
-            summary=f"Resumo de {meeting.id}",
-            decisions=[Decision("Seguir com o plano A")],
-            my_actions=[Action("Enviar relatório", "eu", meeting.id, due=meeting.day + timedelta(days=2))],
+            summary=f"Summary of {meeting.id}",
+            decisions=[Decision("Go ahead with plan A")],
+            my_actions=[Action("Send the report", "me", meeting.id, due=meeting.day + timedelta(days=2))],
         )
 
 
@@ -118,7 +118,7 @@ class FakePlanner:
         overdue = [a.id for a in open_actions if a.is_overdue_on(day)]
         return DailyPlan(
             day=day,
-            markdown=f"# Plano {day}\n\n{len(analyses)} reuniões, {len(new)} ações novas.\n",
+            markdown=f"# Plan {day}\n\n{len(analyses)} meetings, {len(new)} new actions.\n",
             priorities=[a.description for a in new[:3]],
             new_actions=new,
             overdue_action_ids=overdue,
@@ -146,7 +146,7 @@ class _Rec:
 
 
 class InMemoryMeetingRepository:
-    """Simula o repositório em arquivos mantendo apenas o conjunto de nomes de arquivo."""
+    """Simulates the file repository by tracking only the set of file names."""
 
     def __init__(self) -> None:
         self._recs: dict[str, _Rec] = {}
@@ -160,13 +160,13 @@ class InMemoryMeetingRepository:
         except KeyError:
             raise MeetingNotFound(meeting_id) from None
 
-    # helper para testes montarem estado
+    # helper for tests to seed state
     def seed(self, meeting: Meeting, files: set[str] | None = None, transcript: Transcript | None = None, analysis: Analysis | None = None) -> None:
         self._recs[meeting.id] = _Rec(meeting, {META, *(files or set())}, transcript, analysis)
 
     def create(self, meeting: Meeting) -> None:
         if meeting.id in self._recs:
-            raise RepositoryError("já existe")
+            raise RepositoryError("already exists")
         self._recs[meeting.id] = _Rec(meeting, {META})
 
     def save_meta(self, meeting: Meeting) -> None:
@@ -201,7 +201,7 @@ class InMemoryMeetingRepository:
     def lock(self, meeting_id: str) -> Iterator[None]:
         rec = self._get(meeting_id)
         if LOCK in rec.files:
-            raise RepositoryError("em processamento")
+            raise RepositoryError("being processed")
         rec.files.add(LOCK)
         try:
             yield
@@ -227,7 +227,7 @@ class InMemoryMeetingRepository:
     def load_transcript(self, meeting_id: str) -> Transcript:
         t = self._get(meeting_id).transcript
         if t is None:
-            raise RepositoryError("sem transcrição")
+            raise RepositoryError("no transcript")
         return t
 
     def save_analysis(self, meeting_id: str, analysis: Analysis) -> None:
@@ -238,7 +238,7 @@ class InMemoryMeetingRepository:
     def load_analysis(self, meeting_id: str) -> Analysis:
         a = self._get(meeting_id).analysis
         if a is None:
-            raise RepositoryError("sem análise")
+            raise RepositoryError("no analysis")
         return a
 
     def mark_failed(self, meeting_id: str, message: str) -> None:

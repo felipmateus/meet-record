@@ -45,4 +45,4 @@ def test_analyze_sets_meeting_id_and_saves(repo, meeting):
 
     assert analysis.meeting_id == meeting.id
     assert analyzer.calls[0][1] is meeting
-    assert repo.load_analysis(meeting.id).summary == f"Resumo de {meeting.id}"
+    assert repo.load_analysis(meeting.id).summary == f"Summary of {meeting.id}"

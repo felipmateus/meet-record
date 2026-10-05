@@ -1,11 +1,11 @@
-"""Localiza o PID do Microsoft Teams. Será reaproveitado pelo detector de chamadas (fase 5)."""
+"""Locates the Microsoft Teams PID. Will be reused by the call detector (phase 5)."""
 from __future__ import annotations
 
 import subprocess
 
 
 def find_pid(process_name: str, runner=subprocess.run) -> int | None:
-    """Retorna o menor PID cujo nome de executável é exatamente `process_name`, ou None."""
+    """Return the lowest PID whose executable name is exactly `process_name`, or None."""
     try:
         result = runner(["pgrep", "-x", process_name], capture_output=True, text=True, check=False)
     except OSError:

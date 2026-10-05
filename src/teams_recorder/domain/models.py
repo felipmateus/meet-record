@@ -1,4 +1,4 @@
-"""Entidades e objetos de valor do domínio. Sem I/O, sem dependências externas."""
+"""Domain entities and value objects. No I/O, no external dependencies."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -129,7 +129,7 @@ class DailyPlan:
 
 
 def merge_open_actions(current: list[Action], plan: DailyPlan) -> list[Action]:
-    """Aplica um plano à lista de ações abertas: remove concluídas, marca vencidas, acrescenta novas."""
+    """Apply a plan to the open-actions list: drop completed, flag overdue, append new ones."""
     completed = set(plan.completed_action_ids)
     overdue = set(plan.overdue_action_ids)
     result: list[Action] = []

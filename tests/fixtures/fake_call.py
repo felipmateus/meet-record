@@ -1,7 +1,7 @@
-"""Simula uma chamada do Teams: segura uma asserção de energia (PreventUserIdleDisplaySleep)
-via IOKit até receber SIGINT/SIGTERM. Usado para testar o detector e o daemon sem o Teams.
+"""Simulates a Teams call: holds a power assertion (PreventUserIdleDisplaySleep)
+via IOKit until it receives SIGINT/SIGTERM. Used to test the detector and the daemon without Teams.
 
-Uso: fake_call.py [segundos]   (padrão: até ser interrompido)
+Usage: fake_call.py [seconds]   (default: until interrupted)
 """
 import ctypes
 import ctypes.util
@@ -26,9 +26,9 @@ def cfstr(s: str):
     return cf.CFStringCreateWithCString(None, s.encode(), kCFStringEncodingUTF8)
 
 
-# Vira cliente de áudio do Core Audio (como o Teams em chamada): abre a unidade de saída
-# padrão e a inicia, sem callback de render → toca silêncio. Sem isso o process tap não
-# consegue traduzir o PID em objeto de áudio.
+# Becomes a Core Audio client (like Teams during a call): opens the default output unit
+# and starts it, with no render callback -> plays silence. Without this the process tap
+# cannot translate the PID into an audio object.
 at = ctypes.cdll.LoadLibrary(ctypes.util.find_library("AudioToolbox"))
 
 
@@ -50,14 +50,14 @@ at.AudioUnitInitialize.argtypes = [ctypes.c_void_p]
 at.AudioOutputUnitStart.argtypes = [ctypes.c_void_p]
 at.AudioOutputUnitStop.argtypes = [ctypes.c_void_p]
 if component and at.AudioComponentInstanceNew(component, ctypes.byref(unit)) == 0 and at.AudioUnitInitialize(unit) == 0 and at.AudioOutputUnitStart(unit) == 0:
-    print("cliente de áudio ativo", flush=True)
+    print("audio client active", flush=True)
 else:
-    print("aviso: não consegui virar cliente de áudio", file=sys.stderr, flush=True)
+    print("warning: could not become an audio client", file=sys.stderr, flush=True)
 
 assertion_id = ctypes.c_uint32(0)
 rc = iokit.IOPMAssertionCreateWithName(cfstr("PreventUserIdleDisplaySleep"), kIOPMAssertionLevelOn, cfstr("fake Teams call"), ctypes.byref(assertion_id))
 if rc != 0:
-    print(f"IOPMAssertionCreateWithName falhou: {rc}", file=sys.stderr)
+    print(f"IOPMAssertionCreateWithName failed: {rc}", file=sys.stderr)
     sys.exit(1)
 
 running = True
@@ -71,10 +71,10 @@ def _stop(signum, frame):
 signal.signal(signal.SIGINT, _stop)
 signal.signal(signal.SIGTERM, _stop)
 deadline = time.monotonic() + float(sys.argv[1]) if len(sys.argv) > 1 else None
-print("em chamada (asserção ativa)", flush=True)
+print("in call (assertion active)", flush=True)
 while running and (deadline is None or time.monotonic() < deadline):
     time.sleep(0.2)
 iokit.IOPMAssertionRelease(assertion_id)
 if unit:
     at.AudioOutputUnitStop(unit)
-print("chamada encerrada", flush=True)
+print("call ended", flush=True)

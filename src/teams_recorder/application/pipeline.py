@@ -1,7 +1,7 @@
-"""Encadeia as etapas após uma chamada e retoma reuniões pendentes.
+"""Chains the steps after a call and resumes pending meetings.
 
-Cada etapa falha isoladamente: o erro é registrado em error.txt na pasta da
-reunião e as reuniões seguintes não são afetadas (RNF05).
+Each step fails in isolation: the error is written to error.txt in the meeting
+folder and other meetings are not affected (NFR05).
 """
 from __future__ import annotations
 
@@ -30,11 +30,11 @@ class Pipeline:
         return meeting
 
     def process(self, meeting_id: str) -> MeetingStatus:
-        """Executa as etapas que faltam para a reunião, parando na primeira falha."""
+        """Run the remaining steps for the meeting, stopping at the first failure."""
         self.repo.clear_failed(meeting_id)
         steps = {
-            MeetingStatus.RECORDED: ("transcrição", self.transcribe),
-            MeetingStatus.TRANSCRIBED: ("análise", self.analyze),
+            MeetingStatus.RECORDED: ("transcription", self.transcribe),
+            MeetingStatus.TRANSCRIBED: ("analysis", self.analyze),
         }
         while True:
             status = derive_status(self.repo.files(meeting_id))
@@ -44,14 +44,14 @@ class Pipeline:
             name, use_case = step
             try:
                 use_case.execute(meeting_id)
-            except Exception as exc:  # noqa: BLE001 - qualquer falha vira error.txt
-                log.exception("falha na %s da reunião %s", name, meeting_id)
+            except Exception as exc:  # noqa: BLE001 - any failure becomes error.txt
+                log.exception("%s failed for meeting %s", name, meeting_id)
                 self.repo.mark_failed(meeting_id, f"{name}: {exc}")
-                self.notifier.notify(f"Falha na {name}", f"Reunião {meeting_id}: {exc}")
+                self.notifier.notify(f"{name.capitalize()} failed", f"Meeting {meeting_id}: {exc}")
                 return MeetingStatus.FAILED
 
     def resume_pending(self) -> dict[str, MeetingStatus]:
-        """Retoma todas as reuniões gravadas que ainda não foram analisadas."""
+        """Resume every recorded meeting that has not been analyzed yet."""
         results: dict[str, MeetingStatus] = {}
         for meeting in self.repo.list_meetings():
             status = derive_status(self.repo.files(meeting.id))

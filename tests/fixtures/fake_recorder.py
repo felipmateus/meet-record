@@ -1,6 +1,6 @@
-"""Simula um gravador: cria o arquivo de saída, escreve até receber SIGINT/SIGTERM e sai com 0.
+"""Simulates a recorder: creates the output file, writes until it receives SIGINT/SIGTERM and exits with 0.
 
-Uso: fake_recorder.py --out PATH [--die]   (--die: encerra imediatamente com código 3)
+Usage: fake_recorder.py --out PATH [--die]   (--die: exits immediately with code 3)
 """
 import signal
 import sys
@@ -8,7 +8,7 @@ import time
 
 out = sys.argv[sys.argv.index("--out") + 1]
 if "--die" in sys.argv:
-    print("falha simulada", file=sys.stderr)
+    print("simulated failure", file=sys.stderr)
     sys.exit(3)
 
 running = True

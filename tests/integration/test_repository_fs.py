@@ -82,8 +82,8 @@ def test_lock_is_exclusive_and_released(fs: FsMeetingRepository):
 
 def test_failed_marks_and_clears(fs: FsMeetingRepository):
     m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
-    fs.mark_failed(m.id, "transcrição: whisper falhou")
-    assert fs.path(m.id, ERROR).read_text() == "transcrição: whisper falhou\n"
+    fs.mark_failed(m.id, "transcription: whisper failed")
+    assert fs.path(m.id, ERROR).read_text() == "transcription: whisper failed\n"
     assert derive_status(fs.files(m.id)) == MeetingStatus.FAILED
     fs.clear_failed(m.id)
     assert ERROR not in fs.files(m.id)
@@ -93,7 +93,7 @@ def test_delete_file_and_meeting(fs: FsMeetingRepository):
     m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
     fs.path(m.id, AUDIO).write_bytes(b"\x00")
     fs.delete_file(m.id, AUDIO)
-    fs.delete_file(m.id, AUDIO)  # idempotente
+    fs.delete_file(m.id, AUDIO)  # idempotent
     assert AUDIO not in fs.files(m.id)
     fs.delete_meeting(m.id)
     assert not fs.exists(m.id)
@@ -107,15 +107,15 @@ def test_tmp_files_are_hidden_from_listing(fs: FsMeetingRepository):
 
 def test_plans_and_open_actions(fs: FsMeetingRepository):
     d1, d2, d3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
-    a = Action("x", "eu", "m1", id="abc", due=d2)
-    fs.save_plan(DailyPlan(d1, "# dia 1\n", new_actions=[a]))
-    fs.save_plan(DailyPlan(d3, "# dia 3\n"))
+    a = Action("x", "me", "m1", id="abc", due=d2)
+    fs.save_plan(DailyPlan(d1, "# day 1\n", new_actions=[a]))
+    fs.save_plan(DailyPlan(d3, "# day 3\n"))
 
     assert fs.load_plan(d1).new_actions == [a]
     assert fs.load_plan(d2) is None
     assert fs.latest_plan_before(d3).day == d1
     assert fs.latest_plan_before(d1) is None
-    assert (fs.plans / "2026-10-06.md").read_text() == "# dia 1\n"
+    assert (fs.plans / "2026-10-06.md").read_text() == "# day 1\n"
 
     assert fs.load_open_actions() == []
     fs.save_open_actions([a])

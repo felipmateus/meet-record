@@ -1,7 +1,7 @@
-"""Status de uma reunião derivado dos arquivos presentes na sua pasta.
+"""Meeting status derived from the files present in its folder.
 
-Decisão de arquitetura: o estado do pipeline é a existência dos arquivos,
-não um banco. Este módulo é a única fonte da regra de derivação.
+Architecture decision: pipeline state is the existence of files, not a
+database. This module is the single source of the derivation rule.
 """
 from __future__ import annotations
 
@@ -30,10 +30,10 @@ class MeetingStatus(StrEnum):
 
 
 def derive_status(files: Iterable[str]) -> MeetingStatus:
-    """Deriva o status a partir dos nomes de arquivo presentes na pasta da reunião.
+    """Derive the status from the file names present in the meeting folder.
 
-    Ordem de precedência: falha explícita > análise > transcrição > áudio final > gravando.
-    O áudio pode ter sido apagado pela retenção sem afetar os status posteriores.
+    Precedence: explicit failure > analysis > transcript > final audio > recording.
+    The audio may have been deleted by retention without affecting later statuses.
     """
     present = set(files)
     if ERROR in present:
@@ -48,7 +48,7 @@ def derive_status(files: Iterable[str]) -> MeetingStatus:
 
 
 def next_step(status: MeetingStatus) -> str | None:
-    """Nome da próxima etapa do pipeline para o status dado, ou None se concluído/falho."""
+    """Name of the next pipeline step for the given status, or None when done/failed."""
     return {
         MeetingStatus.RECORDING: "stop",
         MeetingStatus.RECORDED: "transcribe",

@@ -1,13 +1,13 @@
-"""MeetingAnalyzer via Claude API (SDK oficial `anthropic`).
+"""MeetingAnalyzer via the Claude API (official `anthropic` SDK).
 
-Desenho:
-- O esquema de saída (Pydantic) vive aqui e é convertido para o domínio; o domínio não
-  conhece a API.
-- O prompt de sistema é fixo (prompts/analyze_system.md) e marcado para cache; o conteúdo
-  variável (metadados da reunião e transcrição) vai na mensagem do usuário.
-- Fallback de servidor habilitado por padrão: uma recusa pontual dos classificadores
-  de segurança reexecuta a requisição em outro modelo, em vez de derrubar o pipeline.
-- Toda chamada registra uso de tokens em um arquivo JSONL para controle de custo (R7).
+Design:
+- The output schema (Pydantic) lives here and is converted to the domain; the domain
+  knows nothing about the API.
+- The system prompt is fixed (prompts/analyze_system.md) and marked for caching; the
+  variable content (meeting metadata and transcript) goes in the user message.
+- Server-side fallback is enabled by default: a one-off refusal by the safety
+  classifiers re-runs the request on another model instead of taking the pipeline down.
+- Every call records token usage in a JSONL file for cost control (R7).
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-if TYPE_CHECKING:  # o SDK é importado sob demanda: é grande e só o analyze precisa dele
+if TYPE_CHECKING:  # the SDK is imported on demand: it is large and only analyze needs it
     import anthropic
 
 from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Decision, Meeting, Transcript
@@ -28,32 +28,32 @@ from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Dec
 log = logging.getLogger(__name__)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
-MIN_WORDS = 20  # abaixo disso não vale uma chamada à LLM (silêncio, ruído, alucinação do whisper)
+MIN_WORDS = 20  # below this an LLM call is not worth it (silence, noise, whisper hallucination)
 
 
 def trivial_analysis(transcript: Transcript, meeting: Meeting, min_words: int = MIN_WORDS) -> Analysis | None:
-    """Análise local para transcrições vazias ou curtas demais; None quando vale analisar."""
+    """Local analysis for empty or too-short transcripts; None when it is worth analyzing."""
     words = len(transcript.text.split())
     if words == 0:
-        return Analysis(meeting_id=meeting.id, summary="Transcrição vazia: nenhuma fala reconhecida.")
+        return Analysis(meeting_id=meeting.id, summary="Empty transcript: no speech recognized.")
     if words < min_words:
         return Analysis(
             meeting_id=meeting.id,
-            summary=f"Transcrição muito curta ({words} palavras) para análise: \"{transcript.text.strip()[:120]}\"",
+            summary=f"Transcript too short ({words} words) to analyze: \"{transcript.text.strip()[:120]}\"",
         )
     return None
 
 
-# --- esquema de saída -------------------------------------------------------
+# --- output schema ----------------------------------------------------------
 class ActionOut(BaseModel):
-    description: str = Field(description="Tarefa, começando com verbo no infinitivo")
-    owner: str = Field(description="Responsável; 'usuário' para o dono da gravação; 'indefinido' se não souber")
-    due: str | None = Field(default=None, description="Prazo em ISO (AAAA-MM-DD) ou null")
+    description: str = Field(description="Task, starting with a verb in the infinitive")
+    owner: str = Field(description="Owner; 'usuário' for the recording owner; 'indefinido' when unknown")
+    due: str | None = Field(default=None, description="Due date in ISO format (YYYY-MM-DD) or null")
 
 
 class DeadlineOut(BaseModel):
     what: str
-    when: str | None = Field(default=None, description="Data ISO ou null")
+    when: str | None = Field(default=None, description="ISO date or null")
     who: str = "indefinido"
 
 
@@ -94,25 +94,25 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
 
 def build_user_message(transcript: Transcript, meeting: Meeting) -> str:
     header = [
-        f"Data da reunião: {meeting.started_at.date().isoformat()} ({_weekday_pt(meeting.started_at)})",
-        f"Início: {meeting.started_at.strftime('%H:%M')}",
+        f"Meeting date: {meeting.started_at.date().isoformat()} ({_weekday(meeting.started_at)})",
+        f"Start: {meeting.started_at.strftime('%H:%M')}",
     ]
     if meeting.title:
-        header.append(f"Título: {meeting.title}")
+        header.append(f"Title: {meeting.title}")
     if meeting.duration_seconds:
-        header.append(f"Duração: {int(meeting.duration_seconds // 60)} min")
-    return "\n".join(header) + "\n\nTranscrição (com marcação de tempo):\n\n" + transcript.as_timestamped_text()
+        header.append(f"Duration: {int(meeting.duration_seconds // 60)} min")
+    return "\n".join(header) + "\n\nTranscript (with timestamps):\n\n" + transcript.as_timestamped_text()
 
 
-def _weekday_pt(dt: datetime) -> str:
-    return ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"][dt.weekday()]
+def _weekday(dt: datetime) -> str:
+    return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][dt.weekday()]
 
 
-# --- adaptador --------------------------------------------------------------
+# --- adapter ----------------------------------------------------------------
 @dataclass
 class ClaudeAnalyzer:
-    system_prompt: str | None = None            # texto pronto (testes) ...
-    prompt_path: Path | None = None             # ... ou arquivo carregado na primeira análise
+    system_prompt: str | None = None            # ready-made text (tests) ...
+    prompt_path: Path | None = None             # ... or a file loaded on the first analysis
     model: str = "claude-opus-5-5"
     effort: str = "high"
     max_tokens: int = 16000
@@ -124,7 +124,7 @@ class ClaudeAnalyzer:
     def _system(self) -> str:
         if self.system_prompt is None:
             if self.prompt_path is None:
-                raise AnalysisError("ClaudeAnalyzer sem prompt de sistema (system_prompt ou prompt_path)")
+                raise AnalysisError("ClaudeAnalyzer has no system prompt (system_prompt or prompt_path)")
             self.system_prompt = load_prompt(self.prompt_path)
         return self.system_prompt
 
@@ -132,7 +132,7 @@ class ClaudeAnalyzer:
         if self.client is None:
             import anthropic
 
-            self.client = anthropic.Anthropic()  # lê ANTHROPIC_API_KEY do ambiente (.env carregado em config)
+            self.client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment (.env loaded in config)
         return self.client
 
     def analyze(self, transcript: Transcript, meeting: Meeting) -> Analysis:
@@ -144,20 +144,20 @@ class ClaudeAnalyzer:
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             why = f" ({details.category}: {details.explanation})" if details else ""
-            raise AnalysisError(f"a API recusou analisar a reunião {meeting.id}{why}")
+            raise AnalysisError(f"the API refused to analyze meeting {meeting.id}{why}")
         if response.stop_reason == "max_tokens":
-            raise AnalysisError(f"resposta truncada em {self.max_tokens} tokens; aumente llm.max_tokens")
+            raise AnalysisError(f"response truncated at {self.max_tokens} tokens; increase llm.max_tokens")
         text = next((b.text for b in response.content if b.type == "text"), None)
         if text is None:
-            raise AnalysisError("resposta sem bloco de texto")
+            raise AnalysisError("response has no text block")
         try:
             out = AnalysisOut.model_validate_json(text)
         except ValidationError as exc:
-            raise AnalysisError(f"saída fora do esquema: {exc.errors()[:3]}") from exc
+            raise AnalysisError(f"output does not match the schema: {exc.errors()[:3]}") from exc
         return to_domain(out, meeting)
 
-    # Única função que conhece a forma da requisição; a saída estruturada garante JSON válido
-    # conforme o esquema, e o Pydantic valida de novo do nosso lado.
+    # The only function that knows the request shape; structured output guarantees JSON valid
+    # against the schema, and Pydantic validates it again on our side.
     def _request(self, user_message: str) -> Any:
         import anthropic
 
@@ -177,13 +177,13 @@ class ClaudeAnalyzer:
                 return client.beta.messages.create(betas=[FALLBACK_BETA], fallbacks="default", **kwargs)
             return client.messages.create(**kwargs)
         except anthropic.AuthenticationError as exc:
-            raise AnalysisError("chave da API inválida ou ausente (ANTHROPIC_API_KEY no .env)") from exc
+            raise AnalysisError("invalid or missing API key (ANTHROPIC_API_KEY in .env)") from exc
         except anthropic.RateLimitError as exc:
-            raise AnalysisError(f"limite de requisições atingido; tente de novo em instantes ({exc.message})") from exc
+            raise AnalysisError(f"rate limit reached; try again shortly ({exc.message})") from exc
         except anthropic.APIStatusError as exc:
-            raise AnalysisError(f"erro da API ({exc.status_code}): {exc.message}") from exc
+            raise AnalysisError(f"API error ({exc.status_code}): {exc.message}") from exc
         except anthropic.APIConnectionError as exc:
-            raise AnalysisError(f"sem conexão com a API: {exc}") from exc
+            raise AnalysisError(f"no connection to the API: {exc}") from exc
 
     def _log_usage(self, meeting_id: str, response: Any) -> None:
         if not self.usage_log:
@@ -204,12 +204,12 @@ class ClaudeAnalyzer:
             self.usage_log.parent.mkdir(parents=True, exist_ok=True)
             with self.usage_log.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except Exception:  # noqa: BLE001 - log de custo nunca derruba a análise
-            log.warning("não consegui registrar uso de tokens", exc_info=True)
+        except Exception:  # noqa: BLE001 - cost logging never takes the analysis down
+            log.warning("could not record token usage", exc_info=True)
 
 
 def _strict_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """JSON Schema do Pydantic com additionalProperties=false e todos os campos obrigatórios."""
+    """Pydantic JSON Schema with additionalProperties=false and every field required."""
     schema = model.model_json_schema()
     _tighten(schema)
     for d in schema.get("$defs", {}).values():
@@ -229,4 +229,4 @@ def load_prompt(path: Path) -> str:
     try:
         return path.read_text(encoding="utf-8").strip()
     except FileNotFoundError as exc:
-        raise AnalysisError(f"prompt não encontrado: {path}") from exc
+        raise AnalysisError(f"prompt not found: {path}") from exc

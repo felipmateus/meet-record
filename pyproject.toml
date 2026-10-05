@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "teams-recorder"
 version = "0.1.0"
-description = "Grava, transcreve e analisa reuniões do Microsoft Teams no macOS, gerando um plano diário de atividades."
+description = "Records, transcribes and analyzes Microsoft Teams meetings on macOS, generating a daily activity plan."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -28,11 +28,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Cobertura é opt-in: `pytest --cov=teams_recorder --cov-report=term-missing`.
-# Com cobertura ligada na suíte inteira, o processo de teste fica pesado o bastante para
-# o macOS matar os subprocessos (ffmpeg, gravadores simulados) em máquinas com swap cheia.
+# Coverage is opt-in: `pytest --cov=teams_recorder --cov-report=term-missing`.
+# With coverage enabled on the whole suite, the test process gets heavy enough for
+# macOS to kill the subprocesses (ffmpeg, fake recorders) on machines with full swap.
 addopts = "-q"
-markers = ["slow: testes que dependem de binários externos (whisper, ffmpeg)"]
+markers = ["slow: tests that depend on external binaries (whisper, ffmpeg)"]
 
 [tool.coverage.run]
 source = ["teams_recorder"]

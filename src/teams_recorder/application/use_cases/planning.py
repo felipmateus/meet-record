@@ -1,4 +1,4 @@
-"""Casos de uso de planejamento e manutenção."""
+"""Planning and maintenance use cases."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,7 +27,7 @@ class BuildDailyPlan:
         plan.day = day
         self.repo.save_plan(plan)
         self.repo.save_open_actions(merge_open_actions(open_actions, plan))
-        self.notifier.notify("Plano do dia pronto", f"{len(analyses)} reunião(ões), {len(plan.new_actions)} ação(ões) nova(s)")
+        self.notifier.notify("Daily plan ready", f"{len(analyses)} meeting(s), {len(plan.new_actions)} new action(s)")
         return plan
 
 

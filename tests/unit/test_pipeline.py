@@ -31,7 +31,7 @@ def test_run_after_call_goes_to_analyzed(repo, notifier, clock):
 
     assert derive_status(repo.files(meeting.id)) == MeetingStatus.ANALYZED
     titles = [t for t, _ in notifier.messages]
-    assert titles == ["Gravação iniciada", "Gravação encerrada"]
+    assert titles == ["Recording started", "Recording stopped"]
 
 
 def test_failure_in_transcription_marks_error_and_stops(repo, notifier, clock):
@@ -42,8 +42,8 @@ def test_failure_in_transcription_marks_error_and_stops(repo, notifier, clock):
 
     files = repo.files(active.meeting.id)
     assert ERROR in files and TRANSCRIPT_JSON not in files
-    assert "transcrição" in repo.last_error
-    assert notifier.messages[-1][0] == "Falha na transcrição"
+    assert "transcription" in repo.last_error
+    assert notifier.messages[-1][0] == "Transcription failed"
 
 
 def test_failure_in_analysis_keeps_transcript(repo, notifier, clock):
@@ -54,7 +54,7 @@ def test_failure_in_analysis_keeps_transcript(repo, notifier, clock):
 
     assert status == MeetingStatus.FAILED
     assert TRANSCRIPT_JSON in repo.files(active.meeting.id)
-    assert "análise" in repo.last_error
+    assert "analysis" in repo.last_error
 
 
 def test_process_clears_previous_error_and_resumes(repo, notifier, clock):

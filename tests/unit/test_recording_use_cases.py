@@ -8,7 +8,7 @@ from tests.fakes import FakeMicCapture, FakeMixer, FakeProcessCapture
 
 def _start(repo, notifier, clock, **kw):
     proc, mic = FakeProcessCapture(**kw.get("proc", {})), FakeMicCapture(**kw.get("mic", {}))
-    uc = StartRecording(repo, proc, mic, notifier, clock, mic_device="Mic Teste")
+    uc = StartRecording(repo, proc, mic, notifier, clock, mic_device="Test Mic")
     return uc, proc, mic
 
 
@@ -22,7 +22,7 @@ def test_start_recording_creates_meeting_and_starts_both_captures(repo, notifier
     assert active.meeting.pid == 4242 and active.meeting.title == "Daily"
     assert proc.handles[0].out.name == TAP_TRACK
     assert mic.handles[0].out.name == MIC_TRACK
-    assert notifier.messages[0][0] == "Gravação iniciada"
+    assert notifier.messages[0][0] == "Recording started"
 
 
 def test_start_recording_rolls_back_if_mic_fails(repo, notifier, clock):
@@ -60,7 +60,7 @@ def test_stop_recording_mixes_cleans_and_saves(repo, notifier, clock):
     assert derive_status(files) == MeetingStatus.RECORDED
     assert repo.load_meta(meeting.id).ended_at == clock.now()
     assert repo.load_active() is None
-    assert notifier.messages[-1] == ("Gravação encerrada", "30 min. Transcrevendo…")
+    assert notifier.messages[-1] == ("Recording stopped", "30 min. Transcribing…")
 
 
 def test_cancel_recording_discards_everything(repo, notifier, clock):
@@ -72,7 +72,7 @@ def test_cancel_recording_discards_everything(repo, notifier, clock):
     assert not repo.exists(active.meeting.id)
     assert repo.load_active() is None
     assert proc.is_stopped(proc.handles[0]) and mic.is_stopped(mic.handles[0])
-    assert notifier.messages[-1][0] == "Gravação cancelada"
+    assert notifier.messages[-1][0] == "Recording cancelled"
 
 
 def test_start_refuses_when_another_recording_is_active(repo, notifier, clock):
@@ -87,7 +87,7 @@ def test_start_refuses_when_another_recording_is_active(repo, notifier, clock):
 def test_start_recording_rolls_back_if_process_capture_fails(repo, notifier, clock):
     uc, _, mic = _start(repo, notifier, clock, proc={"fail_on_start": True})
 
-    with pytest.raises(CaptureError, match="captura do Teams"):
+    with pytest.raises(CaptureError, match="Teams capture"):
         uc.execute(pid=1)
 
     assert repo.list_meetings() == []

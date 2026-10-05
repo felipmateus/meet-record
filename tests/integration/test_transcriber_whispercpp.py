@@ -1,4 +1,4 @@
-"""Transcritor com whisper-cli simulado (sempre) e com whisper real (slow, se instalado)."""
+"""Transcriber with a fake whisper-cli (always) and with the real whisper (slow, if installed)."""
 import os
 import shutil
 import subprocess
@@ -39,16 +39,16 @@ def model(tmp_path: Path) -> Path:
 
 
 def test_missing_model_is_a_clear_error(tmp_path: Path):
-    with pytest.raises(TranscriptionError, match="modelo não encontrado"):
-        WhisperCppTranscriber(tmp_path / "nao-existe.bin").transcribe(tmp_path / "a.m4a", "pt")
+    with pytest.raises(TranscriptionError, match="model not found"):
+        WhisperCppTranscriber(tmp_path / "does-not-exist.bin").transcribe(tmp_path / "a.m4a", "pt")
 
 
 def test_missing_audio_is_a_clear_error(model: Path, tmp_path: Path):
-    with pytest.raises(TranscriptionError, match="áudio não encontrado"):
+    with pytest.raises(TranscriptionError, match="audio not found"):
         WhisperCppTranscriber(model).transcribe(tmp_path / "a.m4a", "pt")
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_transcribe_with_fake_cli(model: Path, tmp_path: Path):
     audio = tmp_path / "audio.m4a"
     _tone(audio)
@@ -58,16 +58,16 @@ def test_transcribe_with_fake_cli(model: Path, tmp_path: Path):
     assert len(t.segments) == 2 and t.segments[0].text.startswith("Bom dia")
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_cli_failure_is_wrapped(model: Path, tmp_path: Path):
     audio = tmp_path / "audio.m4a"
     _tone(audio)
-    with pytest.raises(TranscriptionError, match="whisper-cli falhou.*erro simulado"):
+    with pytest.raises(TranscriptionError, match="whisper-cli failed.*simulated whisper error"):
         ScriptedTranscriber(model, fail=True).transcribe(audio, "pt")
 
 
-# --- whisper real --------------------------------------------------------------
-# Opt-in: carrega o modelo (574 MB) e usa a GPU; rode com TREC_REAL_WHISPER=1 pytest -m slow
+# --- real whisper --------------------------------------------------------------
+# Opt-in: loads the model (574 MB) and uses the GPU; run with TREC_REAL_WHISPER=1 pytest -m slow
 _settings = load_settings(Path(__file__).resolve().parents[2])
 real_ready = (
     os.environ.get("TREC_REAL_WHISPER") == "1"
@@ -78,11 +78,12 @@ real_ready = (
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not real_ready, reason="defina TREC_REAL_WHISPER=1 (requer whisper-cli, say e modelo)")
+@pytest.mark.skipif(not real_ready, reason="set TREC_REAL_WHISPER=1 (requires whisper-cli, say and the model)")
 def test_real_whisper_transcribes_portuguese_speech(tmp_path: Path):
+    # Portuguese phrase on purpose: the test exercises transcription of pt-BR speech.
     phrase = "Bom dia pessoal, vamos começar pela revisão da sprint e depois falar do relatório de integração."
-    aiff = tmp_path / "fala.aiff"
-    audio = tmp_path / "fala.m4a"
+    aiff = tmp_path / "speech.aiff"
+    audio = tmp_path / "speech.m4a"
     subprocess.run(["say", "-v", "Luciana", "-o", str(aiff), phrase], check=True)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(aiff), "-c:a", "aac", "-b:a", "64k", str(audio)], check=True)
 
@@ -91,4 +92,4 @@ def test_real_whisper_transcribes_portuguese_speech(tmp_path: Path):
     text = t.text.lower()
     assert t.segments and t.duration_seconds > 3
     for word in ("bom dia", "sprint", "relatório", "integração"):
-        assert word in text, f"'{word}' não encontrado em: {t.text}"
+        assert word in text, f"'{word}' not found in: {t.text}"

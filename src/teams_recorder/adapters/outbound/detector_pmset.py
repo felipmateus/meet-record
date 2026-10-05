@@ -1,10 +1,10 @@
-"""CallDetector por heurística do sistema: asserções de energia do processo do Teams.
+"""CallDetector based on a system heuristic: power assertions held by the Teams process.
 
-Durante uma chamada o Teams impede o Mac de dormir, criando asserções visíveis em
-`pmset -g assertions`, no formato:
+During a call Teams prevents the Mac from sleeping, creating assertions visible in
+`pmset -g assertions`, in the format:
     pid 1234(MSTeams): [0x...] 00:05:12 PreventUserIdleDisplaySleep named: "..."
-Fora de chamada essas asserções desaparecem. É uma heurística (risco R3): o detector
-fica isolado atrás da porta e a CLI manual (`trec start/stop`) continua disponível.
+Outside a call these assertions disappear. It is a heuristic (risk R3): the detector
+stays isolated behind the port and the manual CLI (`trec start/stop`) remains available.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _LINE = re.compile(r"^\s*pid\s+(\d+)\(([^)]+)\):.*?\b(" + "|".join(CALL_ASSERTIO
 
 
 def parse_assertions(text: str, process_name: str) -> list[int]:
-    """PIDs do processo `process_name` que seguram uma asserção típica de chamada."""
+    """PIDs of process `process_name` that hold an assertion typical of a call."""
     pids: list[int] = []
     for line in text.splitlines():
         m = _LINE.match(line)

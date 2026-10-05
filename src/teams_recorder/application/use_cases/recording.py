@@ -1,4 +1,4 @@
-"""Casos de uso de gravação: iniciar, parar e cancelar."""
+"""Recording use cases: start, stop and cancel."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,7 +29,7 @@ class StartRecording:
 
     def execute(self, pid: int, title: str | None = None) -> ActiveRecording:
         if self.repo.load_active() is not None:
-            raise RepositoryError("já existe uma gravação em andamento; use `trec stop` ou `trec cancel`")
+            raise RepositoryError("a recording is already in progress; use `trec stop` or `trec cancel`")
         meeting = Meeting.start(self.clock.now(), pid=pid, title=title)
         self.repo.create(meeting)
         try:
@@ -38,16 +38,16 @@ class StartRecording:
             self.repo.delete_meeting(meeting.id)
             if isinstance(exc, CaptureError):
                 raise
-            raise CaptureError(f"falha ao iniciar captura do Teams: {exc}") from exc
+            raise CaptureError(f"failed to start the Teams capture: {exc}") from exc
         try:
             mic_handle = self.mic_capture.start(self.mic_device, self.repo.path(meeting.id, MIC_TRACK))
         except Exception as exc:
             self.process_capture.stop(process_handle)
             self.repo.delete_meeting(meeting.id)
-            raise CaptureError(f"falha ao iniciar microfone: {exc}") from exc
+            raise CaptureError(f"failed to start the microphone: {exc}") from exc
         active = ActiveRecording(meeting, process_handle, mic_handle)
         self.repo.save_active(active)
-        self.notifier.notify("Gravação iniciada", f"Reunião {meeting.id}")
+        self.notifier.notify("Recording started", f"Meeting {meeting.id}")
         return active
 
 
@@ -71,7 +71,7 @@ class StopRecording:
         self.repo.save_meta(meeting)
         self.repo.clear_active()
         minutes = int((meeting.duration_seconds or 0) // 60)
-        self.notifier.notify("Gravação encerrada", f"{minutes} min. Transcrevendo…")
+        self.notifier.notify("Recording stopped", f"{minutes} min. Transcribing…")
         return meeting
 
 
@@ -86,8 +86,8 @@ class CancelRecording:
         for capture, handle in ((self.process_capture, active.process_handle), (self.mic_capture, active.mic_handle)):
             try:
                 capture.stop(handle)
-            except Exception:  # noqa: BLE001 - cancelamento é melhor esforço
+            except Exception:  # noqa: BLE001 - cancellation is best effort
                 pass
         self.repo.delete_meeting(active.meeting.id)
         self.repo.clear_active()
-        self.notifier.notify("Gravação cancelada", f"Reunião {active.meeting.id} descartada")
+        self.notifier.notify("Recording cancelled", f"Meeting {active.meeting.id} discarded")

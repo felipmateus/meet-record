@@ -1,4 +1,4 @@
-"""Análise real contra a Claude API. Opt-in: TREC_REAL_CLAUDE=1 (gasta alguns centavos)."""
+"""Real analysis against the Claude API. Opt-in: TREC_REAL_CLAUDE=1 (costs a few cents)."""
 import json
 import os
 from datetime import datetime
@@ -16,7 +16,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 _settings = load_settings(PROJECT)
 ready = os.environ.get("TREC_REAL_CLAUDE") == "1" and _settings.has_api_key
 
-pytestmark = [pytest.mark.slow, pytest.mark.skipif(not ready, reason="defina TREC_REAL_CLAUDE=1 e ANTHROPIC_API_KEY")]
+pytestmark = [pytest.mark.slow, pytest.mark.skipif(not ready, reason="set TREC_REAL_CLAUDE=1 and ANTHROPIC_API_KEY")]
 
 
 def test_real_analysis_extracts_actions(tmp_path: Path):
@@ -33,6 +33,6 @@ def test_real_analysis_extracts_actions(tmp_path: Path):
     assert analysis.summary
     descriptions = " ".join(a.description.lower() for a in analysis.my_actions)
     assert "relatório" in descriptions
-    # a reunião de exemplo é numa terça (2026-10-06); "até quarta-feira" = 2026-10-07
+    # the sample meeting is on a Tuesday (2026-10-06); "até quarta-feira" (by Wednesday) = 2026-10-07
     assert any(a.due and a.due.isoformat() == "2026-10-07" for a in analysis.my_actions), analysis.my_actions
     assert (tmp_path / "usage.jsonl").exists()

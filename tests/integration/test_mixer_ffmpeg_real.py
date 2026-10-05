@@ -1,4 +1,4 @@
-"""Mixagem real com ffmpeg: gera duas trilhas sintéticas e verifica o M4A resultante."""
+"""Real mixing with ffmpeg: generates two synthetic tracks and checks the resulting M4A."""
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,7 +26,7 @@ def _duration(path: Path) -> float:
     return float(out)
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_mix_two_tracks_produces_mono_aac(tmp_path: Path):
     tap, mic, out = tmp_path / "tap.wav", tmp_path / "mic.wav", tmp_path / "audio.m4a"
     _tone(tap, 440, 2.0)
@@ -43,30 +43,30 @@ def test_mix_two_tracks_produces_mono_aac(tmp_path: Path):
     assert "channels=1" in channels and "codec_name=aac" in channels and "sample_rate=48000" in channels
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_mix_single_track_when_other_is_empty(tmp_path: Path):
     tap, mic, out = tmp_path / "tap.wav", tmp_path / "mic.wav", tmp_path / "audio.m4a"
     _tone(mic, 660, 1.0)
-    tap.write_bytes(b"RIFF" + b"\x00" * 40)  # trilha vazia (permissão negada, por exemplo)
+    tap.write_bytes(b"RIFF" + b"\x00" * 40)  # empty track (permission denied, for example)
 
     FfmpegMixer().mix([tap, mic], out)
 
     assert 0.9 <= _duration(out) <= 1.3
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_anomalous_tracks_are_preserved(tmp_path: Path):
     meeting = tmp_path / "m"; meeting.mkdir()
     tap, mic, out = meeting / "tap.wav", meeting / "mic.wav", meeting / "audio.m4a"
     _tone(tap, 440, 6.0)
-    _tone(mic, 880, 1.0)  # gravador do microfone "morreu" cedo
+    _tone(mic, 880, 1.0)  # the microphone recorder "died" early
 
     FfmpegMixer().mix([tap, mic], out)
 
     assert (meeting / "debug" / "tap.wav").exists() and (meeting / "debug" / "mic.wav").exists()
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_balanced_tracks_are_not_preserved(tmp_path: Path):
     meeting = tmp_path / "m"; meeting.mkdir()
     tap, mic, out = meeting / "tap.wav", meeting / "mic.wav", meeting / "audio.m4a"
@@ -76,7 +76,7 @@ def test_balanced_tracks_are_not_preserved(tmp_path: Path):
     assert not (meeting / "debug").exists()
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_probe_reports_duration_and_levels(tmp_path: Path):
     from teams_recorder.adapters.outbound.mixer_ffmpeg import probe
     t = tmp_path / "t.wav"; _tone(t, 440, 2.0)
@@ -84,9 +84,9 @@ def test_probe_reports_duration_and_levels(tmp_path: Path):
     assert 1.9 <= info["duration"] <= 2.1 and info["max_db"] is not None and info["mean_db"] is not None
 
 
-@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg not installed")
 def test_mix_output_never_clips(tmp_path: Path):
-    """Duas trilhas quentes somadas não podem passar de 0 dBFS no arquivo final."""
+    """Two hot tracks summed must not exceed 0 dBFS in the final file."""
     tap, mic, out = tmp_path / "tap.wav", tmp_path / "mic.wav", tmp_path / "audio.m4a"
     for path, freq in ((tap, 440), (mic, 660)):
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration=3", "-af", "volume=0dB", "-ar", "48000", str(path)], check=True)

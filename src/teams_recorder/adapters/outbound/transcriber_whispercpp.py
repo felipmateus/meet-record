@@ -1,8 +1,8 @@
-"""Transcriber via whisper.cpp (binário `whisper-cli` do Homebrew).
+"""Transcriber via whisper.cpp (Homebrew's `whisper-cli` binary).
 
-Fluxo: converte o áudio para WAV 16 kHz mono com ffmpeg (formato que o whisper-cli
-aceita sem depender de decodificadores), roda o whisper-cli com saída JSON e converte
-os segmentos para o domínio. Tudo local; nada sai do Mac.
+Flow: converts the audio to 16 kHz mono WAV with ffmpeg (a format whisper-cli accepts
+without depending on decoders), runs whisper-cli with JSON output and converts the
+segments to the domain. Everything is local; nothing leaves the Mac.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class WhisperCppTranscriber:
         self.timeout = timeout
         self.vad_model_path = Path(vad_model_path) if vad_model_path else None
 
-    # --- comandos (públicos para teste) -----------------------------------
+    # --- commands (public for testing) ------------------------------------
     def convert_command(self, audio: Path, wav: Path) -> list[str]:
         return [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(audio), "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)]
 
@@ -43,53 +43,53 @@ class WhisperCppTranscriber:
             "-f", str(wav),
             "-l", language,
             "-t", str(self.threads),
-            "-oj",                 # escreve <prefix>.json
+            "-oj",                 # writes <prefix>.json
             "-of", str(out_prefix),
-            "-np",                 # sem prints de progresso
+            "-np",                 # no progress prints
         ]
         if self.vad_model_path is not None and self.vad_model_path.exists():
-            # Detecção de voz (Silero): só transcreve trechos com fala; reduz alucinações em silêncio.
+            # Voice activity detection (Silero): only transcribes speech segments; reduces hallucinations in silence.
             cmd += ["--vad", "-vm", str(self.vad_model_path), "-vt", "0.5", "-vsd", "300", "-vp", "150"]
         return cmd
 
-    # --- porta Transcriber ------------------------------------------------
+    # --- Transcriber port -------------------------------------------------
     def transcribe(self, audio: Path, language: str) -> Transcript:
         if not self.model_path.exists():
             raise TranscriptionError(
-                f"modelo não encontrado em {self.model_path}. Baixe com scripts/download-model.sh"
+                f"model not found at {self.model_path}. Download it with scripts/download-model.sh"
             )
         if not audio.exists():
-            raise TranscriptionError(f"áudio não encontrado: {audio}")
+            raise TranscriptionError(f"audio not found: {audio}")
         with tempfile.TemporaryDirectory(prefix="trec-whisper-") as tmp:
             wav = Path(tmp) / "audio16k.wav"
             prefix = Path(tmp) / "out"
-            self._run(self.convert_command(audio, wav), "conversão para WAV 16 kHz")
+            self._run(self.convert_command(audio, wav), "conversion to 16 kHz WAV")
             self._run(self.whisper_command(wav, language, prefix), "whisper-cli")
             json_path = prefix.with_suffix(".json")
             if not json_path.exists():
-                raise TranscriptionError("whisper-cli terminou sem gerar o JSON de saída")
+                raise TranscriptionError("whisper-cli finished without producing the JSON output")
             try:
                 data = json.loads(json_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
-                raise TranscriptionError(f"JSON do whisper inválido: {exc}") from exc
+                raise TranscriptionError(f"invalid whisper JSON: {exc}") from exc
         return parse_whisper_json(data, language)
 
     def _run(self, command: list[str], what: str) -> None:
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout, check=False)
         except FileNotFoundError as exc:
-            raise TranscriptionError(f"{what}: executável não encontrado ({command[0]}). Instale com: brew install whisper-cpp") from exc
+            raise TranscriptionError(f"{what}: executable not found ({command[0]}). Install with: brew install whisper-cpp") from exc
         except subprocess.TimeoutExpired as exc:
-            raise TranscriptionError(f"{what}: tempo esgotado após {self.timeout:.0f}s") from exc
+            raise TranscriptionError(f"{what}: timed out after {self.timeout:.0f}s") from exc
         if result.returncode != 0:
             tail = (result.stderr or result.stdout).strip()[-800:]
-            raise TranscriptionError(f"{what} falhou (código {result.returncode}): {tail}")
+            raise TranscriptionError(f"{what} failed (code {result.returncode}): {tail}")
 
 
 def parse_whisper_json(data: dict, language: str) -> Transcript:
-    """Converte o JSON do whisper-cli (`-oj`) em Transcript.
+    """Converts whisper-cli's JSON (`-oj`) into a Transcript.
 
-    Formato: {"transcription": [{"timestamps": {...}, "offsets": {"from": ms, "to": ms}, "text": "..."}], ...}
+    Format: {"transcription": [{"timestamps": {...}, "offsets": {"from": ms, "to": ms}, "text": "..."}], ...}
     """
     segments: list[Segment] = []
     for item in data.get("transcription", []):

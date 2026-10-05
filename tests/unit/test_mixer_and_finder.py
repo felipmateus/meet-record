@@ -14,7 +14,7 @@ def test_mixer_command_two_tracks(tmp_path: Path):
     assert cmd.count("-i") == 2
     filt = cmd[cmd.index("-filter_complex") + 1]
     assert "amix=inputs=2" in filt and "loudnorm" in filt and "alimiter" in filt
-    assert filt.count("afftdn") == 2 and filt.count("highpass") == 2  # um por trilha
+    assert filt.count("afftdn") == 2 and filt.count("highpass") == 2  # one per track
     assert cmd[-1].endswith("out.m4a") and "96k" in cmd
     assert cmd[cmd.index("-ar") + 1] == "48000"
 
@@ -38,7 +38,7 @@ def test_usable_tracks_filters_missing_and_empty(tmp_path: Path):
 
 
 def test_mix_without_usable_tracks_raises(tmp_path: Path):
-    with pytest.raises(CaptureError, match="nenhuma trilha"):
+    with pytest.raises(CaptureError, match="no usable audio track"):
         FfmpegMixer().mix([tmp_path / "missing.wav"], tmp_path / "out.m4a")
 
 
@@ -54,5 +54,5 @@ def test_find_pid_none_when_absent():
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
     assert find_pid("MSTeams", runner=fake_run) is None
     def broken(cmd, **kw):
-        raise OSError("sem pgrep")
+        raise OSError("no pgrep")
     assert find_pid("MSTeams", runner=broken) is None

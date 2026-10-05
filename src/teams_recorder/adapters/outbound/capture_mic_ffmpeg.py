@@ -1,4 +1,4 @@
-"""MicCapture via ffmpeg + AVFoundation. SIGINT faz o ffmpeg finalizar o arquivo corretamente."""
+"""MicCapture via ffmpeg + AVFoundation. SIGINT makes ffmpeg finalize the file correctly."""
 from __future__ import annotations
 
 import signal
@@ -19,7 +19,7 @@ class FfmpegMicCapture:
         self._procs: dict[int, subprocess.Popen] = {}
 
     def command(self, device: str, out: Path) -> list[str]:
-        # avfoundation aceita índice ou nome do dispositivo; ":X" significa "sem vídeo, áudio X".
+        # avfoundation accepts a device index or name; ":X" means "no video, audio X".
         return [
             self.ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostdin", "-y",
             "-f", "avfoundation", "-i", f":{device}",

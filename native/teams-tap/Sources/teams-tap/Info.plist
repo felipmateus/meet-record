@@ -11,6 +11,6 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>teams-recorder grava o áudio das reuniões do Microsoft Teams para transcrição local.</string>
+    <string>teams-recorder records the audio of Microsoft Teams meetings for local transcription.</string>
 </dict>
 </plist>

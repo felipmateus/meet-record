@@ -1,4 +1,4 @@
-"""AudioMixer via ffmpeg: soma as trilhas, normaliza loudness e codifica AAC mono."""
+"""AudioMixer via ffmpeg: sums the tracks, normalizes loudness and encodes mono AAC."""
 from __future__ import annotations
 
 import logging
@@ -11,13 +11,13 @@ from teams_recorder.domain import CaptureError
 
 log = logging.getLogger(__name__)
 
-MIN_TRACK_BYTES = 1024  # cabeçalho WAV sem amostras tem 44 bytes; menos de 1 KB é lixo
-ANOMALY_RATIO = 0.5     # trilha com menos da metade da duração da mais longa é anomalia
-DEBUG_DIR = "debug"     # trilhas brutas preservadas aqui quando há anomalia
+MIN_TRACK_BYTES = 1024  # a WAV header without samples is 44 bytes; under 1 KB is garbage
+ANOMALY_RATIO = 0.5     # a track shorter than half the longest one is an anomaly
+DEBUG_DIR = "debug"     # raw tracks are preserved here when there is an anomaly
 
 
 def probe(path: Path, ffmpeg: str = "ffmpeg") -> dict:
-    """Duração (s) e volume médio/máximo (dB) de uma trilha, via ffmpeg volumedetect."""
+    """Duration (s) and mean/peak volume (dB) of a track, via ffmpeg volumedetect."""
     info: dict = {"duration": None, "mean_db": None, "max_db": None}
     try:
         r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=600, check=False)
@@ -40,14 +40,14 @@ class FfmpegMixer:
     def __init__(self, ffmpeg: str = "ffmpeg", bitrate_kbps: int = 64, sample_rate: int = 48000, timeout: float = 600.0, denoise: bool = True) -> None:
         self.ffmpeg = ffmpeg
         self.bitrate_kbps = bitrate_kbps
-        self.sample_rate = sample_rate  # loudnorm reamostra internamente; fixamos a saída
+        self.sample_rate = sample_rate  # loudnorm resamples internally; we pin the output rate
         self.timeout = timeout
         self.denoise = denoise
 
-    # Por trilha: remove zumbido/ruído grave (ventilador, mesa) e reduz ruído de fundo
-    # estimando o piso de ruído continuamente. Depois da soma: normaliza loudness e limita
-    # picos a -1 dBTP, porque a soma de duas trilhas (voz do usuário perto do microfone +
-    # Teams) saturava o arquivo final (pico medido: +1,5 dB).
+    # Per track: removes hum/low-frequency noise (fan, desk) and reduces background noise
+    # by continuously estimating the noise floor. After summing: normalizes loudness and
+    # limits peaks to -1 dBTP, because summing two tracks (user's voice close to the
+    # microphone + Teams) was clipping the final file (measured peak: +1.5 dB).
     TRACK_FILTER = "highpass=f=80,afftdn=nf=-25:tn=1"
     MASTER_FILTER = "loudnorm=I=-18:TP=-2:LRA=11,alimiter=limit=0.891:level=0"
 
@@ -71,9 +71,9 @@ class FfmpegMixer:
         return cmd
 
     def _preserve_if_anomalous(self, tracks: list[Path], durations: dict[Path, float], meeting_dir: Path) -> None:
-        """Se uma trilha é muito mais curta que a outra (gravador morreu), guarda cópias para diagnóstico."""
+        """If one track is much shorter than the other (a recorder died), keep copies for diagnosis."""
         if len(durations) < 2:
-            anomalous = len(tracks) >= 2  # uma trilha inteira faltando/vazia também é anomalia
+            anomalous = len(tracks) >= 2  # a whole track missing/empty is also an anomaly
         else:
             longest = max(durations.values())
             anomalous = longest > 0 and min(durations.values()) / longest < ANOMALY_RATIO
@@ -84,7 +84,7 @@ class FfmpegMixer:
         for t in tracks:
             if t.exists():
                 shutil.copy2(t, debug / t.name)
-        log.warning("anomalia nas trilhas (%s); cópias brutas preservadas em %s", ", ".join(f"{t.name}={durations.get(t, 0):.1f}s" for t in tracks), debug)
+        log.warning("track anomaly (%s); raw copies kept in %s", ", ".join(f"{t.name}={durations.get(t, 0):.1f}s" for t in tracks), debug)
 
     def mix(self, tracks: list[Path], out: Path) -> Path:
         usable = self.usable_tracks(tracks)
@@ -95,16 +95,16 @@ class FfmpegMixer:
                 info = probe(t, self.ffmpeg)
                 if info["duration"] is not None:
                     durations[t] = info["duration"]
-                log.info("trilha %s: %.1f MB, %.1f s, média %s dB, pico %s dB", t.name, size / 1e6, info["duration"] or 0.0, info["mean_db"], info["max_db"])
+                log.info("track %s: %.1f MB, %.1f s, mean %s dB, peak %s dB", t.name, size / 1e6, info["duration"] or 0.0, info["mean_db"], info["max_db"])
             else:
-                log.info("trilha %s: %.1f MB (descartada)", t.name, size / 1e6)
+                log.info("track %s: %.1f MB (discarded)", t.name, size / 1e6)
         self._preserve_if_anomalous(tracks, durations, out.parent)
         if not usable:
-            raise CaptureError("nenhuma trilha de áudio utilizável para mixar: " + ", ".join(str(t) for t in tracks))
+            raise CaptureError("no usable audio track to mix: " + ", ".join(str(t) for t in tracks))
         try:
             result = subprocess.run(self.command(usable, out), capture_output=True, text=True, timeout=self.timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise CaptureError(f"ffmpeg falhou ao mixar: {exc}") from exc
+            raise CaptureError(f"ffmpeg failed to mix: {exc}") from exc
         if result.returncode != 0 or not out.exists():
-            raise CaptureError(f"ffmpeg falhou ao mixar (código {result.returncode}): {result.stderr.strip()[-500:]}")
+            raise CaptureError(f"ffmpeg failed to mix (code {result.returncode}): {result.stderr.strip()[-500:]}")
         return out

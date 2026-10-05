@@ -12,8 +12,8 @@ from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, META, MIC_TRACK
         ({META, AUDIO}, MeetingStatus.RECORDED),
         ({META, AUDIO, TRANSCRIPT_JSON}, MeetingStatus.TRANSCRIBED),
         ({META, AUDIO, TRANSCRIPT_JSON, ANALYSIS}, MeetingStatus.ANALYZED),
-        ({META, TRANSCRIPT_JSON, ANALYSIS}, MeetingStatus.ANALYZED),  # áudio purgado
-        ({META, TRANSCRIPT_JSON}, MeetingStatus.TRANSCRIBED),  # áudio purgado antes da análise
+        ({META, TRANSCRIPT_JSON, ANALYSIS}, MeetingStatus.ANALYZED),  # audio purged
+        ({META, TRANSCRIPT_JSON}, MeetingStatus.TRANSCRIBED),  # audio purged before analysis
         ({META, AUDIO, ERROR}, MeetingStatus.FAILED),
         ({META, AUDIO, TRANSCRIPT_JSON, ANALYSIS, ERROR}, MeetingStatus.FAILED),
     ],

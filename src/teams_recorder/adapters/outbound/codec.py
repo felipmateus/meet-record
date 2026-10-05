@@ -1,6 +1,6 @@
-"""Conversão entre entidades do domínio e dicionários JSON.
+"""Conversion between domain entities and JSON dictionaries.
 
-Mantido no adaptador para que o domínio não conheça formato de persistência.
+Kept in the adapter so the domain knows nothing about the persistence format.
 """
 from __future__ import annotations
 

@@ -1,9 +1,9 @@
-"""Repositório de reuniões baseado em arquivos (decisão: estado = arquivos).
+"""File-based meeting repository (decision: state = files).
 
 Layout:
   <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, .lock}
-  <data_dir>/planos/{AAAA-MM-DD.md, AAAA-MM-DD.json, acoes_abertas.json}
-Escritas são atômicas (arquivo temporário + os.replace).
+  <data_dir>/plans/{YYYY-MM-DD.md, YYYY-MM-DD.json, open_actions.json}
+Writes are atomic (temporary file + os.replace).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from teams_recorder.domain import (
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
-OPEN_ACTIONS = "acoes_abertas.json"
+OPEN_ACTIONS = "open_actions.json"
 ACTIVE_RECORDING = "current_recording.json"
 
 
@@ -47,20 +47,20 @@ def _read_json(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise RepositoryError(f"arquivo não encontrado: {path}") from exc
+        raise RepositoryError(f"file not found: {path}") from exc
     except json.JSONDecodeError as exc:
-        raise RepositoryError(f"JSON inválido em {path}: {exc}") from exc
+        raise RepositoryError(f"invalid JSON in {path}: {exc}") from exc
 
 
 class FsMeetingRepository:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = Path(data_dir)
         self.recordings = self.data_dir / "recordings"
-        self.plans = self.data_dir / "planos"
+        self.plans = self.data_dir / "plans"
         self.recordings.mkdir(parents=True, exist_ok=True)
         self.plans.mkdir(parents=True, exist_ok=True)
 
-    # --- reuniões -------------------------------------------------------
+    # --- meetings -------------------------------------------------------
     def _dir(self, meeting_id: str) -> Path:
         return self.recordings / meeting_id
 
@@ -73,7 +73,7 @@ class FsMeetingRepository:
     def create(self, meeting: Meeting) -> None:
         d = self._dir(meeting.id)
         if d.exists():
-            raise RepositoryError(f"reunião já existe: {meeting.id}")
+            raise RepositoryError(f"meeting already exists: {meeting.id}")
         d.mkdir(parents=True)
         self.save_meta(meeting)
 
@@ -93,7 +93,7 @@ class FsMeetingRepository:
     def exists(self, meeting_id: str) -> bool:
         return self._dir(meeting_id).is_dir()
 
-    # --- arquivos -------------------------------------------------------
+    # --- files ----------------------------------------------------------
     def files(self, meeting_id: str) -> set[str]:
         return {p.name for p in self._require(meeting_id).iterdir() if not p.name.endswith(".tmp")}
 
@@ -114,14 +114,14 @@ class FsMeetingRepository:
     def lock(self, meeting_id: str) -> Iterator[None]:
         lock = self._require(meeting_id) / LOCK
         if lock.exists():
-            raise RepositoryError(f"reunião {meeting_id} já está em processamento")
+            raise RepositoryError(f"meeting {meeting_id} is already being processed")
         lock.write_text(str(os.getpid()))
         try:
             yield
         finally:
             lock.unlink(missing_ok=True)
 
-    # --- gravação ativa -------------------------------------------------
+    # --- active recording -----------------------------------------------
     @property
     def _active_path(self) -> Path:
         return self.data_dir / ACTIVE_RECORDING
@@ -140,7 +140,7 @@ class FsMeetingRepository:
         try:
             meeting = self.load_meta(data["meeting_id"])  # type: ignore[index]
         except MeetingNotFound:
-            self.clear_active()  # ponteiro órfão: a pasta da reunião sumiu
+            self.clear_active()  # orphan pointer: the meeting folder is gone
             return None
         return ActiveRecording(
             meeting=meeting,
@@ -151,7 +151,7 @@ class FsMeetingRepository:
     def clear_active(self) -> None:
         self._active_path.unlink(missing_ok=True)
 
-    # --- artefatos ------------------------------------------------------
+    # --- artifacts ------------------------------------------------------
     def save_transcript(self, meeting_id: str, transcript: Transcript) -> None:
         d = self._require(meeting_id)
         _write_json(d / TRANSCRIPT_JSON, codec.transcript_to_dict(transcript))
@@ -172,7 +172,7 @@ class FsMeetingRepository:
     def clear_failed(self, meeting_id: str) -> None:
         self.delete_file(meeting_id, ERROR)
 
-    # --- planos ---------------------------------------------------------
+    # --- plans ----------------------------------------------------------
     def _plan_json(self, day: date) -> Path:
         return self.plans / f"{day.isoformat()}.json"
 

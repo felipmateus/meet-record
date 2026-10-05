@@ -1,25 +1,25 @@
-"""Exceções do domínio. Adaptadores traduzem erros externos para estas classes."""
+"""Domain exceptions. Adapters translate external failures into these classes."""
 
 
 class TeamsRecorderError(Exception):
-    """Base de todas as exceções do projeto."""
+    """Base class for every exception in the project."""
 
 
 class CaptureError(TeamsRecorderError):
-    """Falha ao iniciar, parar ou mixar captura de áudio."""
+    """Failed to start, stop or mix an audio capture."""
 
 
 class TranscriptionError(TeamsRecorderError):
-    """Falha na transcrição do áudio."""
+    """Audio transcription failed."""
 
 
 class AnalysisError(TeamsRecorderError):
-    """Falha na análise ou no planejamento via LLM."""
+    """LLM analysis or planning failed."""
 
 
 class RepositoryError(TeamsRecorderError):
-    """Falha de leitura ou escrita no repositório de reuniões."""
+    """Read or write failure in the meeting repository."""
 
 
 class MeetingNotFound(RepositoryError):
-    """A reunião pedida não existe no repositório."""
+    """The requested meeting does not exist in the repository."""

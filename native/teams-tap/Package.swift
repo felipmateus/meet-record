@@ -12,8 +12,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
-                // Embute o Info.plist no binário para que o TCC identifique o utilitário
-                // e mostre a descrição de uso ao pedir permissão de áudio do sistema.
+                // Embeds the Info.plist in the binary so that TCC identifies the utility
+                // and shows the usage description when requesting system audio permission.
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",

@@ -1,9 +1,9 @@
-"""MicCapture via o binário `teams-tap --mic` (AVAudioEngine).
+"""MicCapture via the `teams-tap --mic` binary (AVAudioEngine).
 
-Substitui o ffmpeg/avfoundation como padrão: nas duas primeiras reuniões reais o ffmpeg
-parou de receber quadros poucos segundos após o Teams abrir o microfone (reconfiguração
-do dispositivo). O AVAudioEngine recebe a notificação de mudança e reinicia a captura;
-com `default` segue a entrada padrão do sistema (headset, por exemplo).
+Replaces ffmpeg/avfoundation as the default: in the first two real meetings ffmpeg
+stopped receiving frames a few seconds after Teams opened the microphone (device
+reconfiguration). AVAudioEngine receives the change notification and restarts the
+capture; with `default` it follows the system's default input (a headset, for example).
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class CoreAudioMicCapture:
 
     def start(self, device: str, out: Path) -> CaptureHandle:
         if not self.binary.exists():
-            raise CaptureError(f"binário teams-tap não encontrado em {self.binary}. Compile com: scripts/build-native.sh")
+            raise CaptureError(f"teams-tap binary not found at {self.binary}. Build it with: scripts/build-native.sh")
         proc = process_control.spawn(self.command(device, out), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)

@@ -27,7 +27,7 @@ def test_meeting_start_and_duration():
 
 
 def test_transcript_text_and_timestamps():
-    t = Transcript(segments=[Segment(0.0, 2.0, " Olá "), Segment(2.0, 65.5, "tudo bem?"), Segment(65.5, 66.0, "  ")])
+    t = Transcript(segments=[Segment(0.0, 2.0, " Olá "), Segment(2.0, 65.5, "tudo bem?"), Segment(65.5, 66.0, "  ")])  # Portuguese speech is data
     assert t.text == "Olá\ntudo bem?"
     assert t.duration_seconds == 66.0
     lines = t.as_timestamped_text().splitlines()
@@ -41,24 +41,24 @@ def test_empty_transcript():
 
 
 def test_action_overdue():
-    a = Action("x", "eu", "m1", due=date(2026, 10, 5))
+    a = Action("x", "me", "m1", due=date(2026, 10, 5))
     assert a.is_overdue_on(date(2026, 10, 6))
     assert not a.is_overdue_on(date(2026, 10, 5))
     a.status = ActionStatus.DONE
     assert not a.is_overdue_on(date(2026, 10, 6))
-    assert not Action("y", "eu", "m1").is_overdue_on(date(2026, 10, 6))
+    assert not Action("y", "me", "m1").is_overdue_on(date(2026, 10, 6))
 
 
 def test_action_ids_are_unique():
-    assert Action("a", "eu", "m").id != Action("a", "eu", "m").id
+    assert Action("a", "me", "m").id != Action("a", "me", "m").id
 
 
 def test_merge_open_actions():
-    keep = Action("manter", "eu", "m1", id="keep")
-    done = Action("feita", "eu", "m1", id="done")
-    late = Action("atrasada", "eu", "m1", id="late", due=date(2026, 10, 1))
-    new = Action("nova", "eu", "m2", id="new")
-    dup = Action("duplicada", "eu", "m2", id="keep")
+    keep = Action("keep", "me", "m1", id="keep")
+    done = Action("done", "me", "m1", id="done")
+    late = Action("late", "me", "m1", id="late", due=date(2026, 10, 1))
+    new = Action("new", "me", "m2", id="new")
+    dup = Action("duplicate", "me", "m2", id="keep")
     plan = DailyPlan(date(2026, 10, 6), "", new_actions=[new, dup], completed_action_ids=["done"], overdue_action_ids=["late"])
 
     result = merge_open_actions([keep, done, late], plan)

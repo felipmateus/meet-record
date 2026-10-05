@@ -1,4 +1,4 @@
-"""Análise real via Claude Code headless. Opt-in: TREC_REAL_CLAUDE_CLI=1 (usa a assinatura)."""
+"""Real analysis via headless Claude Code. Opt-in: TREC_REAL_CLAUDE_CLI=1 (uses the subscription)."""
 import json
 import os
 import shutil
@@ -15,7 +15,7 @@ PROJECT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 ready = os.environ.get("TREC_REAL_CLAUDE_CLI") == "1" and shutil.which("claude")
 
-pytestmark = [pytest.mark.slow, pytest.mark.skipif(not ready, reason="defina TREC_REAL_CLAUDE_CLI=1 (requer Claude Code logado)")]
+pytestmark = [pytest.mark.slow, pytest.mark.skipif(not ready, reason="set TREC_REAL_CLAUDE_CLI=1 (requires a logged-in Claude Code)")]
 
 
 def test_real_cli_analysis_extracts_actions(tmp_path: Path):
@@ -34,5 +34,5 @@ def test_real_cli_analysis_extracts_actions(tmp_path: Path):
     assert analysis.summary
     descriptions = " ".join(a.description.lower() for a in analysis.my_actions)
     assert "relatório" in descriptions
-    # a reunião de exemplo é numa terça (2026-10-06); "até quarta-feira" = 2026-10-07
+    # the sample meeting is on a Tuesday (2026-10-06); "até quarta-feira" (by Wednesday) = 2026-10-07
     assert any(a.due and a.due.isoformat() == "2026-10-07" for a in analysis.my_actions), analysis.my_actions

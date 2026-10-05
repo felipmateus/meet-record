@@ -1,4 +1,4 @@
-"""Casos de uso de pós-processamento: transcrever e analisar uma reunião."""
+"""Post-processing use cases: transcribe and analyze a meeting."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ class TranscribeMeeting:
 
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
-            raise TranscriptionError(f"reunião {meeting_id} não tem {AUDIO}")
+            raise TranscriptionError(f"meeting {meeting_id} has no {AUDIO}")
         with self.repo.lock(meeting_id):
             transcript = self.transcriber.transcribe(self.repo.path(meeting_id, AUDIO), self.language)
             self.repo.save_transcript(meeting_id, transcript)

@@ -5,9 +5,9 @@ from datetime import datetime
 
 import pytest
 
-# O pytest-cov injeta medição de cobertura em todo subprocesso Python via variáveis
-# COV_CORE_*. Os filhos destes testes são gravadores simulados, não código do pacote,
-# e neste ambiente a importação do coverage no filho leva dezenas de segundos.
+# pytest-cov injects coverage measurement into every Python subprocess through the
+# COV_CORE_* variables. The children spawned by these tests are scripted recorders, not
+# package code, and on this machine importing coverage in the child takes tens of seconds.
 for _var in list(os.environ):
     if _var.startswith("COV_CORE_"):
         os.environ.pop(_var, None)

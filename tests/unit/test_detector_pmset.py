@@ -10,8 +10,8 @@ SAMPLE = (Path(__file__).resolve().parents[1] / "fixtures" / "pmset_assertions.t
 def test_parse_finds_only_target_process_once():
     assert parse_assertions(SAMPLE, "MSTeams") == [51234]
     assert parse_assertions(SAMPLE, "caffeinate") == [4827]
-    assert parse_assertions(SAMPLE, "WindowServer") == []  # UserIsActive não é asserção de chamada
-    assert parse_assertions(SAMPLE, "Nada") == []
+    assert parse_assertions(SAMPLE, "WindowServer") == []  # UserIsActive is not a call assertion
+    assert parse_assertions(SAMPLE, "Nothing") == []
     assert parse_assertions("", "MSTeams") == []
 
 
@@ -39,5 +39,5 @@ def test_poll_unknown_on_failure():
     assert PmsetCallDetector("MSTeams", runner=_runner("", rc=1)).poll() == CallState.UNKNOWN
 
     def boom(cmd, **kw):
-        raise OSError("sem pmset")
+        raise OSError("no pmset")
     assert PmsetCallDetector("MSTeams", runner=boom).poll() == CallState.UNKNOWN

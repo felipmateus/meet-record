@@ -20,10 +20,10 @@ def test_build_daily_plan_uses_only_analyzed_meetings_of_the_day(repo, notifier,
     clock.advance(hours=1)
     _analyzed(repo, clock, "B")
     clock.advance(hours=1)
-    repo.seed(Meeting.start(clock.now(), title="só gravada"), {AUDIO})
+    repo.seed(Meeting.start(clock.now(), title="recorded only"), {AUDIO})
     clock.advance(days=1)
-    _analyzed(repo, clock, "amanhã")
-    late = Action("velha", "eu", "m0", id="late", due=day - timedelta(days=3))
+    _analyzed(repo, clock, "tomorrow")
+    late = Action("old", "me", "m0", id="late", due=day - timedelta(days=3))
     repo.save_open_actions([late])
 
     plan = BuildDailyPlan(repo, FakePlanner(), notifier).execute(day)
@@ -34,7 +34,7 @@ def test_build_daily_plan_uses_only_analyzed_meetings_of_the_day(repo, notifier,
     open_ids = [a.id for a in repo.load_open_actions()]
     assert open_ids[0] == "late" and len(open_ids) == 3
     assert repo.load_open_actions()[0].status == ActionStatus.OVERDUE
-    assert notifier.messages[-1] == ("Plano do dia pronto", "2 reunião(ões), 2 ação(ões) nova(s)")
+    assert notifier.messages[-1] == ("Daily plan ready", "2 meeting(s), 2 new action(s)")
 
 
 def test_build_daily_plan_passes_previous_plan(repo, notifier, clock):

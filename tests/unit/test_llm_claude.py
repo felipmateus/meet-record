@@ -1,4 +1,4 @@
-"""ClaudeAnalyzer com cliente simulado: sem rede, sem chave."""
+"""ClaudeAnalyzer with a simulated client: no network, no key."""
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -79,14 +79,14 @@ def test_analyze_maps_to_domain_and_logs_usage(tmp_path: Path, meeting, transcri
     assert analysis.my_actions[0].owner == "usuário" and analysis.my_actions[0].due == date(2026, 10, 8)
     assert analysis.others_actions[0].owner == "Mariana" and analysis.others_actions[0].due is None
     assert analysis.deadlines[0].when == date(2026, 10, 8)
-    # requisição
+    # request
     call = client.beta.messages.calls[0]
     assert call["model"] == "claude-opus-5-5" and call["fallbacks"] == "default" and call["betas"] == [FALLBACK_BETA]
     assert call["system"][0]["cache_control"] == {"type": "ephemeral"} and call["system"][0]["text"] == "SYS"
     assert call["output_config"]["effort"] == "medium"
     assert call["output_config"]["format"]["type"] == "json_schema"
-    assert "Transcrição" in call["messages"][0]["content"]
-    # log de uso
+    assert "Transcript" in call["messages"][0]["content"]
+    # usage log
     entry = json.loads((tmp_path / "usage.jsonl").read_text().strip())
     assert entry["meeting"] == meeting.id and entry["input"] == 1200 and entry["cache_read"] == 1000
 
@@ -101,25 +101,25 @@ def test_without_fallbacks_uses_plain_messages(meeting, transcript):
 def test_empty_transcript_short_circuits(meeting):
     client = FakeClient(_response("{}"))
     analysis = ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(Transcript(), meeting)
-    assert "vazia" in analysis.summary and not client.beta.messages.calls
+    assert "Empty transcript" in analysis.summary and not client.beta.messages.calls
 
 
 def test_refusal_is_an_error(meeting, transcript):
     details = SimpleNamespace(category="cyber", explanation="x")
     client = FakeClient(_response("", stop_reason="refusal", stop_details=details))
-    with pytest.raises(AnalysisError, match="recusou.*cyber"):
+    with pytest.raises(AnalysisError, match="refused.*cyber"):
         ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_truncation_is_an_error(meeting, transcript):
     client = FakeClient(_response("{", stop_reason="max_tokens"))
-    with pytest.raises(AnalysisError, match="truncada"):
+    with pytest.raises(AnalysisError, match="truncated"):
         ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_schema_violation_is_an_error(meeting, transcript):
     client = FakeClient(_response(json.dumps({"summary": 123})))
-    with pytest.raises(AnalysisError, match="fora do esquema"):
+    with pytest.raises(AnalysisError, match="does not match the schema"):
         ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
@@ -130,7 +130,7 @@ def test_to_domain_tolerates_bad_dates(meeting):
 
 def test_user_message_has_context(meeting, transcript):
     msg = build_user_message(transcript, meeting)
-    assert "2026-10-06 (terça-feira)" in msg and "Título: Planejamento" in msg and "Duração: 45 min" in msg
+    assert "Meeting date: 2026-10-06 (Tuesday)" in msg and "Title: Planejamento" in msg and "Duration: 45 min" in msg
     assert "[00:00:03] Felipe" in msg
 
 
@@ -145,24 +145,24 @@ def test_strict_schema_closes_objects_and_requires_all_fields():
 
 def test_prompt_is_loaded_lazily_from_path(tmp_path: Path, meeting, transcript):
     prompt = tmp_path / "analyze_system.md"
-    prompt.write_text("PROMPT DO ARQUIVO\n")
+    prompt.write_text("PROMPT FROM FILE\n")
     client = FakeClient(_response(json.dumps(SAMPLE_OUT)))
     analyzer = ClaudeAnalyzer(prompt_path=prompt, min_words=1, client=client)
 
     analyzer.analyze(transcript, meeting)
 
-    assert client.beta.messages.calls[0]["system"][0]["text"] == "PROMPT DO ARQUIVO"
+    assert client.beta.messages.calls[0]["system"][0]["text"] == "PROMPT FROM FILE"
 
 
 def test_missing_prompt_file_is_an_error(tmp_path: Path, meeting, transcript):
     client = FakeClient(_response("{}"))
-    with pytest.raises(AnalysisError, match="prompt não encontrado"):
-        ClaudeAnalyzer(prompt_path=tmp_path / "nao.md", min_words=1, client=client).analyze(transcript, meeting)
+    with pytest.raises(AnalysisError, match="prompt not found"):
+        ClaudeAnalyzer(prompt_path=tmp_path / "missing.md", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_short_transcript_is_not_sent(meeting):
     client = FakeClient(_response("{}"))
     short = Transcript(segments=[Segment(0, 1, "Tchau, tchau, tchau.")])
     analysis = ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(short, meeting)
-    assert "muito curta" in analysis.summary and "Tchau" in analysis.summary
+    assert "too short" in analysis.summary and "Tchau" in analysis.summary
     assert not client.beta.messages.calls
