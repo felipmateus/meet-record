@@ -107,3 +107,10 @@ def test_tcc_protected_folders_get_app_support_data_dir(tmp_path: Path, monkeypa
     assert default_data_dir(dev) == dev / "data"
     # APP_SUPPORT_DIR was computed at import time with the real home; only the rule matters here
     assert default_data_dir(docs) == APP_SUPPORT_DIR
+
+
+def test_relative_data_dir_is_resolved_against_project(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[paths]\ndata_dir = "data"\n')
+    assert load_settings(tmp_path).data_dir == tmp_path.resolve() / "data"
+    (tmp_path / "config.toml").write_text('[paths]\ndata_dir = "/abs/place"\n')
+    assert load_settings(tmp_path).data_dir == Path("/abs/place")

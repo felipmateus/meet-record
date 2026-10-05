@@ -23,7 +23,7 @@ scripts/download-model.sh [name]       # ggml models into data/models (default l
 
 trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | purge
 trec daemon --once                     # one detector reading
-trec status                            # also prints the data dir (Application Support when the project is under ~/Documents)
+trec status                            # also prints the data dir (paths.data_dir in config.toml; currently ./data)
 trec agent install|restart|status|uninstall   # LaunchAgent local.teams-recorder.daemon
 native/teams-tap/.build/release/teams-tap --list   # which processes are Core Audio clients right now
 ```
@@ -41,7 +41,7 @@ application/     ports.py (Protocols) + use_cases/ + pipeline.py. Depends only o
 adapters/inbound/   cli.py (Typer app `trec`), daemon.py (detector loop with hysteresis)
 adapters/outbound/  one file per port implementation (see below)
 container.py     composition root: the ONLY place that instantiates concrete adapters, from config.Settings
-config.py        config.toml + .env → frozen Settings; env overrides; data_dir goes to ~/Library/Application Support when the project sits in iCloud or a TCC-protected folder (Documents/Desktop/Downloads)
+config.py        config.toml + .env → frozen Settings; env overrides; data_dir = paths.data_dir (relative = inside the project; this repo uses ./data), or automatic: Application Support when the project sits in iCloud or a TCC-protected folder
 ```
 
 Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer) and `planner_claude` (planner); and `codec` (JSON ↔ domain) is used by `repository_fs`.
@@ -94,5 +94,7 @@ Key invariants:
 - When a skill is run, the organization requires a `RUN_LOG-<user>-<date>.md` in `docs/run-logs/` listing questions asked and answers given.
 
 ## Environment quirks (dev Mac)
+
+Never place the project (or its `data/`) under `~/Documents`, `~/Desktop` or `~/Downloads`: macOS TCC blocks the launchd daemon there ("[Errno 11] Resource deadlock avoided"), first intermittently and then persistently — on 2026-10-05 it stopped recordings entirely, so the project moved to `~/Projetos/Pessoal/teams-recorder`. File I/O still goes through `adapters/outbound/fs_retry.retry_io` and process spawns through `process_control`, both retrying transient errnos; use them for any new file access the daemon performs.
 
 First open of any newly written file (including `.pyc`) can take seconds per file due to endpoint security scanning; a cold `pytest` after large edits may hang for minutes with 0% CPU, then run in ~10 s. Free disk and swap were tight; the macOS kernel has SIGKILLed test subprocesses under memory pressure. Coverage is opt-in for that reason.

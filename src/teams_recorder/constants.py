@@ -171,6 +171,8 @@ class Proc:
     MIC_STARTUP_GRACE = 1.5
     FFMPEG_TIMEOUT = 600.0          # mixing / probing one meeting
     WHISPER_TIMEOUT = 3 * 3600.0
+    IO_RETRIES = 12                 # file reads/writes blocked transiently by TCC
+    IO_RETRY_DELAY = 0.5
     SPAWN_RETRIES = 12
     SPAWN_RETRY_DELAY = 0.5
     STOP_TIMEOUT = 10.0

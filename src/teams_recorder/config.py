@@ -129,6 +129,14 @@ def is_tcc_protected(path: Path) -> bool:
     return bool(rel.parts) and rel.parts[0] in Files.TCC_PROTECTED_FOLDERS
 
 
+def resolve_data_dir(project_dir: Path, configured: str | None) -> Path:
+    """Explicit `paths.data_dir` wins; a relative value is resolved against the project dir."""
+    if not configured:
+        return default_data_dir(project_dir)
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else project_dir / path
+
+
 def default_data_dir(project_dir: Path) -> Path:
     if is_icloud_synced(project_dir) or is_tcc_protected(project_dir):
         return Files.APP_SUPPORT_DIR
@@ -152,7 +160,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     llm = raw.get("llm", {})
     planner = raw.get("planner", {})
 
-    data_dir = Path(paths["data_dir"]).expanduser() if paths.get("data_dir") else default_data_dir(project_dir)
+    data_dir = resolve_data_dir(project_dir, paths.get("data_dir"))
 
     return Settings(
         project_dir=project_dir,

@@ -34,7 +34,7 @@ trec transcribe                      # every recorded meeting not yet transcribe
 trec transcribe 2026-10-06_14-00-00  # one specific meeting
 ```
 
-Produces `transcript.txt` (with timestamps) and `transcript.json` in the meeting folder. Data (recordings, plans, models, logs) lives in `data/` or, if the project is under Documents/Desktop/Downloads or in iCloud, in `~/Library/Application Support/teams-recorder` — macOS blocks background processes in those folders. `trec status` shows the folder in use. Everything runs locally; the audio never leaves the Mac. On a MacBook Air M1, 15 s of speech takes about 30 s including model loading; long meetings approach a 1:4 ratio (one hour in 15 min).
+Produces `transcript.txt` (with timestamps) and `transcript.json` in the meeting folder. Data (recordings, plans, models, logs) lives where `paths.data_dir` in `config.toml` points; this repository keeps it in `./data` (git-ignored). Left empty, it is chosen automatically: `./data`, or `~/Library/Application Support/teams-recorder` when the project is under Documents/Desktop/Downloads or iCloud, since macOS can block background processes there. `trec status` shows the folder in use.
 
 ## Analysis with Claude (phase 4)
 
