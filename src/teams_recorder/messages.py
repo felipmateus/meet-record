@@ -218,6 +218,7 @@ class Log:
     LOG_NOTIFICATION = "[%s] %s"
     USAGE_LOG_FAILED = "could not record LLM usage"
     EXEC_RETRY = "exec of %s failed (%s); attempt %d/%d"
+    IO_RETRY = "file access %s failed (%s); attempt %d/%d"
     WARMUP_BINARY_FAILED = "warm-up of %s failed: %s"
     SIGKILL = "process %s did not exit within %.0fs; SIGKILL"
     TRACK_INFO = "track %s: %.1f MB, %.1f s, mean %s dB, peak %s dB"

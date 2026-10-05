@@ -1,10 +1,12 @@
 # teams-recorder configuration. No secrets here; the API key lives in .env.
 
 [paths]
-# Leave empty for the default: ./data when the project is outside Documents/Desktop/Downloads
-# and outside iCloud; otherwise ~/Library/Application Support/teams-recorder, because
-# macOS blocks background processes that access those folders.
-data_dir = ""
+# Where recordings, plans, models and logs live. A relative path is resolved against the
+# project folder. Empty = automatic: ./data, or ~/Library/Application Support/teams-recorder
+# when the project is in Documents/Desktop/Downloads or iCloud (macOS can block background
+# processes there with "Resource deadlock avoided").
+# User decision (2026-10-05): keep the data inside the project.
+data_dir = "data"
 
 [audio]
 # Microphone: "default" follows the system's default input (recommended: works with a headset),

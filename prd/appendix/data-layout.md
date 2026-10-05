@@ -1,7 +1,7 @@
 # Data layout and schemas
 
 ```
-<data_dir>/                           # ~/Library/Application Support/teams-recorder when the project lives in iCloud or in Documents/Desktop/Downloads; otherwise <project>/data
+<data_dir>/                           # paths.data_dir in config.toml (relative = inside the project; currently ./data); empty = automatic (Application Support under iCloud/Documents/Desktop/Downloads, else ./data)
 ├── current_recording.json            # pointer to the active recording (at most one)
 ├── recordings/<YYYY-MM-DD_HH-MM-SS>/ # one folder per meeting (see dictionary)
 ├── plans/                           # daily plans

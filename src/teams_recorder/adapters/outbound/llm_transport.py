@@ -19,6 +19,7 @@ from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.adapters.outbound.llm_schema import strict_schema
 from teams_recorder.constants import Bin, Effort, Env, Llm, LlmProvider
 from teams_recorder.domain import AnalysisError
@@ -51,8 +52,13 @@ def _log_usage(path: Path | None, entry: dict[str, Any]) -> None:
         return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **entry}, ensure_ascii=False) + "\n")
+        line = json.dumps({"ts": datetime.now().isoformat(timespec="seconds"), **entry}, ensure_ascii=False) + "\n"
+
+        def append() -> None:
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(line)
+
+        retry_io(append, str(path))
     except Exception:  # noqa: BLE001 - usage logging never breaks a call
         log.warning(Log.USAGE_LOG_FAILED, exc_info=True)
 

@@ -10,7 +10,7 @@ Automatically record the audio of every Microsoft Teams meeting on the MacBook, 
 
 | # | Topic | Decision | Note |
 |---|-------|----------|------|
-| 1 | Project folder | `~/Documents/teams-recorder` | See risk R1 (iCloud) |
+| 1 | Project folder | `~/Documents/teams-recorder`, moved to `~/Projetos/Pessoal/teams-recorder` on 2026-10-05 | See risk R1 (iCloud) and the TCC note at the end |
 | 2 | Languages | Python 3.11 + minimal Swift | Swift only in the capture binary |
 | 3 | Teams capture | Core Audio Process Tap | No BlackHole, no routing changes |
 | 4 | LLM | Claude API (Opus 5.5) | No local fallback in this phase |
@@ -149,7 +149,7 @@ The only place that instantiates concrete adapters from `config.py`. Tests swap 
 ## 6. Data file layout (state = files)
 
 ```
-~/Documents/teams-recorder/data/
+~/Projetos/Pessoal/teams-recorder/data/
 ├── recordings/
 │   └── 2026-10-06_14-00-12/
 │       ├── meta.json          # start, end, pid, pipeline version
@@ -292,3 +292,13 @@ teams-recorder/
 - Token usage per call in `data/log/llm_usage.jsonl` (risk R7); `trec status` will start summing the estimated spend in phase 7.
 - The real test against the API is opt-in (`TREC_REAL_CLAUDE=1`), since it spends credits; the default suite uses a mocked client.
 - Second transport for the same `MeetingAnalyzer` port: `ClaudeCodeTransport` calls Claude Code in headless mode (`claude -p --output-format json --json-schema …`) and uses the user's subscription instead of API credit. Selection is by `llm.provider` in `config.toml` or `TREC_LLM_PROVIDER`. Trade-offs: no refusal fallback, cache managed by Claude Code, depends on a logged-in session (relevant for the launchd daemon). Originally implemented as a separate `ClaudeCliAnalyzer`; unified on 2026-10-05 (see phase 6 notes).
+
+### Data folder back inside the project (2026-10-05)
+
+- User decision: `paths.data_dir = "data"` in `config.toml`; relative values now resolve against the project folder. The 549 MB of recordings, plans, models and logs were moved from Application Support back to `./data` (git-ignored); the automatic Application Support default remains for an empty `data_dir`.
+- Known risk (accepted): the daemon runs under launchd and `./data` sits in `~/Documents`, where TCC has caused transient `EDEADLK`. It was observed even before the move, when the daemon read `prompts/analyze_system.md` (meeting 2026-10-05_17-28-06 failed at analysis and was re-run manually). Mitigation: `fs_retry.retry_io` retries transient errnos for prompt reads, repository reads/writes, locks and the LLM usage log, alongside the existing retries for process spawns.
+
+### Project moved out of ~/Documents (2026-10-05)
+
+- With `data/` back inside the project and the project in `~/Documents`, TCC stopped being intermittent: on a test call at 17:51 the daemon failed to execute `teams-tap` 48 times in a row and the call was not recorded; tracebacks even lacked source lines because Python could not read its own files. User decision: keep the data inside the project and move the project to `~/Projetos/Pessoal/teams-recorder` (outside TCC-protected folders, not in iCloud). The virtualenv was recreated, `teams-tap` rebuilt and both LaunchAgents reinstalled with the new paths. The retry helpers stay as defense in depth.
+

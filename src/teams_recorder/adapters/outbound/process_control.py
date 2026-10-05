@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import IO
 
+from teams_recorder.adapters.outbound.fs_retry import TRANSIENT_ERRNOS as _FS_TRANSIENT_ERRNOS
 from teams_recorder.constants import Proc
 from teams_recorder.domain import CaptureError
 from teams_recorder.messages import Err, Log
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 # Transient exec errors on macOS: EDEADLK ("Resource deadlock avoided") was observed on
 # the first run of teams-tap by a freshly started daemon, 4 times in 10 s, and then went
 # away. EAGAIN/ETXTBSY belong to the same family. Worth retrying before giving up.
-TRANSIENT_ERRNOS = {errno.EDEADLK, errno.EAGAIN, errno.ETXTBSY}
+TRANSIENT_ERRNOS = _FS_TRANSIENT_ERRNOS  # shared with fs_retry
 # Module attributes (not read from Proc at call time) so tests can monkeypatch them.
 SPAWN_RETRIES = Proc.SPAWN_RETRIES
 SPAWN_RETRY_DELAY = Proc.SPAWN_RETRY_DELAY

@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.constants import Llm
 from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Decision, Meeting, Transcript
 from teams_recorder.messages import Err, Prompt
@@ -115,6 +116,6 @@ def _tighten(obj: dict[str, Any]) -> None:
 
 def load_prompt(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8").strip()
+        return retry_io(lambda: path.read_text(encoding="utf-8"), str(path)).strip()
     except FileNotFoundError as exc:
         raise AnalysisError(Err.PROMPT_MISSING.format(path=path)) from exc

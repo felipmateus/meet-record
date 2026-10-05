@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterator, cast
 
 from teams_recorder.adapters.outbound import codec
+from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.application.ports import ActiveRecording, CaptureHandle
 from teams_recorder.constants import Files
 from teams_recorder.domain import (
@@ -34,8 +35,8 @@ from teams_recorder.messages import Err
 def _write_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + Files.TMP_SUFFIX)
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)
+    retry_io(lambda: tmp.write_text(text, encoding="utf-8"), str(tmp))
+    retry_io(lambda: os.replace(tmp, path), str(path))
 
 
 def _write_json(path: Path, data: object) -> None:
@@ -44,7 +45,7 @@ def _write_json(path: Path, data: object) -> None:
 
 def _load_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(retry_io(lambda: path.read_text(encoding="utf-8"), str(path)))
     except FileNotFoundError as exc:
         raise RepositoryError(Err.FILE_MISSING.format(path=path)) from exc
     except json.JSONDecodeError as exc:
@@ -128,7 +129,7 @@ class FsMeetingRepository:
         lock = self._require(meeting_id) / LOCK
         if lock.exists():
             raise RepositoryError(Err.MEETING_LOCKED.format(meeting_id=meeting_id))
-        lock.write_text(str(os.getpid()))
+        retry_io(lambda: lock.write_text(str(os.getpid())), str(lock))
         try:
             yield
         finally:
