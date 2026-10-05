@@ -17,8 +17,14 @@ start_after_positive_polls = 2
 stop_after_negative_polls = 5
 
 [transcription]
-whisper_model = "large-v3-turbo"
+# Modelo ggml do whisper.cpp. "large-v3-turbo-q5_0" (574 MB) tem qualidade próxima do
+# large-v3-turbo completo (1,6 GB). Baixe com scripts/download-model.sh.
+whisper_model = "large-v3-turbo-q5_0"
 language = "pt"
+# Pasta dos modelos; vazio = <data_dir>/models
+models_dir = ""
+# Threads do whisper; 0 = automático (núcleos de desempenho)
+threads = 0
 
 [llm]
 model = "claude-opus-5-5"

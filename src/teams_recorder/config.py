@@ -24,6 +24,8 @@ class Settings:
     stop_after_negative_polls: int
     whisper_model: str
     language: str
+    models_dir: Path
+    whisper_threads: int
     llm_model: str
     llm_effort: str
     llm_max_tokens: int
@@ -34,6 +36,10 @@ class Settings:
     @property
     def has_api_key(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def whisper_model_path(self) -> Path:
+        return self.models_dir / f"ggml-{self.whisper_model}.bin"
 
 
 def default_project_dir() -> Path:
@@ -85,8 +91,10 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         poll_seconds=int(detector.get("poll_seconds", 3)),
         start_after_positive_polls=int(detector.get("start_after_positive_polls", 2)),
         stop_after_negative_polls=int(detector.get("stop_after_negative_polls", 5)),
-        whisper_model=str(transcription.get("whisper_model", "large-v3-turbo")),
+        whisper_model=str(transcription.get("whisper_model", "large-v3-turbo-q5_0")),
         language=str(transcription.get("language", "pt")),
+        models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / "models",
+        whisper_threads=int(transcription.get("threads", 0)),
         llm_model=str(llm.get("model", "claude-opus-5-5")),
         llm_effort=str(llm.get("effort", "high")),
         llm_max_tokens=int(llm.get("max_tokens", 16000)),
