@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. Humans: see `README.md`, `docs/REQUISITOS-E-ARQUITETURA.md` (requirements + architecture, Portuguese) and `prd/` (product requirements).
+Guidance for coding agents working in this repository. Humans: see `README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` (requirements + architecture) and `prd/` (product requirements).
 
 ## What this is
 
@@ -22,6 +22,7 @@ scripts/download-model.sh [name]       # ggml models into data/models (default l
 
 trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | purge
 trec daemon --once                     # one detector reading
+trec status                            # also prints the data dir (Application Support when the project is under ~/Documents)
 trec agent install|restart|status|uninstall   # LaunchAgent local.teams-recorder.daemon
 native/teams-tap/.build/release/teams-tap --list   # which processes are Core Audio clients right now
 ```
@@ -39,7 +40,7 @@ application/     ports.py (Protocols) + use_cases/ + pipeline.py. Depends only o
 adapters/inbound/   cli.py (Typer app `trec`), daemon.py (detector loop with hysteresis)
 adapters/outbound/  one file per port implementation (see below)
 container.py     composition root: the ONLY place that instantiates concrete adapters, from config.Settings
-config.py        config.toml + .env → frozen Settings; env overrides; iCloud-aware data_dir
+config.py        config.toml + .env → frozen Settings; env overrides; data_dir goes to ~/Library/Application Support when the project sits in iCloud or a TCC-protected folder (Documents/Desktop/Downloads)
 ```
 
 Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except `llm_claude_cli` reusing schema/prompt helpers from `llm_claude`, and `codec` (JSON ↔ domain) used by `repository_fs`.
@@ -67,13 +68,22 @@ Key invariants:
 - Prompts live in `prompts/*.md`; the analyzer's JSON schema is derived from `AnalysisOut` (Pydantic) with `additionalProperties=false`.
 - The `anthropic` SDK is imported lazily (inside `ClaudeAnalyzer`); do not import it at module level — it has ~1,900 modules and a cold import took 12 minutes on the dev Mac.
 
+## Adding an adapter (the most common change)
+
+1. If the capability is new, declare the port as a `typing.Protocol` in `application/ports.py` (methods only; no I/O types beyond `Path`). Existing ports: see the table above.
+2. Implement it in `adapters/outbound/<capability>_<tech>.py`. Translate every external failure into a domain error (`CaptureError`, `TranscriptionError`, `AnalysisError`, `RepositoryError`) with a message that tells the user what to do. Keep SDK/CLI shapes in one method (e.g. `command()` / `_request()`) so tests can inspect them.
+3. Add a fake in `tests/fakes/__init__.py` (in-memory, records calls) and unit tests for the adapter with a scripted stand-in if it spawns processes (`tests/fixtures/fake_*.py`, wait for a readiness file).
+4. Register it in `container.py` (`build_container` or a `build_<x>()` helper) and, if selectable, add the switch to `config.toml` + `config.Settings` with a test in `tests/unit/test_config.py`.
+5. Surface it in `trec doctor` when it depends on an external binary or model, update `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 notes and the relevant `prd/` page.
+
 ## Working conventions
 
+- **English only.** Everything written into this repository is in English: code, identifiers, comments, docstrings, log messages, CLI output, notifications, tests, documentation, PRD, run logs and commit messages. The only Portuguese allowed is data: sample transcripts and analyses used as test fixtures, and the content the LLM produces for the user (meetings are held in Brazilian Portuguese, so prompts must keep asking for Portuguese output while being written in English). Commits before 2026-10-05 are in Portuguese and were not rewritten.
 - **Ask before committing or pushing.** Edit, test and show the diff; commit only with explicit approval.
-- Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative Portuguese messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
+- Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative English messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
 - Never commit `.env`, `data/`, `native/teams-tap/.build/` or `.venv/` (already ignored). `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
 - Ask before: installing/uninstalling/restarting the LaunchAgent on the user's Mac, deleting anything under `data/recordings`, changing macOS permissions, or running tests that spend API credit. The daemon is installed and running on the development machine and records the user's real meetings.
-- Keep `docs/REQUISITOS-E-ARQUITETURA.md` §10 (phase status + notes) and `prd/` in sync when a phase or a behavior changes.
+- Keep `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase status + notes) and `prd/` in sync when a phase or a behavior changes.
 - When a skill is run, the organization requires a `RUN_LOG-<user>-<date>.md` in `docs/run-logs/` listing questions asked and answers given.
 
 ## Environment quirks (dev Mac)

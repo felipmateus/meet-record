@@ -1,75 +1,78 @@
-# teams-recorder — Documento de Requisitos de Produto (PRD)
+# teams-recorder — Product Requirements Document (PRD)
 
-> Gerado a partir do código em 2026-10-05 (commit da fase 5 + tratamento de ruído). Linguagem de produto; detalhes técnicos só onde afetam o comportamento. Itens marcados `[TBC]` não puderam ser confirmados pelo código.
+> Generated from the code on 2026-10-05 (phase 5 commit + noise handling). Written in product language; technical details only where they affect behavior. Items marked `[TBC]` could not be confirmed from the code.
 
-## 1. Visão geral do sistema
+## 1. System overview
 
-O teams-recorder é um utilitário pessoal para macOS que grava automaticamente as reuniões do Microsoft Teams de um único usuário, transcreve o áudio localmente em português, extrai da transcrição um registro estruturado (resumo, decisões, ações, prazos, perguntas em aberto) usando um modelo de linguagem, e, na fase seguinte, consolida as reuniões do dia em um plano de atividades.
+teams-recorder is a personal macOS utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and, in the next phase, consolidates the day's meetings into an activity plan.
 
-Ele roda em segundo plano, sem interface gráfica: um daemon observa o Teams e dispara a gravação quando uma chamada começa; ao fim, processa tudo sozinho e avisa por notificações do macOS. Uma linha de comando (`trec`) permite operar e inspecionar manualmente cada etapa. Áudio e transcrição nunca saem do Mac; só o texto da transcrição é enviado ao modelo de linguagem, por API ou pelo Claude Code instalado.
+It runs in the background with no graphical interface: a daemon watches Teams and starts recording when a call begins; when the call ends, it processes everything on its own and reports through macOS notifications. A command line (`trec`) lets the user operate and inspect each step manually. Audio and transcripts never leave the Mac; only the transcript text is sent to the language model, through the API or through the locally installed Claude Code.
 
-**Usuário**: uma pessoa, dona do Mac e da conta do Teams, que participa de várias reuniões por dia e quer um registro confiável de compromissos sem tomar notas. **Contexto**: ambiente corporativo; a gravação nativa do Teams pode estar desabilitada; consentimento e política interna são responsabilidade do usuário (ver §6).
+**User**: one person, owner of the Mac and of the Teams account, who attends several meetings a day and wants a reliable record of commitments without taking notes. **Context**: corporate environment; native Teams recording may be disabled; consent and internal policy are the user's responsibility (see §6).
 
-## 2. Módulos
+## 2. Modules
 
-| Módulo | Fluxos | Função central | Status |
+| Module | Flows | Core function | Status |
 |---|---|---|---|
-| Gravação | start, stop, cancel | Capturar o áudio do Teams e do microfone em trilhas separadas e mixar num M4A | Entregue (fase 2) |
-| Transcrição | transcribe | Converter o áudio em texto com marcação de tempo, localmente | Entregue (fase 3) |
-| Análise | analyze | Extrair resumo, decisões, ações, prazos e perguntas da transcrição | Entregue (fase 4) |
-| Automação | daemon, agent | Detectar chamadas do Teams e encadear gravação → transcrição → análise sem intervenção | Entregue (fase 5) |
-| Operação | status, doctor, purge, version | Inspecionar o estado, verificar dependências, aplicar retenção | Entregue (fases 1 a 5) |
-| Planejamento | plan, scheduler | Consolidar as análises do dia num plano em Markdown e manter ações abertas | Pendente (fase 6) |
-| Instalação | install.sh | Instalar do zero em outro Mac/usuário | Pendente (fase 7) |
+| Recording | start, stop, cancel | Capture Teams and microphone audio on separate tracks and mix them into an M4A | Delivered (phase 2) |
+| Transcription | transcribe | Convert the audio into timestamped text, locally | Delivered (phase 3) |
+| Analysis | analyze | Extract summary, decisions, actions, deadlines and questions from the transcript | Delivered (phase 4) |
+| Automation | daemon, agent | Detect Teams calls and chain recording → transcription → analysis with no intervention | Delivered (phase 5) |
+| Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
+| Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
+| Installation | install.sh | Install from scratch on another Mac/user | Pending (phase 7) |
 
-## 3. Inventário de fluxos
+## 3. Flow inventory
 
-| # | Fluxo | Comando | Módulo | Doc |
+| # | Flow | Command | Module | Doc |
 |---|---|---|---|---|
-| 1 | Gravação manual | `trec start` / `trec stop` / `trec cancel` | Gravação | [→](./pages/01-gravacao-manual.md) |
-| 2 | Transcrição | `trec transcribe [id]` | Transcrição | [→](./pages/02-transcricao.md) |
-| 3 | Análise | `trec analyze [id]` | Análise | [→](./pages/03-analise.md) |
-| 4 | Gravação automática | `trec daemon`, `trec agent …` | Automação | [→](./pages/04-automacao.md) |
-| 5 | Operação e diagnóstico | `trec status` / `doctor` / `purge` / `version` | Operação | [→](./pages/05-operacao.md) |
-| 6 | Plano diário | `trec plan` (futuro) | Planejamento | [→](./pages/06-plano-diario.md) |
-| 7 | Instalação | `scripts/install.sh` (futuro) | Instalação | [→](./pages/07-instalacao.md) |
+| 1 | Manual recording | `trec start` / `trec stop` / `trec cancel` | Recording | [→](./pages/01-manual-recording.md) |
+| 2 | Transcription | `trec transcribe [id]` | Transcription | [→](./pages/02-transcription.md) |
+| 3 | Analysis | `trec analyze [id]` | Analysis | [→](./pages/03-analysis.md) |
+| 4 | Automatic recording | `trec daemon`, `trec agent …` | Automation | [→](./pages/04-automation.md) |
+| 5 | Operations and diagnostics | `trec status` / `doctor` / `purge` / `version` | Operations | [→](./pages/05-operations.md) |
+| 6 | Daily plan | `trec plan` | Planning | [→](./pages/06-daily-plan.md) |
+| 7 | Installation | `scripts/install.sh` (future) | Installation | [→](./pages/07-installation.md) |
 
-Apêndices: [dicionário de estados e enumerações](./appendix/dicionario-enums.md) · [integrações externas](./appendix/integracoes.md) · [layout de dados e esquemas](./appendix/layout-de-dados.md) · [relações entre fluxos](./appendix/relacionamentos.md).
+Appendices: [state and enumeration dictionary](./appendix/enum-dictionary.md) · [external integrations](./appendix/integrations.md) · [data layout and schemas](./appendix/data-layout.md) · [relationships between flows](./appendix/relationships.md).
 
-## 4. Notas globais
+## 4. Global notes
 
-### Modelo de estado: "o estado é o arquivo"
-Não há banco de dados. Cada reunião é uma pasta em `data/recordings/<id>/`, e o estado da reunião é derivado de quais arquivos existem nela (ver dicionário). Qualquer etapa pode ser repetida a partir dos arquivos existentes; falhas ficam registradas em `error.txt` na própria pasta e não afetam outras reuniões.
+### State model: "the state is the file"
+There is no database. Each meeting is a folder at `<data_dir>/recordings/<id>/` (see the data layout for where `<data_dir>` lives), and the meeting's state is derived from which files exist in it (see the dictionary). Any step can be repeated from the existing files; failures are recorded in `error.txt` inside the meeting folder and do not affect other meetings.
 
-### Identidade da reunião
-O id é o instante de início no formato `AAAA-MM-DD_HH-MM-SS`. Não há título automático; o campo `title` só é preenchido quando informado manualmente em `trec start --title`. `[TBC]` integração com o calendário para nomear reuniões foi descartada na entrevista de requisitos (decisão 9), mas o campo existe no modelo.
+### Meeting identity
+The id is the start instant in the format `YYYY-MM-DD_HH-MM-SS`. There is no automatic title; the `title` field is only filled when provided manually through `trec start --title`. `[TBC]` Calendar integration to name meetings was dropped in the requirements interview (decision 9), but the field exists in the model.
 
-### Configuração
-`config.toml` na raiz do projeto, sem segredos; `.env` com a chave da API (ignorado pelo git, permissão 600 recomendada). Variáveis de ambiente sobrescrevem pontos específicos: `TEAMS_RECORDER_DIR` (pasta do projeto), `TREC_LLM_PROVIDER` (api | claude-code), `TREC_TEAMS_PROCESS` (nome do processo observado; uso em testes).
+### Configuration
+`config.toml` at the project root, with no secrets; `.env` holding the API key (git-ignored, permission 600 recommended). Environment variables override specific points: `TEAMS_RECORDER_DIR` (project folder), `TREC_LLM_PROVIDER` (api | claude-code), `TREC_TEAMS_PROCESS` (name of the watched process; used in tests).
 
-### Permissões do macOS
-Duas permissões são necessárias e pedidas na primeira gravação: **Microfone** e **Gravação de Tela e Áudio do Sistema**. Sem a segunda, a trilha do Teams sai em silêncio e a mixagem segue só com o microfone.
+### macOS permissions
+Two permissions are required and requested on the first recording: **Microphone** and **Screen & System Audio Recording**. Without the second, the Teams track comes out silent and the mix proceeds with the microphone only.
 
-### Padrões de interação
-- Comandos de processamento (`transcribe`, `analyze`) sem argumento atuam sobre **todas** as reuniões pendentes daquela etapa e seguem adiante mesmo quando uma falha; saem com código 1 se houve alguma falha.
-- Toda saída de erro começa com `erro:`; comandos de fases futuras existem na ajuda e informam em que fase chegam (código de saída 2).
-- Notificações do macOS: "Gravação iniciada", "Gravação encerrada", "Falha na transcrição/análise", "Plano do dia pronto" (fase 6).
+### Interaction patterns
+- Processing commands (`transcribe`, `analyze`) with no argument act on **all** meetings pending that step and keep going even when one fails; they exit with code 1 if any failed.
+- Every error line starts with `error: `; commands from future phases exist in the help and report which phase they arrive in (exit code 2).
+- macOS notifications: "Recording started", "Recording stopped", "Recording cancelled", "Transcription failed" / "Analysis failed", "Daily plan ready".
 
-### Custo e privacidade
-- Transcrição 100 % local (whisper.cpp). Modelo `large-v3-turbo-q5_0`, 574 MB.
-- Análise: Claude Opus 5.5 via API (pré-pago, ~US$ 0,10 por hora de reunião) ou Claude Code headless (assinatura). Cada chamada registra tokens e custo em `data/log/llm_usage.jsonl`.
-- Transcrições com menos de 20 palavras não são enviadas ao modelo.
-- Áudio é apagado após 30 dias (configurável) quando já transcrito; transcrição e análise permanecem.
+### Language
+Analysis and plan content (summaries, actions, the daily Markdown plan) is produced in Brazilian Portuguese because the meetings are in Portuguese; CLI messages and notifications are also in Portuguese, and this document quotes them verbatim with an English gloss.
 
-## 5. Roteiro
+### Cost and privacy
+- Transcription is 100 % local (whisper.cpp). Model `large-v3-turbo-q5_0`, 574 MB.
+- Analysis: Claude Opus 5.5 through the API (prepaid, ~US$ 0.10 per hour of meeting) or headless Claude Code (subscription). Each call logs tokens and cost to `data/log/llm_usage.jsonl`.
+- Transcripts with fewer than 20 words are not sent to the model.
+- Audio is deleted after 30 days (configurable) once transcribed; transcript and analysis remain.
 
-| Fase | Entrega | Situação |
+## 5. Roadmap
+
+| Phase | Deliverable | Status |
 |---|---|---|
-| 1–5 | Gravação, transcrição, análise, automação, operação | Entregues e validadas com chamadas reais do Teams em 2026-10-05 |
-| 6 | Planejador diário (`trec plan`), agendamento às 18h, atualização de ações abertas | Caso de uso e prompt prontos; falta adaptador, comando e agendamento |
-| 7 | `install.sh`, `trec status` com gasto do mês, README de instalação | Pendente |
+| 1–5 | Recording, transcription, analysis, automation, operations | Delivered and validated with real Teams calls on 2026-10-05 |
+| 6 | Daily planner (`trec plan`), scheduling at 6 pm, open-action updates | Delivered 2026-10-05; validation with a real meeting pending |
+| 7 | `install.sh`, `trec status` with the month's spend, installation README | Pending |
 
-## 6. Fora de escopo e responsabilidades do usuário
-- Identificação de quem fala (diarização): não implementada; o modelo infere pelo contexto.
-- Aviso aos participantes e conformidade com política da empresa e LGPD: responsabilidade do usuário. O projeto oferece um filtro de termos sensíveis apenas como melhoria futura (risco R5 do documento de arquitetura).
-- Integração com Microsoft To Do, Obsidian ou calendário: adiada para depois da fase 7.
+## 6. Out of scope and user responsibilities
+- Speaker identification (diarization): not implemented; the model infers speakers from context.
+- Notifying participants and complying with company policy and LGPD (Brazil's data protection law): the user's responsibility. The project offers a sensitive-term filter only as a future improvement (risk R5 in `docs/REQUIREMENTS-AND-ARCHITECTURE.md`).
+- Integration with Microsoft To Do, Obsidian or the calendar: deferred until after phase 7.

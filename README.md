@@ -1,83 +1,96 @@
 # teams-recorder
 
-Grava automaticamente o áudio das reuniões do Microsoft Teams no macOS, transcreve localmente com whisper.cpp, extrai ações e decisões com a Claude API e gera um plano diário de atividades em Markdown.
+Automatically records the audio of Microsoft Teams meetings on macOS, transcribes it locally with whisper.cpp, extracts actions and decisions with the Claude API, and generates a daily activity plan in Markdown.
 
-Documentação de requisitos e arquitetura: `docs/REQUISITOS-E-ARQUITETURA.md`.
+The tool targets meetings held in Brazilian Portuguese, and the analysis and plan content it produces is in Portuguese; the code, documentation and CLI are in English.
 
-## Estado atual
+Requirements and architecture documentation: `docs/REQUIREMENTS-AND-ARCHITECTURE.md`.
 
-- Fase 1 concluída: domínio, portas, casos de uso, repositório em arquivos, CLI (`trec status`, `trec doctor`) e testes.
-- Fase 2 concluída: captura do áudio do Teams via Core Audio Process Tap (binário Swift `teams-tap`), captura do microfone e mixagem com ffmpeg, comandos `trec start`, `trec stop` e `trec cancel`.
-- Fase 3 concluída: transcrição local em português com whisper.cpp (`trec transcribe`), modelo `large-v3-turbo-q5_0`.
-- Fase 4 concluída: análise da transcrição com a Claude API (`trec analyze`): resumo, decisões, ações, prazos e perguntas em aberto em `analysis.json`.
-- Fase 5 concluída: detector de chamada, daemon e LaunchAgent (`trec agent install`). Gravação, transcrição e análise acontecem sozinhas.
-- Próximas fases: planejador diário (6), instalador (7).
+## Current status
 
-## Gravação manual (fase 2)
+- Phase 1 done: domain, ports, use cases, file-based repository, CLI (`trec status`, `trec doctor`) and tests.
+- Phase 2 done: Teams audio capture via Core Audio Process Tap (Swift binary `teams-tap`), microphone capture and mixing with ffmpeg, `trec start`, `trec stop` and `trec cancel` commands.
+- Phase 3 done: local Portuguese transcription with whisper.cpp (`trec transcribe`), model `large-v3-turbo-q5_0`.
+- Phase 4 done: transcript analysis with the Claude API (`trec analyze`): summary, decisions, actions, deadlines and open questions in `analysis.json`.
+- Phase 5 done: call detector, daemon and LaunchAgent (`trec agent install`). Recording, transcription and analysis run on their own.
+- Phase 6 done: daily planner (`trec plan`), scheduled Monday to Friday at 6 pm by the same `trec agent install`, with purging of old audio.
+- Next phase: installer (7).
+
+## Manual recording (phase 2)
 
 ```bash
-scripts/build-native.sh          # compila native/teams-tap/.build/release/teams-tap
-trec start --title "Daily"       # Teams precisa estar aberto; ou use --pid
-trec status                      # mostra a gravação em andamento
-trec stop                        # mixa e gera data/recordings/<id>/audio.m4a
+scripts/build-native.sh          # builds native/teams-tap/.build/release/teams-tap
+trec start --title "Daily"       # Teams must be open; or use --pid
+trec status                      # shows the recording in progress
+trec stop                        # mixes and produces data/recordings/<id>/audio.m4a
 ```
 
-## Transcrição (fase 3)
+## Transcription (phase 3)
 
 ```bash
 brew install whisper-cpp
-scripts/download-model.sh            # ggml-large-v3-turbo-q5_0.bin (574 MB) em data/models/
-trec transcribe                      # todas as reuniões gravadas e ainda não transcritas
-trec transcribe 2026-10-06_14-00-00  # uma reunião específica
+scripts/download-model.sh            # ggml-large-v3-turbo-q5_0.bin (574 MB) into data/models/
+trec transcribe                      # every recorded meeting not yet transcribed
+trec transcribe 2026-10-06_14-00-00  # one specific meeting
 ```
 
-Gera `transcript.txt` (com marcação de tempo) e `transcript.json` na pasta da reunião. Tudo roda localmente; o áudio não sai do Mac. Em um MacBook Air M1, 15 s de fala levam cerca de 30 s incluindo a carga do modelo; reuniões longas ficam próximas de 1:4 (uma hora em 15 min).
+Produces `transcript.txt` (with timestamps) and `transcript.json` in the meeting folder. Data (recordings, plans, models, logs) lives in `data/` or, if the project is under Documents/Desktop/Downloads or in iCloud, in `~/Library/Application Support/teams-recorder` — macOS blocks background processes in those folders. `trec status` shows the folder in use. Everything runs locally; the audio never leaves the Mac. On a MacBook Air M1, 15 s of speech takes about 30 s including model loading; long meetings approach a 1:4 ratio (one hour in 15 min).
 
-## Análise com Claude (fase 4)
+## Analysis with Claude (phase 4)
 
 ```bash
-cp .env.example .env && chmod 600 .env   # cole a chave da API (console.anthropic.com)
-trec analyze                             # todas as reuniões transcritas e ainda não analisadas
-trec analyze 2026-10-06_14-00-00         # uma reunião específica
+cp .env.example .env && chmod 600 .env   # paste the API key (console.anthropic.com)
+trec analyze                             # every transcribed meeting not yet analyzed
+trec analyze 2026-10-06_14-00-00         # one specific meeting
 ```
 
-Só o texto da transcrição e o prompt saem do Mac. Modelo `claude-opus-5-5` com saída estruturada validada por esquema, prompt de sistema em `prompts/analyze_system.md` com cache, e fallback de servidor para recusas pontuais do classificador de segurança. Cada chamada registra tokens em `data/log/llm_usage.jsonl`. Custo típico: cerca de US$ 0,10 por hora de reunião.
+Only the transcript text and the prompt leave the Mac. Model `claude-opus-5-5` with schema-validated structured output, system prompt in `prompts/analyze_system.md` with caching, and a server-side fallback for occasional refusals by the safety classifier. Each call logs tokens to `data/log/llm_usage.jsonl`. Typical cost: about US$ 0.10 per hour of meeting.
 
-### Provedor: API ou Claude Code
+### Provider: API or Claude Code
 
-Em `config.toml`, `llm.provider` escolhe o transporte:
+In `config.toml`, `llm.provider` selects the transport:
 
-| `provider` | Usa | Cobrança | Observações |
+| `provider` | Uses | Billing | Notes |
 |---|---|---|---|
-| `api` (padrão) | Claude API com `ANTHROPIC_API_KEY` | Crédito pré-pago por uso | Fallback de recusa e cache controlados pelo projeto |
-| `claude-code` | Claude Code instalado, em modo headless (`claude -p`) | Assinatura do Claude Code | Exige sessão logada no Mac; sem fallback de recusa; modelo por apelido em `llm.cli_model` |
+| `api` (default) | Claude API with `ANTHROPIC_API_KEY` | Prepaid, pay-per-use credit | Refusal fallback and caching controlled by the project |
+| `claude-code` | Installed Claude Code, in headless mode (`claude -p`) | Claude Code subscription | Requires a logged-in session on the Mac; no refusal fallback; model by alias in `llm.cli_model` |
 
-A variável de ambiente `TREC_LLM_PROVIDER` sobrescreve o arquivo, útil para testar: `TREC_LLM_PROVIDER=claude-code trec analyze`.
+The `TREC_LLM_PROVIDER` environment variable overrides the file, which is handy for testing: `TREC_LLM_PROVIDER=claude-code trec analyze`.
 
-## Automático (fase 5)
+## Automatic (phase 5)
 
 ```bash
-trec agent install                                   # sobe no login, reinicia se cair
-trec agent install --env TREC_LLM_PROVIDER=claude-code   # idem, analisando pela assinatura
+trec agent install                                   # starts at login, restarts if it crashes
+trec agent install --env TREC_LLM_PROVIDER=claude-code   # same, analyzing via the subscription
 trec agent status | restart | uninstall
-trec daemon --once                                   # diagnóstico: o detector vê o Teams em chamada?
+trec daemon --once                                   # diagnostic: does the detector see Teams in a call?
 ```
 
-O daemon consulta `pmset -g assertions` a cada 3 s. O Teams, em chamada, impede o Mac de dormir, e essa asserção é o sinal: a gravação começa após 2 leituras positivas seguidas (~6 s) e termina após 5 negativas (~15 s), evitando falsos positivos em oscilações. Ao fim da chamada o pipeline roda em segundo plano (mixagem, transcrição, análise) enquanto o detector segue atento à próxima. Se o daemon cair no meio de uma gravação, ele finaliza a gravação órfã ao subir e retoma reuniões pendentes. Log em `data/log/teams-recorder.log`; `trec start/stop` manual continua funcionando e o daemon adota uma gravação manual em andamento.
+The daemon polls `pmset -g assertions` every 3 s. Teams, while in a call, keeps the Mac from sleeping, and that assertion is the signal: recording starts after 2 consecutive positive readings (~6 s) and stops after 5 negative ones (~15 s), avoiding false positives from flickering. When the call ends, the pipeline runs in the background (mixing, transcription, analysis) while the detector keeps watching for the next one. If the daemon crashes in the middle of a recording, it finalizes the orphaned recording on startup and resumes pending meetings. Log in `data/log/teams-recorder.log`; manual `trec start/stop` keeps working, and the daemon adopts a manual recording already in progress.
 
-### Microfone e trilha do Teams
+### Microphone and Teams track
 
-O `teams-tap` cuida dos dois lados: `--pid` captura o Teams (o processo principal e os helpers que de fato emitem áudio) e `--mic default` grava o microfone pelo AVAudioEngine, seguindo a entrada padrão do sistema e sobrevivendo à reconfiguração que o Teams faz ao abrir o microfone. `teams-tap --list` mostra quem são os clientes de áudio no momento. O backend `ffmpeg` do microfone continua disponível em `config.toml` (`audio.mic_backend`).
+`teams-tap` handles both sides: `--pid` captures Teams (the main process and the helpers that actually emit audio) and `--mic default` records the microphone through AVAudioEngine, following the system default input and surviving the reconfiguration Teams performs when it opens the microphone. `teams-tap --list` shows who the current audio clients are. The `ffmpeg` microphone backend remains available in `config.toml` (`audio.mic_backend`).
 
-Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmpeg) e **Gravação de Tela e Áudio do Sistema** (para o teams-tap), em Ajustes do Sistema > Privacidade e Segurança. Sem a segunda, a trilha do Teams sai em silêncio.
+## Daily plan (phase 6)
 
-## Desenvolvimento
+```bash
+trec plan                      # consolidates today's analyzed meetings into data/plans/YYYY-MM-DD.md
+trec plan --date 2026-10-06    # rebuilds the plan for a given day
+trec plan --purge              # same + deletes audio from old meetings (retention)
+```
+
+New actions come from the day's analyses (deterministic); overdue ones are open actions whose deadline has passed; the model writes the Markdown and the priorities and points out which open actions were completed according to the analyses, and may only cite existing ids. The accumulated list lives in `data/plans/open_actions.json`. The `local.teams-recorder.planner` LaunchAgent runs `trec plan --purge` at 6 pm (config `planner.hour`), Monday to Friday.
+
+On first run, macOS asks for two permissions: **Microphone** (for ffmpeg) and **Screen & System Audio Recording** (for teams-tap), under System Settings > Privacy & Security. Without the second one, the Teams track comes out silent.
+
+## Development
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                                             # suíte rápida (sem cobertura)
-pytest --cov=teams_recorder --cov-report=term-missing   # com cobertura (alvo: 70%)
-TREC_REAL_WHISPER=1 pytest -m slow                 # inclui transcrição real com o modelo
+pytest                                             # fast suite (no coverage)
+pytest --cov=teams_recorder --cov-report=term-missing   # with coverage (target: 70%)
+TREC_REAL_WHISPER=1 pytest -m slow                 # includes real transcription with the model
 trec --help
 ```

@@ -1,28 +1,34 @@
-# Convenção de commits
+# Commit convention
 
-O histórico é organizado em **ondas**: cada fase do plano de implementação (seção 10 de
-`REQUISITOS-E-ARQUITETURA.md`) vira uma sequência curta de commits, um por camada da
-arquitetura hexagonal, na ordem de dependência:
+The history is organized in **waves**: each phase of the implementation plan (section 10 of
+`REQUIREMENTS-AND-ARCHITECTURE.md`) becomes a short sequence of commits, one per layer of the
+hexagonal architecture, in dependency order:
 
-1. `docs:` documentos e decisões da fase
-2. `feat(domain):` entidades e regras puras
-3. `feat(application):` portas, casos de uso, pipeline
-4. `feat(adapters):` adaptadores de saída (I/O)
-5. `feat(native):` código Swift
-6. `feat(cli):` composition root e comandos
-7. `test:` fakes, fixtures e testes da onda
+1. `docs:` documents and decisions for the phase
+2. `feat(domain):` entities and pure rules
+3. `feat(application):` ports, use cases, pipeline
+4. `feat(adapters):` outbound adapters (I/O)
+5. `feat(native):` Swift code
+6. `feat(cli):` composition root and commands
+7. `test:` fakes, fixtures and tests for the wave
 
-Mensagens no imperativo, em português, com escopo entre parênteses. Cada commit deve
-deixar a árvore importável; os testes podem só passar ao fim da onda.
+Messages are written in English, in the imperative mood, with the scope in parentheses
+(e.g. `feat(adapters): add Core Audio microphone capture`). Each commit must leave the tree
+importable; tests may only pass at the end of the wave.
 
-## Ondas já registradas
+Commit messages before 2026-10-05 are in Portuguese; the convention switched to English on
+that date and the earlier history was not rewritten.
 
-| Onda | Fase | Conteúdo |
-|------|------|----------|
-| 0 | — | Entrevista, requisitos, arquitetura, convenções |
-| 1 | 1 | Esqueleto, domínio, aplicação, repositório em arquivos, config, testes |
-| 2 | 2 | teams-tap (Swift), captura e mixagem, CLI start/stop/cancel, testes de adaptadores |
-| 3 | 3 | Config de transcrição, transcritor whisper.cpp e download do modelo, CLI transcribe, testes, docs |
-| 4 | 4 | Prompts, analisador Claude com saída estruturada, CLI analyze e pipeline no container, testes, docs |
-| 4b | 4 | Provedor alternativo via Claude Code headless, seleção por config, testes, docs |
-| 5 | 5 | Detector pmset, daemon com histerese e recuperação, LaunchAgent, CLI daemon/agent, espera de áudio no teams-tap, testes, docs |
+## Recorded waves
+
+| Wave | Phase | Contents |
+|------|-------|----------|
+| 0 | — | Interview, requirements, architecture, conventions |
+| 1 | 1 | Skeleton, domain, application, file-based repository, config, tests |
+| 2 | 2 | teams-tap (Swift), capture and mixing, CLI start/stop/cancel, adapter tests |
+| 3 | 3 | Transcription config, whisper.cpp transcriber and model download, CLI transcribe, tests, docs |
+| 4 | 4 | Prompts, Claude analyzer with structured output, CLI analyze and pipeline in the container, tests, docs |
+| 4b | 4 | Alternative provider via headless Claude Code, selection by config, tests, docs |
+| 5 | 5 | pmset detector, daemon with hysteresis and recovery, LaunchAgent, CLI daemon/agent, audio wait in teams-tap, tests, docs |
+| 5b | 5 | Fixes from the first real meetings: Teams helpers, Core Audio microphone, per-track diagnostics, noise/limiter, optional VAD |
+| 6 | 6 | Structured transport, Claude planner, CLI plan, scheduled agent, tests, docs |

@@ -1,16 +1,16 @@
 # RUN_LOG — felipemateusdecarvalho — 2026-10-05 13:28
 
-Skill executada: `init` (geração do arquivo de orientação para agentes), adaptada para produzir `AGENTS.md` por decisão do usuário.
+Skill executed: `init` (generation of the guidance file for agents), adapted to produce `AGENTS.md` by the user's decision.
 
-## Perguntas feitas ao usuário e respostas
+## Questions asked of the user and answers
 
-| Pergunta | Resposta |
+| Question | Answer |
 |---|---|
-| Para quais agentes o documento deve servir? | Só AGENTS.md |
-| O que o documento deve priorizar? | Comandos e fluxo de trabalho; regras de arquitetura; convenções de commit e onda |
-| Em que idioma e com que extensão? | Inglês, enxuto |
-| Que nível de autonomia o documento deve dar ao agente? | Pedir antes de commitar |
+| Which agents should the document serve? | AGENTS.md only |
+| What should the document prioritize? | Commands and workflow; architecture rules; commit and wave conventions |
+| In which language and at what length? | English, concise |
+| What level of autonomy should the document give the agent? | Ask before committing |
 
-## Saída
-- `AGENTS.md` (81 linhas, inglês): comandos, regras que costumam causar erro, arquitetura hexagonal com tabela porta → adaptador, invariantes, convenções de trabalho (pedir antes de commitar/publicar, ondas de commits, o que nunca commitar, o que pedir antes de tocar), e uma nota curta sobre peculiaridades do ambiente.
-- Nenhuma regra de Cursor/Copilot/Codex/Gemini encontrada no repositório para importar.
+## Output
+- `AGENTS.md` (81 lines, English): commands, rules that commonly cause errors, hexagonal architecture with a port → adapter table, invariants, working conventions (ask before committing/publishing, commit waves, what never to commit, what to ask about before touching), and a short note on environment quirks.
+- No Cursor/Copilot/Codex/Gemini rules found in the repository to import.

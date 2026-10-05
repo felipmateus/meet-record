@@ -1,34 +1,34 @@
 # RUN_LOG — felipemateusdecarvalho — 2026-10-04 20:10
 
-Atividade: entrevista de requisitos técnicos e definição de arquitetura do projeto teams-recorder. Resultado consolidado em `docs/REQUISITOS-E-ARQUITETURA.md`.
+Activity: technical requirements interview and architecture definition for the teams-recorder project. Consolidated result in `docs/REQUIREMENTS-AND-ARCHITECTURE.md`.
 
-## Rodada 1 — Fundamentos
+## Round 1 — Fundamentals
 
-| Pergunta | Resposta do usuário |
-|----------|---------------------|
-| Em qual pasta o projeto deve ficar no seu Mac? | ~/Documents/teams-recorder |
-| Quais linguagens o projeto deve usar? | Python + Swift mínimo |
-| Como capturar o áudio dos participantes do Teams? | Core Audio Process Tap |
-| Qual LLM fará a análise e o planejamento? | Claude API |
+| Question | User's answer |
+|----------|---------------|
+| Which folder on your Mac should the project live in? | ~/Documents/teams-recorder |
+| Which languages should the project use? | Python + minimal Swift |
+| How should the Teams participants' audio be captured? | Core Audio Process Tap |
+| Which LLM will do the analysis and planning? | Claude API |
 
-## Rodada 2 — Arquitetura do código
+## Round 2 — Code architecture
 
-| Pergunta | Resposta do usuário |
-|----------|---------------------|
-| Como organizar o código Python? | Arquitetura hexagonal |
-| Como as etapas devem se comunicar e guardar estado? | Só arquivos |
-| Onde guardar configuração e segredos? | Arquivo .env |
-| Qual nível de testes automatizados? | pytest com fixtures (alvo 70%) |
+| Question | User's answer |
+|----------|---------------|
+| How should the Python code be organized? | Hexagonal architecture |
+| How should the stages communicate and store state? | Files only |
+| Where should configuration and secrets be stored? | .env file |
+| What level of automated testing? | pytest with fixtures (target 70%) |
 
-## Rodada 3 — Requisitos funcionais
+## Round 3 — Functional requirements
 
-| Pergunta | Resposta do usuário |
-|----------|---------------------|
-| Como detectar que uma reunião do Teams começou e terminou? | Heurística do sistema (pmset + microfone) |
-| O que fazer com o áudio depois de transcrito? | Apagar áudio após 30 dias |
-| Onde o plano de atividades deve ser entregue? | Markdown local |
-| Em que idioma são as reuniões? | Só português |
+| Question | User's answer |
+|----------|---------------|
+| How to detect that a Teams meeting started and ended? | System heuristic (pmset + microphone) |
+| What to do with the audio after it is transcribed? | Delete audio after 30 days |
+| Where should the activity plan be delivered? | Local Markdown |
+| What language are the meetings in? | Portuguese only |
 
-## Observações registradas
-- Usuário optou por `.env` em vez de Keychain e por `~/Documents` como pasta; riscos R1 (iCloud) e R2 (chave em texto puro) documentados com mitigações.
-- Sessão movida para `~/Documents/teams-recorder` (pasta criada vazia nesta data).
+## Recorded notes
+- The user chose `.env` over Keychain and `~/Documents` as the folder; risks R1 (iCloud) and R2 (key in plain text) documented with mitigations.
+- Session moved to `~/Documents/teams-recorder` (folder created empty on this date).

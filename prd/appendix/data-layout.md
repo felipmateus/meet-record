@@ -1,18 +1,18 @@
-# Layout de dados e esquemas
+# Data layout and schemas
 
 ```
-<data_dir>/                           # <projeto>/data, ou ~/Library/Application Support/teams-recorder se o projeto estiver no iCloud
-├── current_recording.json            # ponteiro da gravação ativa (no máximo uma)
-├── recordings/<AAAA-MM-DD_HH-MM-SS>/ # uma pasta por reunião (ver dicionário)
-├── planos/
-│   ├── AAAA-MM-DD.md / .json         # plano diário (fase 6)
-│   └── acoes_abertas.json            # ações acumuladas
+<data_dir>/                           # ~/Library/Application Support/teams-recorder when the project lives in iCloud or in Documents/Desktop/Downloads; otherwise <project>/data
+├── current_recording.json            # pointer to the active recording (at most one)
+├── recordings/<YYYY-MM-DD_HH-MM-SS>/ # one folder per meeting (see dictionary)
+├── plans/                           # daily plans
+│   ├── YYYY-MM-DD.md / .json         # daily plan (phase 6)
+│   └── open_actions.json            # accumulated open actions
 ├── models/                           # ggml-*.bin (whisper, VAD)
 └── log/
-    ├── teams-recorder.log            # daemon (rotação diária, 30 dias)
+    ├── teams-recorder.log            # daemon (daily rotation, 30 days)
     ├── daemon.out.log / daemon.err.log
-    ├── capture.log                   # stderr dos gravadores
-    └── llm_usage.jsonl               # uma linha por chamada à LLM
+    ├── capture.log                   # recorders' stderr
+    └── llm_usage.jsonl               # one line per LLM call
 ```
 
 ## `meta.json`
@@ -29,7 +29,7 @@
 ```json
 {"language": "pt", "segments": [{"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal."}]}
 ```
-`transcript.txt`: `[hh:mm:ss] texto` por segmento.
+`transcript.txt`: `[hh:mm:ss] text` per segment.
 
 ## `analysis.json`
 ```json
@@ -43,16 +43,16 @@
 }
 ```
 
-## `planos/AAAA-MM-DD.json` (fase 6)
+## `plans/YYYY-MM-DD.json` (phase 6)
 ```json
 {"day": "2026-10-06", "markdown": "# …", "priorities": ["…"], "new_actions": [Action…], "completed_action_ids": ["…"], "overdue_action_ids": ["…"]}
 ```
 
-## `llm_usage.jsonl` (uma linha por chamada)
+## `llm_usage.jsonl` (one line per call)
 ```json
 {"ts": "…", "meeting": "…", "provider": "claude-code", "model": "claude-opus-5", "input": 2, "output": 406, "cache_read": 1991, "cache_write": 692, "cost_usd_equiv": 0.054, "stop": "success", "session_id": "…"}
 ```
-No provedor `api`: `request_id` em vez de `session_id`, sem `provider`/`cost_usd_equiv`.
+With the `api` provider: `request_id` instead of `session_id`, and no `provider`/`cost_usd_equiv`.
 
-## Escrita
-Todos os JSON são gravados de forma atômica (arquivo temporário + rename). Arquivos `*.tmp` são ignorados nas listagens.
+## Writes
+All JSON files are written atomically (temporary file + rename). `*.tmp` files are ignored in listings.
