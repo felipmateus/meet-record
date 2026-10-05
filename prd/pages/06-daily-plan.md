@@ -16,7 +16,7 @@ Once a day, consolidates the analyses of the day's meetings, the previous day's 
 ## Output
 | Artifact | Content |
 |---|---|
-| `data/plans/YYYY-MM-DD.md` | Title with the date; sections **Prioridades** (priorities, 3 to 5), **Ações novas** (new actions), **Vencidas** (overdue), **Conflitos e alertas** (conflicts and alerts, when any) |
+| `data/plans/YYYY-MM-DD.md` | Title with weekday and date; sections **Prioridades** (3 to 5), **Ações novas**, **Vencidas** (only the computed overdue ids), **Aguardando terceiros** (others' actions to follow up), **Agenda** (next meetings and dated milestones) and **Conflitos e alertas** (conflicting deadlines, overload, actions without owner, risks); empty sections omitted except Prioridades |
 | `data/plans/YYYY-MM-DD.json` | priorities, new actions, completed ids, overdue ids, markdown |
 | updated `open_actions.json` | removes completed actions, flags overdue ones (`status = overdue`), appends new ones without duplicating ids |
 

@@ -19,7 +19,7 @@ from teams_recorder.domain import (
     Segment,
     Transcript,
 )
-from teams_recorder.domain.status import LOCK, META, ANALYSIS, ERROR, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
 
 class FakeClock:
@@ -158,6 +158,7 @@ class InMemoryMeetingRepository:
         self.plans: dict[date, DailyPlan] = {}
         self.open_actions: list[Action] = []
         self.active: ActiveRecording | None = None
+        self.minutes: dict[str, str] = {}
 
     def _get(self, meeting_id: str) -> _Rec:
         try:
@@ -246,6 +247,11 @@ class InMemoryMeetingRepository:
             raise RepositoryError("no analysis")
         return a
 
+    def save_minutes(self, meeting_id: str, markdown: str) -> None:
+        rec = self._get(meeting_id)
+        rec.files.add(MINUTES)
+        self.minutes[meeting_id] = markdown
+
     def mark_failed(self, meeting_id: str, message: str) -> None:
         self._get(meeting_id).files.add(ERROR)
         self.last_error = message
@@ -268,3 +274,12 @@ class InMemoryMeetingRepository:
 
     def save_open_actions(self, actions: list[Action]) -> None:
         self.open_actions = list(actions)
+
+
+class FakeMinutesRenderer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Meeting, Analysis]] = []
+
+    def render(self, meeting: Meeting, analysis: Analysis) -> str:
+        self.calls.append((meeting, analysis))
+        return f"# Minutes {meeting.id}\n{analysis.summary}\n"

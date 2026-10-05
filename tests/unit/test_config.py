@@ -114,3 +114,9 @@ def test_relative_data_dir_is_resolved_against_project(tmp_path: Path):
     assert load_settings(tmp_path).data_dir == tmp_path.resolve() / "data"
     (tmp_path / "config.toml").write_text('[paths]\ndata_dir = "/abs/place"\n')
     assert load_settings(tmp_path).data_dir == Path("/abs/place")
+
+
+def test_user_name(tmp_path: Path):
+    assert load_settings(tmp_path).user_name == ""
+    (tmp_path / "config.toml").write_text('[user]\nname = " Felipe "\n')
+    assert load_settings(tmp_path).user_name == "Felipe"

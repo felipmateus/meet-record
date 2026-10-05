@@ -55,6 +55,7 @@ class Settings:
     llm_effort: Effort
     llm_max_tokens: int
     plan_hour: int
+    user_name: str
     retention_days: int
     anthropic_api_key: str | None
 
@@ -159,6 +160,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     transcription = raw.get("transcription", {})
     llm = raw.get("llm", {})
     planner = raw.get("planner", {})
+    user = raw.get("user", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"))
 
@@ -185,6 +187,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         llm_effort=_parse_enum(Effort, llm.get("effort", Effort.HIGH), Err.INVALID_EFFORT),
         llm_max_tokens=int(llm.get("max_tokens", Llm.DEFAULT_MAX_TOKENS)),
         plan_hour=int(planner.get("hour", Planner.DEFAULT_HOUR)),
+        user_name=str(user.get("name", "")).strip(),
         retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
         anthropic_api_key=os.environ.get(Env.API_KEY) or None,
     )

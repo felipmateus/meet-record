@@ -31,6 +31,9 @@
 ```
 `transcript.txt`: `[hh:mm:ss] text` per segment.
 
+## `minutes.md`
+Human-readable minutes rendered from `analysis.json` (see the analysis page). Not part of the meeting status.
+
 ## `analysis.json`
 ```json
 {

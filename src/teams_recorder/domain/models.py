@@ -77,6 +77,22 @@ class ActionStatus(StrEnum):
     OVERDUE = "overdue"
 
 
+class Priority(StrEnum):
+    """Urgency stated (or clearly implied) in the meeting; absent when nobody said it."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class MeetingType(StrEnum):
+    STANDUP = "standup"
+    CLIENT = "client"
+    PROJECT_REVIEW = "project_review"
+    ONE_ON_ONE = "one_on_one"
+    OTHER = "other"
+
+
 @dataclass
 class Action:
     description: str
@@ -85,6 +101,8 @@ class Action:
     due: date | None = None
     status: ActionStatus = ActionStatus.OPEN
     id: str = field(default_factory=_new_action_id)
+    priority: Priority | None = None
+    at: str | None = None  # transcript timestamp (HH:MM:SS) where it was said, for verification
 
     def is_overdue_on(self, day: date) -> bool:
         return self.status == ActionStatus.OPEN and self.due is not None and self.due < day
@@ -93,6 +111,13 @@ class Action:
 @dataclass(frozen=True)
 class Decision:
     text: str
+    at: str | None = None  # transcript timestamp (HH:MM:SS) where it was decided
+
+
+@dataclass(frozen=True)
+class Topic:
+    title: str
+    points: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -112,6 +137,12 @@ class Analysis:
     deadlines: list[Deadline] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     next_meetings: list[str] = field(default_factory=list)
+    title: str = ""
+    purpose: str = ""
+    meeting_type: MeetingType = MeetingType.OTHER
+    participants: list[str] = field(default_factory=list)  # names mentioned (no diarization yet)
+    topics: list[Topic] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
 
     @property
     def all_actions(self) -> list[Action]:

@@ -18,13 +18,24 @@ Turns the transcript into a structured record of what matters to the user: summa
 ## Structured output (schema)
 | Field | Type | Extraction rule |
 |---|---|---|
+| `title` | text | short title (≤ 8 words) inferred from the content; names untitled automatic recordings |
+| `purpose` | text | one sentence: why the meeting happened |
+| `meeting_type` | enum | `standup`, `client`, `project_review`, `one_on_one`, `other` |
+| `participants[]` | text | names mentioned or addressed (no guessing; no diarization yet) |
 | `summary` | text | 3 to 6 sentences, objective |
+| `topics[]` | title, points[] | main discussion topics in order, 1 to 4 key points each |
 | `decisions[]` | text | only what was actually decided |
 | `my_actions[]` | description, owner (`usuário`), ISO due date or null | the user's commitments; verb in the infinitive |
 | `others_actions[]` | description, owner, due date | third-party tasks that affect the user; `indefinido` (undetermined) when the owner cannot be identified |
 | `deadlines[]` | what, when (ISO or null), who | relative expressions resolved against the meeting date given in the prompt |
 | `open_questions[]` | text | unanswered questions |
 | `next_meetings[]` | text | agreed follow-up meetings |
+| `risks[]` | text | risks, blockers and issues raised |
+
+Decisions are `{text, at}` and actions carry `priority` (`high`/`medium`/`low`, only when urgency was stated) and `at`, the `HH:MM:SS` transcript timestamp where it was said, so the user can verify each item. The message to the model starts with the user's name (`[user] name` in `config.toml`), and the prompt lists Portuguese cue phrases for actions and decisions. Old analyses (plain-string decisions, no new fields) still load with defaults.
+
+## Minutes (`minutes.md`)
+Written next to `analysis.json` after each analysis by `MarkdownMinutesRenderer` (no LLM call), in the structure of the `meeting-notes` skill: title, date and time, participants, type, purpose, summary, topics, decisions with timestamps, an action table (owner — the user shown by name, `⚠️ sem responsável` when unknown — due date, priority, timestamp), risks, open questions and next steps; empty sections are omitted. `trec minutes [id] [--all]` re-renders from existing analyses.
 
 Each action receives a short unique id and `status = open`. The prompt explicitly instructs the model not to invent tasks, deadlines or decisions.
 

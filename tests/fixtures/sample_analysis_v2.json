@@ -1,0 +1,76 @@
+{
+  "meeting_id": "2026-10-06_14-00-00",
+  "title": "Revisão da sprint de integração",
+  "purpose": "Definir as entregas da semana e o escopo com o SAP.",
+  "meeting_type": "project_review",
+  "participants": [
+    "Felipe",
+    "Mariana"
+  ],
+  "topics": [
+    {
+      "title": "Relatório de integração",
+      "points": [
+        "Entrega até quarta-feira",
+        "Depende do escopo do SAP"
+      ]
+    }
+  ],
+  "summary": "Revisão da sprint com definição de entregas da semana.",
+  "decisions": [
+    {
+      "text": "Relatório de integração será entregue até quarta-feira.",
+      "at": "00:00:03"
+    }
+  ],
+  "my_actions": [
+    {
+      "id": "a1b2c3d4",
+      "description": "Enviar relatório de integração",
+      "owner": "usuário",
+      "source_meeting": "2026-10-06_14-00-00",
+      "due": "2026-10-07",
+      "status": "open",
+      "priority": "high",
+      "at": "00:00:03"
+    },
+    {
+      "id": "e5f6a7b8",
+      "description": "Agendar reunião com o cliente",
+      "owner": "usuário",
+      "source_meeting": "2026-10-06_14-00-00",
+      "due": null,
+      "status": "open",
+      "priority": null,
+      "at": "00:00:09"
+    }
+  ],
+  "others_actions": [
+    {
+      "id": "c9d0e1f2",
+      "description": "Confirmar o escopo do SAP",
+      "owner": "indefinido",
+      "source_meeting": "2026-10-06_14-00-00",
+      "due": null,
+      "status": "open",
+      "priority": "medium",
+      "at": null
+    }
+  ],
+  "deadlines": [
+    {
+      "what": "Relatório de integração",
+      "when": "2026-10-07",
+      "who": "usuário"
+    }
+  ],
+  "open_questions": [
+    "Qual o escopo final da integração com o SAP?"
+  ],
+  "next_meetings": [
+    "Reunião com o cliente na semana de 13/10"
+  ],
+  "risks": [
+    "Escopo do SAP ainda indefinido pode atrasar o relatório"
+  ]
+}

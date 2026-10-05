@@ -15,6 +15,7 @@ AUDIO = "audio.m4a"
 TRANSCRIPT_TXT = "transcript.txt"
 TRANSCRIPT_JSON = "transcript.json"
 ANALYSIS = "analysis.json"
+MINUTES = "minutes.md"  # human-readable minutes rendered from the analysis (not part of status)
 ERROR = "error.txt"
 LOCK = ".lock"
 

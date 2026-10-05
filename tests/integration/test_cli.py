@@ -188,3 +188,23 @@ def test_transcribe_retries_failed_meetings(tmp_path: Path, monkeypatch):
 
     assert "No meeting pending" not in result.output
     assert "Transcribing" in result.output
+
+
+def test_minutes_command(tmp_path: Path, monkeypatch):
+    import json as _json
+    from teams_recorder.adapters.outbound import codec
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    assert runner.invoke(app, ["minutes"]).output.strip() == "No analyzed meeting without minutes."
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0))
+    repo.create(m)
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "sample_analysis_v2.json"
+    repo.save_analysis(m.id, codec.analysis_from_dict(_json.loads(fixture.read_text())))
+
+    result = runner.invoke(app, ["minutes"])
+
+    assert result.exit_code == 0, result.output
+    minutes = project / "data" / "recordings" / m.id / "minutes.md"
+    assert minutes.read_text().startswith("# Ata: Revisão da sprint de integração")
+    assert runner.invoke(app, ["minutes"]).output.strip() == "No analyzed meeting without minutes."
+    assert "minutes.md" in runner.invoke(app, ["minutes", "--all"]).output

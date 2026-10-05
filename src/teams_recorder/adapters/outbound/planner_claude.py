@@ -37,6 +37,7 @@ class ClaudePlanner:
     transport: StructuredTransport
     prompt_path: Path | None = None
     system_prompt: str | None = None
+    user_name: str = ""
 
     def _system(self) -> str:
         if self.system_prompt is None:
@@ -53,7 +54,7 @@ class ClaudePlanner:
         if not analyses and not open_actions:
             return DailyPlan(day=day, markdown=Err.EMPTY_PLAN.format(day=day.isoformat()))
 
-        out = self.transport.complete(self._system(), build_user_message(day, analyses, previous_plan, open_actions, new_actions, overdue_ids), PlanOut, tag=f"plan:{day.isoformat()}", extra={"day": day.isoformat()})
+        out = self.transport.complete(self._system(), build_user_message(day, analyses, previous_plan, open_actions, new_actions, overdue_ids, self.user_name), PlanOut, tag=f"plan:{day.isoformat()}", extra={"day": day.isoformat()})
         valid_ids = known | {a.id for a in new_actions}
         completed = [i for i in out.completed_action_ids if i in valid_ids]  # the model may not invent ids
         return DailyPlan(
@@ -66,8 +67,9 @@ class ClaudePlanner:
         )
 
 
-def build_user_message(day: date, analyses: list[Analysis], previous: DailyPlan | None, open_actions: list[Action], new_actions: list[Action], overdue_ids: list[str]) -> str:
-    parts = [Prompt.PLAN_DATE.format(date=day.isoformat(), weekday=WEEKDAYS[day.weekday()])]
+def build_user_message(day: date, analyses: list[Analysis], previous: DailyPlan | None, open_actions: list[Action], new_actions: list[Action], overdue_ids: list[str], user_name: str = "") -> str:
+    parts = [Prompt.USER_NAME.format(name=user_name)] if user_name else []
+    parts.append(Prompt.PLAN_DATE.format(date=day.isoformat(), weekday=WEEKDAYS[day.weekday()]))
     parts.append(Prompt.PLAN_MEETINGS + json.dumps([codec.analysis_to_dict(a) for a in analyses], ensure_ascii=False, indent=1))
     parts.append(Prompt.PLAN_OPEN_ACTIONS + json.dumps([codec.action_to_dict(a) for a in open_actions], ensure_ascii=False, indent=1))
     parts.append(Prompt.PLAN_NEW_ACTIONS + json.dumps([codec.action_to_dict(a) for a in new_actions], ensure_ascii=False, indent=1))

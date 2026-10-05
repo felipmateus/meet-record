@@ -37,6 +37,23 @@ Note: `audio.m4a` may have been deleted by retention without changing `transcrib
 | `done` | completed (marked by the daily plan) |
 | `overdue` | deadline passed as of the plan date |
 
+## Meeting type (`MeetingType`, in `analysis.json`)
+| Value | Meaning | Minutes label |
+|---|---|---|
+| `standup` | daily status round | Daily |
+| `client` | with a customer or external party | Reunião com cliente |
+| `project_review` | progress, risks, milestones | Revisão de projeto |
+| `one_on_one` | two people, personal follow-up | 1:1 |
+| `other` | anything else (default) | Reunião |
+
+## Action priority (`Priority`)
+| Value | Set when | Minutes label |
+|---|---|---|
+| `high` | urgency stated ("urgente", "o quanto antes") | 🔴 Alta |
+| `medium` | some urgency implied | 🟡 Média |
+| `low` | explicitly deferrable | 🟢 Baixa |
+| *(null)* | nobody said | — |
+
 ## LLM provider (`llm.provider`)
 | Value | Transport | Billing |
 |---|---|---|

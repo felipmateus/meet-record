@@ -309,3 +309,12 @@ teams-recorder/
 - Detector defaults: `poll_seconds = 1`, `start_after_positive_polls = 1`, `stop_after_negative_polls = 5`. Short false starts are absorbed by the 20-word analysis cut.
 - Still open: the root cause of the delivery pauses, now visible in `capture.log`; per-track transcription with speaker labels and merging short whisper segments (proposed, not implemented).
 
+### Meeting notes (2026-10-05)
+
+- Reviewed the analysis and planning prompts against the `meeting-notes` skill (run log in `docs/run-logs/`). Gaps closed: the model did not know the user's name; automatic recordings had no title or purpose; no meeting type, topics, participants, risks, per-action priority or transcript timestamps for verification; no Portuguese cue phrases; the plan ignored others' actions and next meetings and did not flag actions without owner.
+- Schema: `AnalysisOut` gains `title`, `purpose`, `meeting_type`, `participants`, `topics[{title, points}]`, `risks`; decisions become `{text, at}`; actions gain `priority` and `at`. Domain: `MeetingType`, `Priority`, `Topic`, new optional fields with defaults; the codec still reads analyses written before (plain-string decisions).
+- `[user] name` in `config.toml` is sent first in the analysis and plan messages.
+- `MinutesRenderer` port + `MarkdownMinutesRenderer` write `minutes.md` after each analysis (no extra LLM call); `AnalyzeMeeting` also names untitled meetings with the inferred title; `RenderMinutes` / `trec minutes` re-render from existing analyses.
+- Plan prompt: new sections "Aguardando terceiros" and "Agenda"; "Vencidas" restricted to the computed overdue ids (a real run listed an action due on the plan date as overdue); unassigned actions flagged under "Conflitos e alertas".
+- Validated with a richer synthetic meeting through Claude Code: title, type, participants, 4 topics, 2 decisions and 5 actions with timestamps, relative dates converted, priority only where "é urgente" was said, small talk ignored, and a "talvez… pensar depois" idea not taken as a decision.
+
