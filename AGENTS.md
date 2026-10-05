@@ -43,7 +43,7 @@ container.py     composition root: the ONLY place that instantiates concrete ada
 config.py        config.toml + .env → frozen Settings; env overrides; data_dir goes to ~/Library/Application Support when the project sits in iCloud or a TCC-protected folder (Documents/Desktop/Downloads)
 ```
 
-Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except `llm_claude_cli` reusing schema/prompt helpers from `llm_claude`, and `codec` (JSON ↔ domain) used by `repository_fs`.
+Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer) and `planner_claude` (planner); and `codec` (JSON ↔ domain) is used by `repository_fs`.
 
 Ports and their adapters (`application/ports.py`):
 
@@ -54,10 +54,10 @@ Ports and their adapters (`application/ports.py`):
 | `MicCapture` | `capture_mic_coreaudio` (default, `teams-tap --mic`, survives device reconfiguration) or `capture_mic_ffmpeg` |
 | `AudioMixer` | `mixer_ffmpeg` (per-track highpass+afftdn, amix, loudnorm, limiter; keeps raw tracks in `debug/` on anomaly) |
 | `Transcriber` | `transcriber_whispercpp` (ffmpeg → 16 kHz WAV → whisper-cli `-oj`; optional Silero VAD) |
-| `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` (API, structured output, cache, server fallback) or `llm_claude_cli.ClaudeCliAnalyzer` (`claude -p`), chosen by `llm.provider` |
+| `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
 | `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process) |
 | `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock` |
-| `Planner` | not yet implemented (phase 6) |
+| `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 
 Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`) that wait for a readiness file instead of assuming startup time.
 

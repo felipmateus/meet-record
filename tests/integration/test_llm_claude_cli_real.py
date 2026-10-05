@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.adapters.outbound import codec
-from teams_recorder.adapters.outbound.llm_claude_cli import ClaudeCliAnalyzer
+from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
+from teams_recorder.adapters.outbound.llm_transport import ClaudeCodeTransport
 from teams_recorder.config import load_settings
 
 PROJECT = Path(__file__).resolve().parents[2]
@@ -26,9 +27,9 @@ def test_real_cli_analysis_extracts_actions(tmp_path: Path):
     meeting = Meeting.start(datetime(2026, 10, 6, 14, 0, 0), title="Revisão da sprint")
     meeting.ended_at = datetime(2026, 10, 6, 14, 30, 0)
 
-    analysis = ClaudeCliAnalyzer(
-        prompt_path=settings.prompts_dir / "analyze_system.md", model=settings.llm_cli_model, effort="medium",
-        usage_log=tmp_path / "usage.jsonl",
+    analysis = ClaudeAnalyzer(
+        ClaudeCodeTransport(model=settings.llm_cli_model, effort="medium", usage_log=tmp_path / "usage.jsonl"),
+        prompt_path=settings.prompts_dir / "analyze_system.md",
     ).analyze(transcript, meeting)
 
     assert analysis.summary

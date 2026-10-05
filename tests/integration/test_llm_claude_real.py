@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.adapters.outbound import codec
-from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer, load_prompt
+from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
+from teams_recorder.adapters.outbound.llm_transport import ApiTransport
 from teams_recorder.config import load_settings
 from teams_recorder.domain import Meeting
 
@@ -24,8 +25,8 @@ def test_real_analysis_extracts_actions(tmp_path: Path):
     meeting = Meeting.start(datetime(2026, 10, 6, 14, 0, 0), title="Revisão da sprint")
     meeting.ended_at = datetime(2026, 10, 6, 14, 30, 0)
     analyzer = ClaudeAnalyzer(
-        system_prompt=load_prompt(_settings.prompts_dir / "analyze_system.md"),
-        model=_settings.llm_model, effort="medium", usage_log=tmp_path / "usage.jsonl",
+        ApiTransport(model=_settings.llm_model, effort="medium", usage_log=tmp_path / "usage.jsonl"),
+        prompt_path=_settings.prompts_dir / "analyze_system.md",
     )
 
     analysis = analyzer.analyze(transcript, meeting)

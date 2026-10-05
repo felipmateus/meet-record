@@ -16,7 +16,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from teams_recorder.adapters.outbound import codec
-from teams_recorder.adapters.outbound.llm_claude import load_prompt
+from teams_recorder.adapters.outbound.llm_schema import load_prompt
 from teams_recorder.adapters.outbound.llm_transport import StructuredTransport
 from teams_recorder.domain import Action, Analysis, DailyPlan
 
@@ -51,7 +51,7 @@ class ClaudePlanner:
         if not analyses and not open_actions:
             return DailyPlan(day=day, markdown=f"# Plan {day.isoformat()}\n\nNo analyzed meetings and no open actions.\n")
 
-        out = self.transport.complete(self._system(), build_user_message(day, analyses, previous_plan, open_actions, new_actions, overdue_ids), PlanOut, tag=f"plan:{day.isoformat()}")
+        out = self.transport.complete(self._system(), build_user_message(day, analyses, previous_plan, open_actions, new_actions, overdue_ids), PlanOut, tag=f"plan:{day.isoformat()}", extra={"day": day.isoformat()})
         valid_ids = known | {a.id for a in new_actions}
         completed = [i for i in out.completed_action_ids if i in valid_ids]  # the model may not invent ids
         return DailyPlan(

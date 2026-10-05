@@ -14,7 +14,7 @@ class FakeTransport:
         self.out = out
         self.calls: list[tuple[str, str, type, str]] = []
 
-    def complete(self, system, user, schema, *, tag):
+    def complete(self, system, user, schema, *, tag, extra=None):
         self.calls.append((system, user, schema, tag))
         return self.out
 
