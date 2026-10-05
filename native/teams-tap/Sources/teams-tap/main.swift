@@ -31,6 +31,8 @@ struct Arguments {
     var out: URL?
     var verbose = false
     var waitAudioSeconds: Double = 20   // tempo para o processo alvo virar cliente de áudio
+    var list = false                    // só lista os processos clientes de áudio e sai
+    var includeDescendants = true       // inclui processos filhos do alvo (Teams toca áudio por um helper)
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -48,16 +50,83 @@ struct Arguments {
             case "--wait-audio":
                 guard let v = it.next(), let secs = Double(v) else { fail("--wait-audio exige segundos") }
                 args.waitAudioSeconds = secs
+            case "--list":
+                args.list = true
+            case "--no-descendants":
+                args.includeDescendants = false
             case "--help", "-h":
-                print("Uso: teams-tap --pid <pid> --out <arquivo.wav> [--wait-audio <s>] [--verbose]")
+                print("Uso: teams-tap --pid <pid> --out <arquivo.wav> [--wait-audio <s>] [--no-descendants] [--verbose]")
+                print("     teams-tap --list        lista os processos que são clientes de áudio (pid, pai, bundle, emitindo?)")
                 exit(0)
             default:
                 fail("argumento desconhecido: \(a)")
             }
         }
+        if args.list { return args }
         guard args.pid > 0 else { fail("--pid é obrigatório") }
         guard args.out != nil else { fail("--out é obrigatório") }
         return args
+    }
+}
+
+// MARK: - Processos de áudio
+
+struct AudioProcess {
+    let object: AudioObjectID
+    let pid: pid_t
+    let bundleID: String
+    let isRunningOutput: Bool
+}
+
+func getProperty<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ initial: T) -> T? {
+    var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var value = initial
+    var size = UInt32(MemoryLayout<T>.size)
+    let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+    return status == noErr ? value : nil
+}
+
+/// Todos os processos registrados no Core Audio (clientes de áudio).
+func audioProcesses() -> [AudioProcess] {
+    var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
+    var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &objects) == noErr else { return [] }
+    return objects.compactMap { obj in
+        guard let pid: pid_t = getProperty(obj, kAudioProcessPropertyPID, pid_t(0)) else { return nil }
+        let bundle = (getProperty(obj, kAudioProcessPropertyBundleID, "" as CFString) as String?) ?? ""
+        let running = (getProperty(obj, kAudioProcessPropertyIsRunningOutput, UInt32(0)) ?? 0) != 0
+        return AudioProcess(object: obj, pid: pid, bundleID: bundle, isRunningOutput: running)
+    }
+}
+
+func parentPID(of pid: pid_t) -> pid_t? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.size
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    return info.kp_eproc.e_ppid
+}
+
+/// Verdadeiro se `pid` é `root` ou descende dele (sobe pela cadeia de pais).
+func isDescendant(_ pid: pid_t, of root: pid_t) -> Bool {
+    var current = pid
+    var hops = 0
+    while current > 1 && hops < 32 {
+        if current == root { return true }
+        guard let parent = parentPID(of: current) else { return false }
+        current = parent
+        hops += 1
+    }
+    return false
+}
+
+func listAudioProcesses() {
+    let procs = audioProcesses().sorted { $0.pid < $1.pid }
+    print("pid\tppid\temitindo\tbundle")
+    for p in procs {
+        print("\(p.pid)\t\(parentPID(of: p.pid) ?? 0)\t\(p.isRunningOutput ? "sim" : "não")\t\(p.bundleID)")
     }
 }
 
@@ -68,6 +137,7 @@ final class ProcessTapRecorder {
     let url: URL
     let verbose: Bool
     let waitAudioSeconds: Double
+    let includeDescendants: Bool
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -78,18 +148,19 @@ final class ProcessTapRecorder {
     private(set) var framesWritten: Int64 = 0
     private var stopped = false
 
-    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double) {
+    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool) {
         self.pid = pid
         self.url = url
         self.verbose = verbose
         self.waitAudioSeconds = waitAudioSeconds
+        self.includeDescendants = includeDescendants
     }
 
     func start() {
-        let processObject = waitForAudioClient()
-        if verbose { log("processo \(pid) → AudioObjectID \(processObject)") }
+        let targets = waitForAudioClients()
+        log("teams-tap: capturando \(targets.count) processo(s) de áudio: " + targets.map { "\($0.pid)\($0.bundleID.isEmpty ? "" : "[\($0.bundleID)]")" }.joined(separator: ", "))
 
-        let tapDescription = CATapDescription(stereoMixdownOfProcesses: [processObject])
+        let tapDescription = CATapDescription(stereoMixdownOfProcesses: targets.map { $0.object })
         tapDescription.uuid = UUID()
         tapDescription.name = "teams-tap \(pid)"
         tapDescription.isPrivate = true
@@ -165,41 +236,29 @@ final class ProcessTapRecorder {
 
     // MARK: Core Audio helpers
 
-    /// O Teams pode levar alguns segundos entre o início da chamada (asserção de energia)
-    /// e a inicialização do áudio; até lá o PID não tem objeto de áudio. Tenta de novo.
-    private func waitForAudioClient() -> AudioObjectID {
+    /// Processos de áudio que são o alvo ou descendem dele. O Teams (Electron) toca o som por
+    /// um processo auxiliar, não pelo principal; e pode levar alguns segundos entre o início da
+    /// chamada e a inicialização do áudio. Espera até existir ao menos um.
+    private func matchingAudioProcesses() -> [AudioProcess] {
+        audioProcesses().filter { $0.pid == pid || (includeDescendants && isDescendant($0.pid, of: pid)) }
+    }
+
+    private func waitForAudioClients() -> [AudioProcess] {
         let deadline = Date().addingTimeInterval(waitAudioSeconds)
         var attempt = 0
         while true {
             attempt += 1
             if kill(pid, 0) != 0 { fail("processo \(pid) não existe") }
-            if let object = translatePID(pid) { 
-                if attempt > 1 { log("teams-tap: processo \(pid) virou cliente de áudio após \(attempt) tentativas") }
-                return object
+            let found = matchingAudioProcesses()
+            if !found.isEmpty {
+                if attempt > 1 { log("teams-tap: áudio do processo \(pid) disponível após \(attempt) tentativas") }
+                return found
             }
-            if Date() >= deadline { fail("processo \(pid) não emite áudio (sem objeto de áudio após \(Int(waitAudioSeconds)) s)") }
+            if Date() >= deadline { fail("processo \(pid) (e descendentes) sem cliente de áudio após \(Int(waitAudioSeconds)) s") }
             Thread.sleep(forTimeInterval: 0.5)
         }
     }
 
-    private func translatePID(_ pid: pid_t) -> AudioObjectID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var pidValue = pid
-        var object = AudioObjectID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        let status = withUnsafeMutablePointer(to: &pidValue) { pidPtr in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject), &address,
-                UInt32(MemoryLayout<pid_t>.size), pidPtr, &size, &object
-            )
-        }
-        check(status, "traduzir PID \(pid) para objeto de áudio")
-        return object == kAudioObjectUnknown ? nil : object
-    }
 
     private func defaultOutputDeviceUID() -> String {
         var address = AudioObjectPropertyAddress(
@@ -238,7 +297,12 @@ final class ProcessTapRecorder {
 
 let args = Arguments.parse(CommandLine.arguments)
 
-let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds)
+if args.list {
+    listAudioProcesses()
+    exit(0)
+}
+
+let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants)
 recorder.start()
 
 // Encerramento limpo por sinal.
