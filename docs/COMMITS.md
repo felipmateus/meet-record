@@ -23,3 +23,4 @@ deixar a árvore importável; os testes podem só passar ao fim da onda.
 | 1 | 1 | Esqueleto, domínio, aplicação, repositório em arquivos, config, testes |
 | 2 | 2 | teams-tap (Swift), captura e mixagem, CLI start/stop/cancel, testes de adaptadores |
 | 3 | 3 | Config de transcrição, transcritor whisper.cpp e download do modelo, CLI transcribe, testes, docs |
+| 4 | 4 | Prompts, analisador Claude com saída estruturada, CLI analyze e pipeline no container, testes, docs |

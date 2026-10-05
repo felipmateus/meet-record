@@ -264,7 +264,7 @@ teams-recorder/
 | 1 | Esqueleto do pacote, domínio, portas, fakes, CLI vazio, testes de domínio | `pytest` verde; `trec --help` funciona | Concluída em 2026-10-04 (casos de uso e repositório em arquivos entraram nesta fase) |
 | 2 | `teams-tap` em Swift + `CoreAudioTapCapture` + `FfmpegMicCapture` + `FfmpegMixer`; `trec start/stop` manual | Chamada de teste gera `audio.m4a` audível com os dois lados | Concluída em 2026-10-04. Pendente do usuário: conceder "Gravação de Áudio do Sistema" ao `teams-tap` |
 | 3 | `WhisperCppTranscriber`; `trec transcribe` | Transcrição em português do áudio da fase 2 com erros aceitáveis | Concluída em 2026-10-04. Fala sintetizada (voz Luciana) transcrita sem erros com `large-v3-turbo-q5_0` |
-| 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | `analysis.json` válido com ações reais da reunião de teste | |
+| 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | `analysis.json` válido com ações reais da reunião de teste | Concluída em 2026-10-05 |
 | 5 | `PmsetCallDetector` + daemon + launchd + notificações | Reunião real gravada sem toque no teclado | |
 | 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Plano Markdown gerado às 18h com ações acumuladas | |
 | 7 | `install.sh`, `trec doctor/status`, README | Instalação do zero em outro usuário do Mac funciona | |
@@ -282,3 +282,12 @@ teams-recorder/
 - O whisper-cli lê WAV/FLAC/MP3/OGG; o adaptador converte o M4A para WAV 16 kHz mono com ffmpeg em pasta temporária antes de transcrever.
 - Saída via `-oj`: segmentos com `offsets` em milissegundos. Segmentos em branco são descartados.
 - `trec transcribe` sem argumento processa todas as reuniões em estado RECORDED; falhas viram `error.txt` e não interrompem as demais (RNF05).
+
+### Notas da fase 4
+
+- Saída estruturada por JSON Schema derivado de um modelo Pydantic do adaptador (`AnalysisOut`), com `additionalProperties=false` e todos os campos obrigatórios; o Pydantic valida de novo do lado do cliente antes de converter para o domínio. Datas vêm em ISO e expressões relativas ("quarta-feira") são resolvidas pelo modelo a partir da data da reunião informada na mensagem.
+- Prompt de sistema fixo e marcado com `cache_control`; metadados da reunião e transcrição vão na mensagem do usuário, preservando o prefixo cacheado entre reuniões.
+- Fallback de servidor (`fallbacks: "default"`) ligado por padrão; a recusa final ainda é tratada como `AnalysisError` e vira `error.txt`.
+- Respostas truncadas (`max_tokens`) e fora do esquema são erros explícitos, nunca análises parciais.
+- Uso de tokens por chamada em `data/log/llm_usage.jsonl` (risco R7); `trec status` passará a somar o gasto estimado na fase 7.
+- Teste real contra a API é opt-in (`TREC_REAL_CLAUDE=1`), pois gasta créditos; a suíte padrão usa um cliente simulado.
