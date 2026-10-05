@@ -42,6 +42,17 @@ trec analyze 2026-10-06_14-00-00         # uma reunião específica
 
 Só o texto da transcrição e o prompt saem do Mac. Modelo `claude-opus-5-5` com saída estruturada validada por esquema, prompt de sistema em `prompts/analyze_system.md` com cache, e fallback de servidor para recusas pontuais do classificador de segurança. Cada chamada registra tokens em `data/log/llm_usage.jsonl`. Custo típico: cerca de US$ 0,10 por hora de reunião.
 
+### Provedor: API ou Claude Code
+
+Em `config.toml`, `llm.provider` escolhe o transporte:
+
+| `provider` | Usa | Cobrança | Observações |
+|---|---|---|---|
+| `api` (padrão) | Claude API com `ANTHROPIC_API_KEY` | Crédito pré-pago por uso | Fallback de recusa e cache controlados pelo projeto |
+| `claude-code` | Claude Code instalado, em modo headless (`claude -p`) | Assinatura do Claude Code | Exige sessão logada no Mac; sem fallback de recusa; modelo por apelido em `llm.cli_model` |
+
+A variável de ambiente `TREC_LLM_PROVIDER` sobrescreve o arquivo, útil para testar: `TREC_LLM_PROVIDER=claude-code trec analyze`.
+
 Na primeira execução o macOS pede duas permissões: **Microfone** (para o ffmpeg) e **Gravação de Tela e Áudio do Sistema** (para o teams-tap), em Ajustes do Sistema > Privacidade e Segurança. Sem a segunda, a trilha do Teams sai em silêncio.
 
 ## Desenvolvimento
