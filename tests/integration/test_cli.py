@@ -130,3 +130,11 @@ def test_purge_runs(tmp_path: Path, monkeypatch):
     _project(tmp_path, monkeypatch)
     result = runner.invoke(app, ["purge"])
     assert result.exit_code == 0 and "Áudios removidos: 0" in result.output
+
+
+def test_analyze_with_claude_code_provider_requires_binary(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("TREC_LLM_PROVIDER", "claude-code")
+    monkeypatch.setattr("teams_recorder.adapters.inbound.cli.shutil.which", lambda name: None)
+    result = runner.invoke(app, ["analyze"])
+    assert result.exit_code == 1 and "Claude Code" in result.output

@@ -65,7 +65,7 @@ def test_analysis_roundtrip_from_fixture(fs: FsMeetingRepository):
 
     loaded = fs.load_analysis(m.id)
     assert loaded == analysis
-    assert loaded.my_actions[0].due == date(2026, 10, 8)
+    assert loaded.my_actions[0].due == date(2026, 10, 7)
     assert loaded.deadlines[0].who == "Felipe"
     assert derive_status(fs.files(m.id)) == MeetingStatus.ANALYZED
 

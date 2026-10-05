@@ -40,3 +40,20 @@ def test_icloud_detection(tmp_path: Path):
     assert not is_icloud_synced(tmp_path)
     assert default_data_dir(icloud) == Path.home() / "Library" / "Application Support" / "teams-recorder"
     assert default_data_dir(tmp_path) == tmp_path / "data"
+
+
+def test_llm_provider_from_toml_and_env(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    (tmp_path / "config.toml").write_text('[llm]\nprovider = "claude-code"\ncli_model = "sonnet"\n')
+    s = load_settings(tmp_path)
+    assert s.llm_provider == "claude-code" and s.llm_cli_model == "sonnet"
+    monkeypatch.setenv("TREC_LLM_PROVIDER", "api")
+    assert load_settings(tmp_path).llm_provider == "api"
+
+
+def test_invalid_llm_provider(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    (tmp_path / "config.toml").write_text('[llm]\nprovider = "gemini"\n')
+    import pytest
+    with pytest.raises(ValueError, match="llm.provider"):
+        load_settings(tmp_path)

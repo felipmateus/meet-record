@@ -3,11 +3,11 @@
   "summary": "Revisão da sprint com definição de entregas da semana.",
   "decisions": ["Relatório de integração será entregue até quarta-feira."],
   "my_actions": [
-    {"id": "a1b2c3d4", "description": "Enviar relatório de integração", "owner": "Felipe", "source_meeting": "2026-10-06_14-00-00", "due": "2026-10-08", "status": "open"},
+    {"id": "a1b2c3d4", "description": "Enviar relatório de integração", "owner": "Felipe", "source_meeting": "2026-10-06_14-00-00", "due": "2026-10-07", "status": "open"},
     {"id": "e5f6a7b8", "description": "Agendar reunião com o cliente", "owner": "Felipe", "source_meeting": "2026-10-06_14-00-00", "due": null, "status": "open"}
   ],
   "others_actions": [],
-  "deadlines": [{"what": "Relatório de integração", "when": "2026-10-08", "who": "Felipe"}],
+  "deadlines": [{"what": "Relatório de integração", "when": "2026-10-07", "who": "Felipe"}],
   "open_questions": ["Qual o escopo final da integração com o SAP?"],
   "next_meetings": ["Reunião com o cliente na semana de 13/10"]
 }
