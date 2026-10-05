@@ -14,7 +14,7 @@ def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
 
     assert s.project_dir == tmp_path.resolve()
     assert s.data_dir == tmp_path.resolve() / "data"
-    assert s.mic_device == "USB Mic"
+    assert s.mic_device == "USB Mic" and s.mic_backend == "coreaudio"
     assert s.retention_days == 7
     assert s.llm_effort == "medium"
     assert s.llm_model == "claude-opus-5-5"
@@ -64,3 +64,9 @@ def test_teams_process_override(tmp_path: Path, monkeypatch):
     assert load_settings(tmp_path).teams_process_name == "python3.11"
     monkeypatch.delenv("TREC_TEAMS_PROCESS")
     assert load_settings(tmp_path).teams_process_name == "MSTeams"
+
+
+def test_mic_backend_from_toml(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[audio]\nmic_backend = "ffmpeg"\n')
+    assert load_settings(tmp_path).mic_backend == "ffmpeg"
+    assert load_settings(tmp_path).mic_device == "default"

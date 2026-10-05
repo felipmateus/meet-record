@@ -52,3 +52,33 @@ def test_mix_single_track_when_other_is_empty(tmp_path: Path):
     FfmpegMixer().mix([tap, mic], out)
 
     assert 0.9 <= _duration(out) <= 1.3
+
+
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+def test_anomalous_tracks_are_preserved(tmp_path: Path):
+    meeting = tmp_path / "m"; meeting.mkdir()
+    tap, mic, out = meeting / "tap.wav", meeting / "mic.wav", meeting / "audio.m4a"
+    _tone(tap, 440, 6.0)
+    _tone(mic, 880, 1.0)  # gravador do microfone "morreu" cedo
+
+    FfmpegMixer().mix([tap, mic], out)
+
+    assert (meeting / "debug" / "tap.wav").exists() and (meeting / "debug" / "mic.wav").exists()
+
+
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+def test_balanced_tracks_are_not_preserved(tmp_path: Path):
+    meeting = tmp_path / "m"; meeting.mkdir()
+    tap, mic, out = meeting / "tap.wav", meeting / "mic.wav", meeting / "audio.m4a"
+    _tone(tap, 440, 2.0)
+    _tone(mic, 880, 2.0)
+    FfmpegMixer().mix([tap, mic], out)
+    assert not (meeting / "debug").exists()
+
+
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+def test_probe_reports_duration_and_levels(tmp_path: Path):
+    from teams_recorder.adapters.outbound.mixer_ffmpeg import probe
+    t = tmp_path / "t.wav"; _tone(t, 440, 2.0)
+    info = probe(t)
+    assert 1.9 <= info["duration"] <= 2.1 and info["max_db"] is not None and info["mean_db"] is not None

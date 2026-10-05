@@ -8,6 +8,7 @@ import pytest
 
 from teams_recorder.adapters.outbound import process_control
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
+from teams_recorder.adapters.outbound.capture_mic_coreaudio import CoreAudioMicCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.application.ports import CaptureHandle
 from teams_recorder.domain import CaptureError
@@ -107,3 +108,25 @@ def test_terminate_escalates_to_sigkill(tmp_path: Path):
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+class ScriptedCoreAudioMic(CoreAudioMicCapture):
+    def command(self, device: str, out: Path) -> list[str]:
+        return [sys.executable, str(FAKE), "--out", str(out)]
+
+
+def test_coreaudio_mic_roundtrip(tmp_path: Path):
+    cap = ScriptedCoreAudioMic(binary=FAKE, log_path=tmp_path / "cap.log", startup_grace=0.3)
+    out = tmp_path / "mic.wav"
+    handle = cap.start("default", out)
+    wait_for(out)
+    assert cap.is_running(handle)
+    cap.stop(handle)
+    assert out.read_bytes().endswith(b"END") and not cap.is_running(handle)
+
+
+def test_coreaudio_mic_command_and_missing_binary(tmp_path: Path):
+    cmd = CoreAudioMicCapture(binary=tmp_path / "teams-tap").command("", tmp_path / "m.wav")
+    assert cmd[1:3] == ["--mic", "default"]
+    with pytest.raises(CaptureError, match="teams-tap não encontrado"):
+        CoreAudioMicCapture(binary=tmp_path / "teams-tap").start("default", tmp_path / "m.wav")
