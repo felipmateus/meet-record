@@ -11,7 +11,7 @@ from teams_recorder import __version__
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.config import ENV_PROJECT_DIR, load_settings
 from teams_recorder.container import build_container, teams_tap_binary
-from teams_recorder.domain import TeamsRecorderError, derive_status, next_step
+from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
 
 app = typer.Typer(
     name="trec",
@@ -21,7 +21,6 @@ app = typer.Typer(
 )
 
 PHASES = {
-    "transcribe": 3,
     "analyze": 4,
     "daemon": 5,
     "plan": 6,
@@ -87,6 +86,9 @@ def doctor() -> None:
         mark = "ok " if found else "FALTA"
         ok = ok and bool(found)
         typer.echo(f"[{mark}] {name}: {found or 'não encontrado'}")
+    model_ok = settings.whisper_model_path.exists()
+    ok = ok and model_ok
+    typer.echo(f"[{'ok ' if model_ok else 'FALTA'}] modelo whisper: {settings.whisper_model_path}" + ("" if model_ok else "  → scripts/download-model.sh"))
     typer.echo(f"[{'ok ' if settings.has_api_key else 'FALTA'}] ANTHROPIC_API_KEY no .env")
     env_file = settings.project_dir / ".env"
     if env_file.exists():
@@ -132,6 +134,40 @@ def stop() -> None:
     minutes = (meeting.duration_seconds or 0) / 60
     typer.echo(f"Reunião {meeting.id} encerrada após {minutes:.1f} min.")
     typer.echo(f"  Áudio: {c.repo.path(meeting.id, 'audio.m4a')}")
+    typer.echo(f"Transcreva com `trec transcribe {meeting.id}`.")
+
+
+@app.command()
+def transcribe(
+    meeting_id: str | None = typer.Argument(None, help="ID da reunião. Sem argumento: todas as gravadas e ainda não transcritas."),
+) -> None:
+    """Transcreve o áudio de uma reunião (ou de todas as pendentes) com whisper.cpp, localmente."""
+    c = build_container(_settings(), headless=True)
+    if meeting_id:
+        if not c.repo.exists(meeting_id):
+            _fail(f"reunião {meeting_id} não existe")
+        targets = [meeting_id]
+    else:
+        targets = [m.id for m in c.repo.list_meetings() if derive_status(c.repo.files(m.id)) == MeetingStatus.RECORDED]
+        if not targets:
+            typer.echo("Nenhuma reunião pendente de transcrição.")
+            return
+    use_case = c.transcribe_meeting()
+    failures = 0
+    for mid in targets:
+        typer.echo(f"Transcrevendo {mid}…", nl=False)
+        try:
+            transcript = use_case.execute(mid)
+        except TeamsRecorderError as exc:
+            failures += 1
+            c.repo.mark_failed(mid, f"transcrição: {exc}")
+            typer.echo(f" FALHOU: {exc}")
+            continue
+        c.repo.clear_failed(mid)
+        typer.echo(f" ok ({len(transcript.segments)} segmentos, {transcript.duration_seconds/60:.1f} min)")
+        typer.echo(f"  Texto: {c.repo.path(mid, 'transcript.txt')}")
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()

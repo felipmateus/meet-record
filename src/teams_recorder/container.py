@@ -13,6 +13,7 @@ from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
 from teams_recorder.application.ports import (
     AudioMixer,
     CallDetector,
@@ -30,6 +31,7 @@ from teams_recorder.application.use_cases import (
     PurgeOldAudio,
     StartRecording,
     StopRecording,
+    TranscribeMeeting,
 )
 from teams_recorder.config import Settings
 
@@ -47,8 +49,8 @@ class Container:
     process_capture: ProcessAudioCapture
     mic_capture: MicCapture
     mixer: AudioMixer
+    transcriber: Transcriber
     detector: CallDetector | None = None
-    transcriber: Transcriber | None = None
     analyzer: MeetingAnalyzer | None = None
     planner: Planner | None = None
 
@@ -60,6 +62,9 @@ class Container:
 
     def cancel_recording(self) -> CancelRecording:
         return CancelRecording(self.repo, self.process_capture, self.mic_capture, self.notifier)
+
+    def transcribe_meeting(self) -> TranscribeMeeting:
+        return TranscribeMeeting(self.repo, self.transcriber, self.settings.language)
 
     def purge_old_audio(self) -> PurgeOldAudio:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
@@ -75,4 +80,5 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         process_capture=CoreAudioTapCapture(teams_tap_binary(settings.project_dir), log_path=capture_log),
         mic_capture=FfmpegMicCapture(log_path=capture_log),
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
+        transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
     )
