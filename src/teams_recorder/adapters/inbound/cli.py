@@ -21,7 +21,6 @@ app = typer.Typer(
 )
 
 PHASES = {
-    "analyze": 4,
     "daemon": 5,
     "plan": 6,
 }
@@ -168,6 +167,7 @@ def transcribe(
         typer.echo(f"  Texto: {c.repo.path(mid, 'transcript.txt')}")
     if failures:
         raise typer.Exit(code=1)
+    typer.echo("Analise com `trec analyze`.")
 
 
 @app.command()
@@ -179,6 +179,46 @@ def cancel() -> None:
         _fail("nenhuma gravação em andamento")
     c.cancel_recording().execute(active)  # type: ignore[arg-type]
     typer.echo(f"Gravação {active.meeting.id} descartada.")  # type: ignore[union-attr]
+
+
+@app.command()
+def analyze(
+    meeting_id: str | None = typer.Argument(None, help="ID da reunião. Sem argumento: todas as transcritas e ainda não analisadas."),
+) -> None:
+    """Extrai resumo, decisões, ações e prazos da transcrição com a Claude API."""
+    settings = _settings()
+    if not settings.has_api_key:
+        _fail("ANTHROPIC_API_KEY ausente no .env")
+    c = build_container(settings, headless=True)
+    if meeting_id:
+        if not c.repo.exists(meeting_id):
+            _fail(f"reunião {meeting_id} não existe")
+        targets = [meeting_id]
+    else:
+        targets = [m.id for m in c.repo.list_meetings() if derive_status(c.repo.files(m.id)) == MeetingStatus.TRANSCRIBED]
+        if not targets:
+            typer.echo("Nenhuma reunião pendente de análise.")
+            return
+    use_case = c.analyze_meeting()
+    failures = 0
+    for mid in targets:
+        typer.echo(f"Analisando {mid}…", nl=False)
+        try:
+            analysis = use_case.execute(mid)
+        except TeamsRecorderError as exc:
+            failures += 1
+            c.repo.mark_failed(mid, f"análise: {exc}")
+            typer.echo(f" FALHOU: {exc}")
+            continue
+        c.repo.clear_failed(mid)
+        typer.echo(f" ok ({len(analysis.decisions)} decisões, {len(analysis.my_actions)} ações suas, {len(analysis.others_actions)} de terceiros)")
+        typer.echo(f"  Resumo: {analysis.summary}")
+        for a in analysis.my_actions:
+            due = f" até {a.due.isoformat()}" if a.due else ""
+            typer.echo(f"  • {a.description}{due}")
+        typer.echo(f"  Arquivo: {c.repo.path(mid, 'analysis.json')}")
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command()

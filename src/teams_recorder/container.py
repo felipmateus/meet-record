@@ -10,6 +10,7 @@ from pathlib import Path
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
+from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
@@ -26,7 +27,9 @@ from teams_recorder.application.ports import (
     ProcessAudioCapture,
     Transcriber,
 )
+from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.use_cases import (
+    AnalyzeMeeting,
     CancelRecording,
     PurgeOldAudio,
     StartRecording,
@@ -50,8 +53,8 @@ class Container:
     mic_capture: MicCapture
     mixer: AudioMixer
     transcriber: Transcriber
+    analyzer: MeetingAnalyzer
     detector: CallDetector | None = None
-    analyzer: MeetingAnalyzer | None = None
     planner: Planner | None = None
 
     def start_recording(self) -> StartRecording:
@@ -65,6 +68,12 @@ class Container:
 
     def transcribe_meeting(self) -> TranscribeMeeting:
         return TranscribeMeeting(self.repo, self.transcriber, self.settings.language)
+
+    def analyze_meeting(self) -> AnalyzeMeeting:
+        return AnalyzeMeeting(self.repo, self.analyzer)
+
+    def pipeline(self) -> Pipeline:
+        return Pipeline(self.repo, self.notifier, self.stop_recording(), self.transcribe_meeting(), self.analyze_meeting())
 
     def purge_old_audio(self) -> PurgeOldAudio:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
@@ -81,4 +90,11 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         mic_capture=FfmpegMicCapture(log_path=capture_log),
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
+        analyzer=ClaudeAnalyzer(
+            prompt_path=settings.prompts_dir / "analyze_system.md",
+            model=settings.llm_model,
+            effort=settings.llm_effort,
+            max_tokens=settings.llm_max_tokens,
+            usage_log=settings.usage_log,
+        ),
     )
