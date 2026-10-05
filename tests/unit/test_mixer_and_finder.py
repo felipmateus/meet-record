@@ -13,7 +13,8 @@ def test_mixer_command_two_tracks(tmp_path: Path):
     assert cmd[0] == "ffmpeg"
     assert cmd.count("-i") == 2
     filt = cmd[cmd.index("-filter_complex") + 1]
-    assert "amix=inputs=2" in filt and "loudnorm" in filt
+    assert "amix=inputs=2" in filt and "loudnorm" in filt and "alimiter" in filt
+    assert filt.count("afftdn") == 2 and filt.count("highpass") == 2  # um por trilha
     assert cmd[-1].endswith("out.m4a") and "96k" in cmd
     assert cmd[cmd.index("-ar") + 1] == "48000"
 
@@ -21,6 +22,13 @@ def test_mixer_command_two_tracks(tmp_path: Path):
 def test_mixer_command_single_track(tmp_path: Path):
     cmd = FfmpegMixer().command([tmp_path / "a.wav"], tmp_path / "out.m4a")
     assert "-filter_complex" not in cmd and "-af" in cmd
+    assert "afftdn" in cmd[cmd.index("-af") + 1]
+
+
+def test_mixer_without_denoise(tmp_path: Path):
+    cmd = FfmpegMixer(denoise=False).command([tmp_path / "a.wav", tmp_path / "b.wav"], tmp_path / "out.m4a")
+    filt = cmd[cmd.index("-filter_complex") + 1]
+    assert "afftdn" not in filt and "alimiter" in filt
 
 
 def test_usable_tracks_filters_missing_and_empty(tmp_path: Path):

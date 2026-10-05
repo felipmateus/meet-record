@@ -70,3 +70,11 @@ def test_mic_backend_from_toml(tmp_path: Path):
     (tmp_path / "config.toml").write_text('[audio]\nmic_backend = "ffmpeg"\n')
     assert load_settings(tmp_path).mic_backend == "ffmpeg"
     assert load_settings(tmp_path).mic_device == "default"
+
+
+def test_denoise_and_vad_settings(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.denoise is True and s.vad is False and s.vad_model_path is None
+    (tmp_path / "config.toml").write_text('[audio]\ndenoise = false\n[transcription]\nvad = true\n')
+    s = load_settings(tmp_path)
+    assert s.denoise is False and s.vad_model_path.name == "ggml-silero-v5.1.2.bin"

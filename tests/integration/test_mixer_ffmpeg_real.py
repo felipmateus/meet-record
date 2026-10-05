@@ -82,3 +82,15 @@ def test_probe_reports_duration_and_levels(tmp_path: Path):
     t = tmp_path / "t.wav"; _tone(t, 440, 2.0)
     info = probe(t)
     assert 1.9 <= info["duration"] <= 2.1 and info["max_db"] is not None and info["mean_db"] is not None
+
+
+@pytest.mark.skipif(ffmpeg_missing, reason="ffmpeg não instalado")
+def test_mix_output_never_clips(tmp_path: Path):
+    """Duas trilhas quentes somadas não podem passar de 0 dBFS no arquivo final."""
+    tap, mic, out = tmp_path / "tap.wav", tmp_path / "mic.wav", tmp_path / "audio.m4a"
+    for path, freq in ((tap, 440), (mic, 660)):
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"sine=frequency={freq}:duration=3", "-af", "volume=0dB", "-ar", "48000", str(path)], check=True)
+    FfmpegMixer().mix([tap, mic], out)
+    stats = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(out), "-af", "astats=measure_overall=Peak_level:measure_perchannel=none", "-f", "null", "-"], capture_output=True, text=True).stderr
+    peak = float(next(line.split(":")[1] for line in stats.splitlines() if "Peak level dB" in line))
+    assert peak <= 0.0, peak

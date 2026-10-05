@@ -36,3 +36,12 @@ def test_commands(tmp_path: Path):
 
 def test_threads_default_is_positive(tmp_path: Path):
     assert WhisperCppTranscriber(tmp_path / "m.bin").threads >= 1
+
+
+def test_vad_flags_only_when_model_exists(tmp_path: Path):
+    vad = tmp_path / "ggml-silero.bin"
+    without = WhisperCppTranscriber(tmp_path / "m.bin", vad_model_path=vad).whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
+    assert "--vad" not in without
+    vad.write_bytes(b"\x00")
+    with_vad = WhisperCppTranscriber(tmp_path / "m.bin", vad_model_path=vad).whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
+    assert "--vad" in with_vad and with_vad[with_vad.index("-vm") + 1] == str(vad)
