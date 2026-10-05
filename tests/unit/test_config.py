@@ -57,3 +57,10 @@ def test_invalid_llm_provider(tmp_path: Path, monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="llm.provider"):
         load_settings(tmp_path)
+
+
+def test_teams_process_override(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TREC_TEAMS_PROCESS", "python3.11")
+    assert load_settings(tmp_path).teams_process_name == "python3.11"
+    monkeypatch.delenv("TREC_TEAMS_PROCESS")
+    assert load_settings(tmp_path).teams_process_name == "MSTeams"

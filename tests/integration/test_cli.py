@@ -48,9 +48,24 @@ def test_status_shows_meetings_and_next_step(tmp_path: Path, monkeypatch):
 
 def test_future_commands_report_phase(tmp_path: Path, monkeypatch):
     _project(tmp_path, monkeypatch)
-    result = runner.invoke(app, ["daemon"])
+    result = runner.invoke(app, ["plan"])
     assert result.exit_code == 2
-    assert "fase 5" in result.output
+    assert "fase 6" in result.output
+
+
+def test_daemon_once_reports_detector_state(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("TREC_TEAMS_PROCESS", "ProcessoQueNaoExiste")
+    result = runner.invoke(app, ["daemon", "--once"])
+    assert result.exit_code == 0, result.output
+    assert "detector (ProcessoQueNaoExiste): idle" in result.output
+
+
+def test_agent_status_when_not_installed(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    result = runner.invoke(app, ["agent", "status"])
+    assert result.exit_code == 1 and "carregado: não" in result.output
 
 
 def test_analyze_requires_api_key(tmp_path: Path, monkeypatch):

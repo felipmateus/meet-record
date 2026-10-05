@@ -1,0 +1,14 @@
+Assertion status system-wide:
+   BackgroundTask                 0
+   PreventUserIdleDisplaySleep    1
+   PreventUserIdleSystemSleep     1
+
+Listed by owning process:
+   pid 97509(Claude): [0x000f03eb00019fa6] 00:00:41 NoIdleSleepAssertion named: "Electron"  
+   pid 4827(caffeinate): [0x0008a98b0005a17e] 241:03:49 PreventUserIdleDisplaySleep named: "caffeinate command-line tool"  
+	Details: caffeinate asserting forever
+   pid 399(WindowServer): [0x000ee405000994d2] 00:00:00 UserIsActive named: "com.apple.iohideventsystem.queue.tickle"  
+   pid 51234(MSTeams): [0x000f044000059fb1] 00:12:01 PreventUserIdleDisplaySleep named: "Microsoft Teams call"  
+   pid 51234(MSTeams): [0x000f044000059fb2] 00:12:01 PreventUserIdleSystemSleep named: "Microsoft Teams call"  
+   pid 409(runningboardd): [0x000efb1600019636] 00:38:22 PreventUserIdleSystemSleep named: "app<application.com.goodnotesapp>"  
+Idle sleep preventers: IODisplayWrangler
