@@ -1,0 +1,69 @@
+from datetime import date, datetime, timedelta
+
+from teams_recorder.domain import (
+    Action,
+    ActionStatus,
+    DailyPlan,
+    Meeting,
+    Segment,
+    Transcript,
+    meeting_id_for,
+    merge_open_actions,
+)
+
+
+def test_meeting_id_format():
+    assert meeting_id_for(datetime(2026, 10, 6, 14, 5, 9)) == "2026-10-06_14-05-09"
+
+
+def test_meeting_start_and_duration():
+    start = datetime(2026, 10, 6, 14, 0, 0)
+    m = Meeting.start(start, pid=7)
+    assert m.id == "2026-10-06_14-00-00"
+    assert m.day == date(2026, 10, 6)
+    assert m.duration_seconds is None
+    m.ended_at = start + timedelta(minutes=45)
+    assert m.duration_seconds == 2700
+
+
+def test_transcript_text_and_timestamps():
+    t = Transcript(segments=[Segment(0.0, 2.0, " Olá "), Segment(2.0, 65.5, "tudo bem?"), Segment(65.5, 66.0, "  ")])
+    assert t.text == "Olá\ntudo bem?"
+    assert t.duration_seconds == 66.0
+    lines = t.as_timestamped_text().splitlines()
+    assert lines[0] == "[00:00:00] Olá"
+    assert lines[1] == "[00:00:02] tudo bem?"
+
+
+def test_empty_transcript():
+    assert Transcript().text == ""
+    assert Transcript().duration_seconds == 0.0
+
+
+def test_action_overdue():
+    a = Action("x", "eu", "m1", due=date(2026, 10, 5))
+    assert a.is_overdue_on(date(2026, 10, 6))
+    assert not a.is_overdue_on(date(2026, 10, 5))
+    a.status = ActionStatus.DONE
+    assert not a.is_overdue_on(date(2026, 10, 6))
+    assert not Action("y", "eu", "m1").is_overdue_on(date(2026, 10, 6))
+
+
+def test_action_ids_are_unique():
+    assert Action("a", "eu", "m").id != Action("a", "eu", "m").id
+
+
+def test_merge_open_actions():
+    keep = Action("manter", "eu", "m1", id="keep")
+    done = Action("feita", "eu", "m1", id="done")
+    late = Action("atrasada", "eu", "m1", id="late", due=date(2026, 10, 1))
+    new = Action("nova", "eu", "m2", id="new")
+    dup = Action("duplicada", "eu", "m2", id="keep")
+    plan = DailyPlan(date(2026, 10, 6), "", new_actions=[new, dup], completed_action_ids=["done"], overdue_action_ids=["late"])
+
+    result = merge_open_actions([keep, done, late], plan)
+
+    ids = [a.id for a in result]
+    assert ids == ["keep", "late", "new"]
+    assert late.status == ActionStatus.OVERDUE
+    assert keep.status == ActionStatus.OPEN

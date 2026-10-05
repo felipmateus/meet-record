@@ -1,0 +1,129 @@
+import json
+from datetime import date, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from teams_recorder.adapters.outbound import codec
+from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.domain import Action, DailyPlan, Meeting, MeetingNotFound, MeetingStatus, RepositoryError, derive_status
+from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+@pytest.fixture
+def fs(tmp_path: Path) -> FsMeetingRepository:
+    return FsMeetingRepository(tmp_path / "data")
+
+
+def test_create_and_meta_roundtrip(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0), pid=9, title="Daily")
+    fs.create(m)
+    assert fs.exists(m.id)
+    assert fs.files(m.id) == {META}
+    assert derive_status(fs.files(m.id)) == MeetingStatus.RECORDING
+
+    m.ended_at = m.started_at + timedelta(minutes=10)
+    fs.save_meta(m)
+    loaded = fs.load_meta(m.id)
+    assert loaded == m
+    assert fs.list_meetings() == [m]
+
+
+def test_create_twice_fails(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0))
+    fs.create(m)
+    with pytest.raises(RepositoryError):
+        fs.create(m)
+
+
+def test_unknown_meeting(fs: FsMeetingRepository):
+    with pytest.raises(MeetingNotFound):
+        fs.load_meta("nada")
+    assert not fs.exists("nada")
+
+
+def test_transcript_roundtrip_from_fixture(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    transcript = codec.transcript_from_dict(json.loads((FIXTURES / "sample_transcript.json").read_text()))
+
+    fs.save_transcript(m.id, transcript)
+
+    assert {TRANSCRIPT_JSON, TRANSCRIPT_TXT} <= fs.files(m.id)
+    assert fs.load_transcript(m.id) == transcript
+    txt = fs.path(m.id, TRANSCRIPT_TXT).read_text()
+    assert txt.startswith("[00:00:00] Bom dia")
+    assert "[00:00:09] Combinado." in txt
+
+
+def test_analysis_roundtrip_from_fixture(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    analysis = codec.analysis_from_dict(json.loads((FIXTURES / "sample_analysis.json").read_text()))
+
+    fs.save_analysis(m.id, analysis)
+
+    loaded = fs.load_analysis(m.id)
+    assert loaded == analysis
+    assert loaded.my_actions[0].due == date(2026, 10, 8)
+    assert loaded.deadlines[0].who == "Felipe"
+    assert derive_status(fs.files(m.id)) == MeetingStatus.ANALYZED
+
+
+def test_lock_is_exclusive_and_released(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    with fs.lock(m.id):
+        assert LOCK in fs.files(m.id)
+        with pytest.raises(RepositoryError):
+            with fs.lock(m.id):
+                pass
+    assert LOCK not in fs.files(m.id)
+
+
+def test_failed_marks_and_clears(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.mark_failed(m.id, "transcrição: whisper falhou")
+    assert fs.path(m.id, ERROR).read_text() == "transcrição: whisper falhou\n"
+    assert derive_status(fs.files(m.id)) == MeetingStatus.FAILED
+    fs.clear_failed(m.id)
+    assert ERROR not in fs.files(m.id)
+
+
+def test_delete_file_and_meeting(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.path(m.id, AUDIO).write_bytes(b"\x00")
+    fs.delete_file(m.id, AUDIO)
+    fs.delete_file(m.id, AUDIO)  # idempotente
+    assert AUDIO not in fs.files(m.id)
+    fs.delete_meeting(m.id)
+    assert not fs.exists(m.id)
+
+
+def test_tmp_files_are_hidden_from_listing(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.path(m.id, "analysis.json.tmp").write_text("{")
+    assert ANALYSIS not in fs.files(m.id) and "analysis.json.tmp" not in fs.files(m.id)
+
+
+def test_plans_and_open_actions(fs: FsMeetingRepository):
+    d1, d2, d3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
+    a = Action("x", "eu", "m1", id="abc", due=d2)
+    fs.save_plan(DailyPlan(d1, "# dia 1\n", new_actions=[a]))
+    fs.save_plan(DailyPlan(d3, "# dia 3\n"))
+
+    assert fs.load_plan(d1).new_actions == [a]
+    assert fs.load_plan(d2) is None
+    assert fs.latest_plan_before(d3).day == d1
+    assert fs.latest_plan_before(d1) is None
+    assert (fs.plans / "2026-10-06.md").read_text() == "# dia 1\n"
+
+    assert fs.load_open_actions() == []
+    fs.save_open_actions([a])
+    assert fs.load_open_actions() == [a]
+
+
+def test_corrupt_json_raises_repository_error(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.path(m.id, META).write_text("{nope")
+    with pytest.raises(RepositoryError):
+        fs.load_meta(m.id)

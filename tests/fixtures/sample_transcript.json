@@ -1,0 +1,8 @@
+{
+  "language": "pt",
+  "segments": [
+    {"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal. Vamos começar pela revisão da sprint."},
+    {"start": 3.2, "end": 9.8, "text": "Felipe, você fica responsável por enviar o relatório de integração até quarta-feira."},
+    {"start": 9.8, "end": 14.1, "text": "Combinado. Também vou agendar a reunião com o cliente para a semana que vem."}
+  ]
+}
