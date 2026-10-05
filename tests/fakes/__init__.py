@@ -64,6 +64,9 @@ class FakeProcessCapture:
     def is_stopped(self, handle: CaptureHandle) -> bool:
         return handle.pid in self.stopped
 
+    def is_running(self, handle: CaptureHandle) -> bool:
+        return handle in self.handles and handle.pid not in self.stopped and handle.pid not in getattr(self, "died", set())
+
 
 class FakeMicCapture(FakeProcessCapture):
     def start(self, device: str, out: Path) -> CaptureHandle:  # type: ignore[override]

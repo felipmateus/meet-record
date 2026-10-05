@@ -22,6 +22,14 @@ class FakeContainer:
     proc: FakeProcessCapture
     mic: FakeMicCapture
 
+    @property
+    def process_capture(self):
+        return self.proc
+
+    @property
+    def mic_capture(self):
+        return self.mic
+
     def start_recording(self):
         return StartRecording(self.repo, self.proc, self.mic, self.notifier, self.clock, "mic")
 
@@ -131,3 +139,15 @@ def test_tick_without_detector_raises(repo, notifier, clock):
     c.detector = None
     with pytest.raises(Exception, match="sem detector"):
         d.tick()
+
+
+def test_dead_capturer_is_logged_once(repo, notifier, clock, caplog):
+    import logging
+    d, c = _daemon(repo, notifier, clock, [CallState.IN_CALL] * 5)
+    d.tick(); d.tick()
+    assert d.active is not None
+    c.proc.died = {d.active.process_handle.pid}
+    with caplog.at_level(logging.WARNING):
+        d.tick(); d.tick()
+    warnings = [r for r in caplog.records if "morreu durante a chamada" in r.getMessage()]
+    assert len(warnings) == 1 and "teams-tap" in warnings[0].getMessage()

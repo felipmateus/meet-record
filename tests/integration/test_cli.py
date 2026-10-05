@@ -63,7 +63,11 @@ def test_daemon_once_reports_detector_state(tmp_path: Path, monkeypatch):
 
 def test_agent_status_when_not_installed(tmp_path: Path, monkeypatch):
     _project(tmp_path, monkeypatch)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    # não depende do launchd real da máquina (o agente pode estar instalado de verdade)
+    monkeypatch.setattr(
+        "teams_recorder.adapters.inbound.cli.LaunchAgent.status",
+        lambda self: {"loaded": False, "plist": str(self.plist_path), "plist_exists": False, "pid": None, "state": None},
+    )
     result = runner.invoke(app, ["agent", "status"])
     assert result.exit_code == 1 and "carregado: não" in result.output
 

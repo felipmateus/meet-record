@@ -46,11 +46,11 @@ def test_tap_start_stop_roundtrip(tmp_path: Path):
     out = tmp_path / "tap.wav"
 
     handle = cap.start(4242, out)
-    assert process_control.is_running(handle.pid)
+    assert process_control.is_running(handle.pid) and cap.is_running(handle)
     wait_for(out)
 
     assert cap.stop(handle) == out
-    assert not process_control.is_running(handle.pid)
+    assert not process_control.is_running(handle.pid) and not cap.is_running(handle)
     assert out.read_bytes().endswith(b"END")  # recebeu o sinal e finalizou o arquivo
 
 
