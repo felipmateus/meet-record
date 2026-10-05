@@ -6,8 +6,12 @@
 data_dir = ""
 
 [audio]
-# Nome (ou índice) do microfone como listado por: ffmpeg -f avfoundation -list_devices true -i ""
-mic_device = "MacBook Air Microphone"
+# Microfone: "default" segue a entrada padrão do sistema (recomendado: funciona com headset),
+# ou o nome exato do dispositivo (ex.: "MacBook Air Microphone").
+mic_device = "default"
+# Backend do microfone: "coreaudio" (teams-tap --mic, sobrevive à reconfiguração feita pelo Teams)
+# ou "ffmpeg" (avfoundation; parou de gravar segundos após o Teams abrir o microfone).
+mic_backend = "coreaudio"
 teams_process_name = "MSTeams"
 bitrate_kbps = 64
 

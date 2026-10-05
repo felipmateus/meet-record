@@ -20,6 +20,7 @@ class Settings:
     project_dir: Path
     data_dir: Path
     mic_device: str
+    mic_backend: str
     teams_process_name: str
     bitrate_kbps: int
     poll_seconds: int
@@ -109,7 +110,8 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     return Settings(
         project_dir=project_dir,
         data_dir=data_dir,
-        mic_device=str(audio.get("mic_device", "MacBook Air Microphone")),
+        mic_device=str(audio.get("mic_device", "default")),
+        mic_backend=str(audio.get("mic_backend", "coreaudio")),
         teams_process_name=os.environ.get(ENV_TEAMS_PROCESS) or str(audio.get("teams_process_name", "MSTeams")),
         bitrate_kbps=int(audio.get("bitrate_kbps", 64)),
         poll_seconds=int(detector.get("poll_seconds", 3)),

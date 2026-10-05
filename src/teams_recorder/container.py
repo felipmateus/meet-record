@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
+from teams_recorder.adapters.outbound.capture_mic_coreaudio import CoreAudioMicCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
@@ -89,7 +90,8 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         clock=SystemClock(),
         notifier=LogNotifier() if headless else MacOSNotifier(),
         process_capture=CoreAudioTapCapture(teams_tap_binary(settings.project_dir), log_path=capture_log),
-        mic_capture=FfmpegMicCapture(log_path=capture_log),
+        mic_capture=(FfmpegMicCapture(log_path=capture_log) if settings.mic_backend == "ffmpeg"
+                     else CoreAudioMicCapture(teams_tap_binary(settings.project_dir), log_path=capture_log)),
         mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps),
         transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads),
         analyzer=build_analyzer(settings),

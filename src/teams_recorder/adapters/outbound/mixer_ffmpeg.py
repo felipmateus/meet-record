@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +12,28 @@ from teams_recorder.domain import CaptureError
 log = logging.getLogger(__name__)
 
 MIN_TRACK_BYTES = 1024  # cabeçalho WAV sem amostras tem 44 bytes; menos de 1 KB é lixo
+ANOMALY_RATIO = 0.5     # trilha com menos da metade da duração da mais longa é anomalia
+DEBUG_DIR = "debug"     # trilhas brutas preservadas aqui quando há anomalia
+
+
+def probe(path: Path, ffmpeg: str = "ffmpeg") -> dict:
+    """Duração (s) e volume médio/máximo (dB) de uma trilha, via ffmpeg volumedetect."""
+    info: dict = {"duration": None, "mean_db": None, "max_db": None}
+    try:
+        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=600, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return info
+    out = r.stderr
+    m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", out)
+    if m:
+        info["duration"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    m = re.search(r"mean_volume: (-?[\d.]+) dB", out)
+    if m:
+        info["mean_db"] = float(m.group(1))
+    m = re.search(r"max_volume: (-?[\d.]+) dB", out)
+    if m:
+        info["max_db"] = float(m.group(1))
+    return info
 
 
 class FfmpegMixer:
@@ -36,11 +60,35 @@ class FfmpegMixer:
         cmd += ["-ac", "1", "-ar", str(self.sample_rate), "-c:a", "aac", "-b:a", f"{self.bitrate_kbps}k", str(out)]
         return cmd
 
+    def _preserve_if_anomalous(self, tracks: list[Path], durations: dict[Path, float], meeting_dir: Path) -> None:
+        """Se uma trilha é muito mais curta que a outra (gravador morreu), guarda cópias para diagnóstico."""
+        if len(durations) < 2:
+            anomalous = len(tracks) >= 2  # uma trilha inteira faltando/vazia também é anomalia
+        else:
+            longest = max(durations.values())
+            anomalous = longest > 0 and min(durations.values()) / longest < ANOMALY_RATIO
+        if not anomalous:
+            return
+        debug = meeting_dir / DEBUG_DIR
+        debug.mkdir(exist_ok=True)
+        for t in tracks:
+            if t.exists():
+                shutil.copy2(t, debug / t.name)
+        log.warning("anomalia nas trilhas (%s); cópias brutas preservadas em %s", ", ".join(f"{t.name}={durations.get(t, 0):.1f}s" for t in tracks), debug)
+
     def mix(self, tracks: list[Path], out: Path) -> Path:
         usable = self.usable_tracks(tracks)
+        durations: dict[Path, float] = {}
         for t in tracks:
             size = t.stat().st_size if t.exists() else 0
-            log.info("trilha %s: %.1f MB%s", t.name, size / 1e6, "" if t in usable else " (descartada)")
+            if t in usable:
+                info = probe(t, self.ffmpeg)
+                if info["duration"] is not None:
+                    durations[t] = info["duration"]
+                log.info("trilha %s: %.1f MB, %.1f s, média %s dB, pico %s dB", t.name, size / 1e6, info["duration"] or 0.0, info["mean_db"], info["max_db"])
+            else:
+                log.info("trilha %s: %.1f MB (descartada)", t.name, size / 1e6)
+        self._preserve_if_anomalous(tracks, durations, out.parent)
         if not usable:
             raise CaptureError("nenhuma trilha de áudio utilizável para mixar: " + ", ".join(str(t) for t in tracks))
         try:
