@@ -1,4 +1,4 @@
-"""Carrega config.toml e .env em um objeto Settings imutável."""
+"""Loads config.toml and .env into an immutable Settings object."""
 from __future__ import annotations
 
 import os
@@ -10,9 +10,14 @@ from dotenv import load_dotenv
 
 ENV_PROJECT_DIR = "TEAMS_RECORDER_DIR"
 ENV_LLM_PROVIDER = "TREC_LLM_PROVIDER"
-ENV_TEAMS_PROCESS = "TREC_TEAMS_PROCESS"   # para testes: simular o Teams com outro processo
+ENV_TEAMS_PROCESS = "TREC_TEAMS_PROCESS"   # for tests: simulate Teams with another process
 LLM_PROVIDERS = ("api", "claude-code")
 ICLOUD_MARKER = "Mobile Documents"
+# Folders protected by macOS TCC: background processes (launchd) touching files in them
+# trigger permission prompts they cannot answer; observed as "[Errno 11] Resource deadlock
+# avoided" when executing binaries and writing logs.
+PROTECTED_FOLDERS = ("Documents", "Desktop", "Downloads")
+APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / "teams-recorder"
 
 
 @dataclass(frozen=True)
@@ -70,7 +75,7 @@ class Settings:
 def _provider(value: object) -> str:
     v = str(value).strip().lower()
     if v not in LLM_PROVIDERS:
-        raise ValueError(f"llm.provider inválido: {value!r}; use um de {LLM_PROVIDERS}")
+        raise ValueError(f"invalid llm.provider: {value!r}; use one of {LLM_PROVIDERS}")
     return v
 
 
@@ -82,16 +87,25 @@ def default_project_dir() -> Path:
 
 
 def is_icloud_synced(path: Path) -> bool:
-    """Heurística: caminhos sob ~/Library/Mobile Documents são sincronizados com o iCloud."""
+    """Heuristic: paths under ~/Library/Mobile Documents are synced with iCloud."""
     try:
         return ICLOUD_MARKER in str(path.resolve())
     except OSError:
         return False
 
 
+def is_tcc_protected(path: Path) -> bool:
+    """True when the path is under ~/Documents, ~/Desktop or ~/Downloads."""
+    try:
+        rel = path.resolve().relative_to(Path.home())
+    except (ValueError, OSError):
+        return False
+    return bool(rel.parts) and rel.parts[0] in PROTECTED_FOLDERS
+
+
 def default_data_dir(project_dir: Path) -> Path:
-    if is_icloud_synced(project_dir):
-        return Path.home() / "Library" / "Application Support" / "teams-recorder"
+    if is_icloud_synced(project_dir) or is_tcc_protected(project_dir):
+        return APP_SUPPORT_DIR
     return project_dir / "data"
 
 

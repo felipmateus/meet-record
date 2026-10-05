@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from teams_recorder.config import default_data_dir, is_icloud_synced, load_settings
+from teams_recorder.config import APP_SUPPORT_DIR, default_data_dir, is_icloud_synced, is_tcc_protected, load_settings
 
 
 def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
@@ -29,8 +29,8 @@ def test_load_settings_defaults_without_files(tmp_path: Path, monkeypatch):
 
 
 def test_explicit_data_dir(tmp_path: Path):
-    (tmp_path / "config.toml").write_text('[paths]\ndata_dir = "~/outro/lugar"\n')
-    assert load_settings(tmp_path).data_dir == Path("~/outro/lugar").expanduser()
+    (tmp_path / "config.toml").write_text('[paths]\ndata_dir = "~/other/place"\n')
+    assert load_settings(tmp_path).data_dir == Path("~/other/place").expanduser()
 
 
 def test_icloud_detection(tmp_path: Path):
@@ -78,3 +78,13 @@ def test_denoise_and_vad_settings(tmp_path: Path):
     (tmp_path / "config.toml").write_text('[audio]\ndenoise = false\n[transcription]\nvad = true\n')
     s = load_settings(tmp_path)
     assert s.denoise is False and s.vad_model_path.name == "ggml-silero-v5.1.2.bin"
+
+
+def test_tcc_protected_folders_get_app_support_data_dir(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    docs = tmp_path / "Documents" / "proj"; docs.mkdir(parents=True)
+    dev = tmp_path / "dev" / "proj"; dev.mkdir(parents=True)
+    assert is_tcc_protected(docs) and not is_tcc_protected(dev)
+    assert default_data_dir(dev) == dev / "data"
+    # APP_SUPPORT_DIR was computed at import time with the real home; only the rule matters here
+    assert default_data_dir(docs) == APP_SUPPORT_DIR

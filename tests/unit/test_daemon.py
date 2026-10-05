@@ -1,4 +1,4 @@
-"""Máquina de estados do daemon com todas as portas simuladas."""
+"""Daemon state machine with all ports faked."""
 from dataclasses import dataclass
 
 import pytest
@@ -14,7 +14,7 @@ from tests.fakes import FakeAnalyzer, FakeCallDetector, FakeMicCapture, FakeMixe
 
 @dataclass
 class FakeContainer:
-    """Só o que o Daemon usa do Container real."""
+    """Only what the Daemon uses from the real Container."""
     repo: object
     detector: object
     notifier: object
@@ -52,7 +52,7 @@ class FakeContainer:
 
 def _daemon(repo, notifier, clock, states, **kw):
     c = FakeContainer(repo, FakeCallDetector(states), notifier, clock, FakeProcessCapture(), FakeMicCapture())
-    inline = lambda fn: fn()  # noqa: E731 - pós-processamento síncrono nos testes
+    inline = lambda fn: fn()  # noqa: E731 - synchronous post-processing in tests
     return Daemon(c, poll_seconds=0, start_after=2, stop_after=3, sleep=lambda s: None, run_in_background=inline, **kw), c
 
 
@@ -69,7 +69,7 @@ def test_full_call_cycle(repo, notifier, clock):
     assert derive_status(repo.files(meetings[0].id)) == MeetingStatus.ANALYZED
     assert d.active is None
     titles = [t for t, _ in notifier.messages]
-    assert titles[:2] == ["Gravação iniciada", "Gravação encerrada"]
+    assert titles[:2] == ["Recording started", "Recording stopped"]
 
 
 def test_hysteresis_ignores_short_blips(repo, notifier, clock):
@@ -94,7 +94,7 @@ def test_unknown_readings_are_neutral(repo, notifier, clock):
     d, _ = _daemon(repo, notifier, clock, states)
     for _ in states:
         d.tick()
-    assert d.active is not None  # os dois UNKNOWN não zeraram a contagem
+    assert d.active is not None  # the two UNKNOWN readings did not reset the count
 
 
 def test_adopts_manual_recording_instead_of_starting_another(repo, notifier, clock):
@@ -120,7 +120,7 @@ def test_recover_finishes_orphan_recording(repo, notifier, clock):
 
 def test_recover_clears_pointer_without_tracks(repo, notifier, clock):
     d, c = _daemon(repo, notifier, clock, [])
-    c.start_recording().execute(pid=1)  # sem trilhas gravadas
+    c.start_recording().execute(pid=1)  # no tracks recorded
     d.recover()
     assert repo.load_active() is None
 
@@ -137,7 +137,7 @@ def test_shutdown_finishes_active_call(repo, notifier, clock):
 def test_tick_without_detector_raises(repo, notifier, clock):
     d, c = _daemon(repo, notifier, clock, [])
     c.detector = None
-    with pytest.raises(Exception, match="sem detector"):
+    with pytest.raises(Exception, match="without a configured detector"):
         d.tick()
 
 
@@ -149,5 +149,5 @@ def test_dead_capturer_is_logged_once(repo, notifier, clock, caplog):
     c.proc.died = {d.active.process_handle.pid}
     with caplog.at_level(logging.WARNING):
         d.tick(); d.tick()
-    warnings = [r for r in caplog.records if "morreu durante a chamada" in r.getMessage()]
+    warnings = [r for r in caplog.records if "died during call" in r.getMessage()]
     assert len(warnings) == 1 and "teams-tap" in warnings[0].getMessage()

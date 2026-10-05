@@ -1,16 +1,19 @@
-"""Simula `claude -p --output-format json`: lê a mensagem em stdin e imprime um envelope.
+"""Simulates `claude -p --output-format json`: reads the message from stdin and prints an envelope.
 
-Comportamento controlado pela variável FAKE_CLAUDE_MODE: success (padrão), error, no_structured, bad_schema.
+Behavior is controlled by the FAKE_CLAUDE_MODE variable: success (default), error, no_structured, bad_schema.
 """
 import json
 import os
 import sys
 
 mode = os.environ.get("FAKE_CLAUDE_MODE", "success")
+if any(k.startswith("ANTHROPIC_") for k in os.environ):
+    print("ANTHROPIC_* leaked into the claude environment", file=sys.stderr)
+    sys.exit(4)
 args = sys.argv[1:]
 assert "-p" in args and "--json-schema" in args and "--system-prompt" in args, args
 user_message = sys.stdin.read()
-assert "Transcrição" in user_message, user_message[:100]
+assert "Transcript" in user_message, user_message[:100]
 
 out = {
     "summary": "Revisão da sprint com entregas definidas.",

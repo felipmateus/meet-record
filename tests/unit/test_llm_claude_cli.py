@@ -1,4 +1,4 @@
-"""ClaudeCliAnalyzer com um `claude` simulado (script Python)."""
+"""ClaudeCliAnalyzer with a simulated `claude` (Python script)."""
 import json
 import sys
 from datetime import date, datetime
@@ -17,7 +17,7 @@ class Scripted(ClaudeCliAnalyzer):
         cmd = super().command()
         return [sys.executable, str(FAKE)] + cmd[1:]
 
-    def analyze(self, transcript, meeting):  # pula a checagem de binário no PATH
+    def analyze(self, transcript, meeting):  # skips the PATH binary check
         self.claude_bin = sys.executable
         return super().analyze(transcript, meeting)
 
@@ -69,14 +69,21 @@ def test_falls_back_to_result_text(meeting, transcript, monkeypatch):
 
 def test_schema_violation(meeting, transcript, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "bad_schema")
-    with pytest.raises(AnalysisError, match="fora do esquema"):
+    with pytest.raises(AnalysisError, match="does not match the schema"):
         Scripted(system_prompt="SYS", min_words=1).analyze(transcript, meeting)
 
 
 def test_missing_binary(tmp_path: Path, meeting, transcript):
-    with pytest.raises(AnalysisError, match="não encontrado"):
-        ClaudeCliAnalyzer(system_prompt="SYS", min_words=1, claude_bin=str(tmp_path / "nao-existe")).analyze(transcript, meeting)
+    with pytest.raises(AnalysisError, match="not found"):
+        ClaudeCliAnalyzer(system_prompt="SYS", min_words=1, claude_bin=str(tmp_path / "does-not-exist")).analyze(transcript, meeting)
 
 
 def test_empty_transcript_short_circuits(meeting):
-    assert "vazia" in ClaudeCliAnalyzer(system_prompt="SYS").analyze(Transcript(), meeting).summary
+    assert "Empty transcript" in ClaudeCliAnalyzer(system_prompt="SYS").analyze(Transcript(), meeting).summary
+
+
+def test_api_key_is_not_leaked_to_claude_code(tmp_path: Path, meeting, transcript, monkeypatch):
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "success")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-must-not-leak")
+    analysis = Scripted(system_prompt="SYS", min_words=1).analyze(transcript, meeting)
+    assert analysis.summary  # the fake would exit with code 4 if the key leaked

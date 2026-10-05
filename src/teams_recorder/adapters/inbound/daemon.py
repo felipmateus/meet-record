@@ -1,8 +1,8 @@
-"""Daemon: observa o detector e dispara gravação → transcrição → análise sem intervenção.
+"""Daemon: watches the detector and triggers recording → transcription → analysis without intervention.
 
-Máquina de estados simples com histerese: começa a gravar após N leituras positivas
-consecutivas e para após M negativas (config [detector]). O pós-processamento roda em
-uma thread para a detecção da próxima chamada continuar imediatamente.
+Simple state machine with hysteresis: starts recording after N consecutive positive
+readings and stops after M negative ones (config [detector]). Post-processing runs in
+a thread so detection of the next call can continue immediately.
 """
 from __future__ import annotations
 
@@ -36,16 +36,19 @@ class Daemon:
     stop_event: threading.Event = field(default_factory=threading.Event)
     workers: list[threading.Thread] = field(default_factory=list)
 
-    # --- ciclo de vida ----------------------------------------------------
+    # --- lifecycle --------------------------------------------------------
     def run(self) -> None:
-        log.info("daemon iniciado (poll=%ss, start_after=%s, stop_after=%s)", self.poll_seconds, self.start_after, self.stop_after)
+        log.info("daemon started (poll=%ss, start_after=%s, stop_after=%s)", self.poll_seconds, self.start_after, self.stop_after)
+        warm = getattr(self.container.process_capture, "warmup", None)
+        if callable(warm):
+            log.info("recorder warm-up: %s", "ok" if warm() else "failed (continuing anyway)")
         self.recover()
         self._background(self._resume_pending)
         while not self.stop_event.is_set():
             try:
                 self.tick()
-            except Exception:  # noqa: BLE001 - o laço nunca morre por uma iteração ruim
-                log.exception("erro no ciclo do daemon")
+            except Exception:  # noqa: BLE001 - the loop never dies because of one bad iteration
+                log.exception("error in daemon cycle")
             self.sleep(self.poll_seconds)
         self.shutdown()
 
@@ -54,22 +57,22 @@ class Daemon:
 
     def shutdown(self) -> None:
         if self.active is not None:
-            log.info("encerrando gravação em andamento antes de sair")
+            log.info("finishing recording in progress before exiting")
             self._finish_call()
         for t in self.workers:
             t.join(timeout=30)
-        log.info("daemon encerrado")
+        log.info("daemon stopped")
 
-    # --- uma iteração -----------------------------------------------------
+    # --- one iteration ----------------------------------------------------
     def tick(self) -> None:
         detector = self.container.detector
         if detector is None:
-            raise TeamsRecorderError("daemon sem detector configurado")
+            raise TeamsRecorderError("daemon without a configured detector")
         state = detector.poll()
         if self.active is not None:
             self._watch_capturers()
         if state == CallState.UNKNOWN:
-            return  # leitura falhou; não conta para nenhum lado
+            return  # reading failed; counts for neither side
         if state == CallState.IN_CALL:
             self.positives += 1
             self.negatives = 0
@@ -82,62 +85,62 @@ class Daemon:
                 self._finish_call()
 
     def _watch_capturers(self) -> None:
-        """Avisa (uma vez por gravador) se um processo de captura morreu durante a chamada."""
+        """Warn (once per capturer) if a capture process died during the call."""
         assert self.active is not None
-        checks = (("teams-tap", self.container.process_capture, self.active.process_handle), ("microfone", self.container.mic_capture, self.active.mic_handle))
+        checks = (("teams-tap", self.container.process_capture, self.active.process_handle), ("microphone", self.container.mic_capture, self.active.mic_handle))
         for name, capture, handle in checks:
             key = f"{self.active.meeting.id}:{name}"
             if key in self.warned_dead:
                 continue
             if not capture.is_running(handle):
                 self.warned_dead.add(key)
-                log.warning("gravador %s (pid %s) morreu durante a chamada %s; veja data/log/capture.log", name, handle.pid, self.active.meeting.id)
+                log.warning("capturer %s (pid %s) died during call %s; see data/log/capture.log", name, handle.pid, self.active.meeting.id)
 
     def _start_call(self, pid: int | None) -> None:
         if pid is None:
-            log.warning("chamada detectada mas sem PID do Teams; aguardando")
+            log.warning("call detected but no Teams PID; waiting")
             return
         if self.container.repo.load_active() is not None:
-            log.info("já existe gravação ativa (manual?); daemon não inicia outra")
+            log.info("a recording is already active (manual?); daemon will not start another")
             self.active = self.container.repo.load_active()
             return
         try:
             self.active = self.container.start_recording().execute(pid)
-            log.info("gravação iniciada: %s (pid alvo %s)", self.active.meeting.id, pid)
+            log.info("recording started: %s (target pid %s)", self.active.meeting.id, pid)
         except TeamsRecorderError:
-            log.exception("falha ao iniciar gravação")
+            log.exception("failed to start recording")
 
     def _finish_call(self) -> None:
         active, self.active = self.active, None
         if active is None:
             return
-        log.info("chamada encerrada; finalizando %s", active.meeting.id)
+        log.info("call ended; finalizing %s", active.meeting.id)
         pipeline = self.container.pipeline()
 
         def job() -> None:
             try:
                 meeting = pipeline.run_after_call(active)
                 status = derive_status(self.container.repo.files(meeting.id))
-                log.info("reunião %s processada: %s", meeting.id, status.value)
+                log.info("meeting %s processed: %s", meeting.id, status.value)
             except Exception:  # noqa: BLE001
-                log.exception("falha no pós-processamento de %s", active.meeting.id)
+                log.exception("post-processing of %s failed", active.meeting.id)
 
         self._background(job)
 
-    # --- recuperação ------------------------------------------------------
+    # --- recovery ---------------------------------------------------------
     def recover(self) -> None:
-        """Se o daemon caiu no meio de uma gravação, fecha o que der para fechar."""
+        """If the daemon crashed in the middle of a recording, close whatever can be closed."""
         repo = self.container.repo
         active = repo.load_active()
         if active is None:
             return
         files = repo.files(active.meeting.id)
         if TAP_TRACK in files or MIC_TRACK in files:
-            log.warning("gravação órfã encontrada (%s); tentando finalizar", active.meeting.id)
+            log.warning("orphan recording found (%s); trying to finalize", active.meeting.id)
             try:
                 self.container.stop_recording().execute(active)
             except TeamsRecorderError:
-                log.exception("não consegui finalizar a gravação órfã; descartando")
+                log.exception("could not finalize the orphan recording; discarding")
                 self.container.cancel_recording().execute(active)
         else:
             repo.clear_active()
@@ -146,9 +149,9 @@ class Daemon:
         try:
             results = self.container.pipeline().resume_pending()
             if results:
-                log.info("pendências retomadas: %s", results)
+                log.info("pending work resumed: %s", results)
         except Exception:  # noqa: BLE001
-            log.exception("falha ao retomar pendências")
+            log.exception("failed to resume pending work")
 
     def _background(self, fn: Callable[[], None]) -> None:
         if self.run_in_background is not None:

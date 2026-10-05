@@ -1,4 +1,4 @@
-"""ProcessAudioCapture via o binário Swift `teams-tap` (Core Audio Process Tap)."""
+"""ProcessAudioCapture via the Swift `teams-tap` binary (Core Audio Process Tap)."""
 from __future__ import annotations
 
 import signal
@@ -16,18 +16,18 @@ class CoreAudioTapCapture:
         self.log_path = log_path
         self.stop_timeout = stop_timeout
         self.startup_grace = startup_grace
-        self.wait_audio = wait_audio  # segundos que o teams-tap espera o processo virar cliente de áudio
+        self.wait_audio = wait_audio  # seconds teams-tap waits for the process to become an audio client
         self._procs: dict[int, subprocess.Popen] = {}
 
     def command(self, pid: int, out: Path) -> list[str]:
         return [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
 
+    def warmup(self) -> bool:
+        return self.binary.exists() and process_control.warmup(self.binary, ["--list"])
+
     def start(self, pid: int, out: Path) -> CaptureHandle:
         if not self.binary.exists():
-            raise CaptureError(
-                f"binário teams-tap não encontrado em {self.binary}. "
-                "Compile com: cd native/teams-tap && swift build -c release"
-            )
+            raise CaptureError(f"teams-tap binary not found at {self.binary}. Build it with: scripts/build-native.sh")
         proc = process_control.spawn(self.command(pid, out), self.log_path, self.startup_grace)
         self._procs[proc.pid] = proc
         return CaptureHandle(pid=proc.pid, out=out)
