@@ -70,7 +70,7 @@ def transcript():
 
 def test_analyze_maps_to_domain_and_logs_usage(tmp_path: Path, meeting, transcript):
     client = FakeClient(_response(json.dumps(SAMPLE_OUT)))
-    analyzer = ClaudeAnalyzer(system_prompt="SYS", client=client, usage_log=tmp_path / "usage.jsonl", effort="medium")
+    analyzer = ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client, usage_log=tmp_path / "usage.jsonl", effort="medium")
 
     analysis = analyzer.analyze(transcript, meeting)
 
@@ -93,14 +93,14 @@ def test_analyze_maps_to_domain_and_logs_usage(tmp_path: Path, meeting, transcri
 
 def test_without_fallbacks_uses_plain_messages(meeting, transcript):
     client = FakeClient(_response(json.dumps(SAMPLE_OUT)))
-    ClaudeAnalyzer(system_prompt="SYS", client=client, use_fallbacks=False).analyze(transcript, meeting)
+    ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client, use_fallbacks=False).analyze(transcript, meeting)
     assert client.messages.calls and not client.beta.messages.calls
     assert "fallbacks" not in client.messages.calls[0]
 
 
 def test_empty_transcript_short_circuits(meeting):
     client = FakeClient(_response("{}"))
-    analysis = ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(Transcript(), meeting)
+    analysis = ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(Transcript(), meeting)
     assert "vazia" in analysis.summary and not client.beta.messages.calls
 
 
@@ -108,19 +108,19 @@ def test_refusal_is_an_error(meeting, transcript):
     details = SimpleNamespace(category="cyber", explanation="x")
     client = FakeClient(_response("", stop_reason="refusal", stop_details=details))
     with pytest.raises(AnalysisError, match="recusou.*cyber"):
-        ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(transcript, meeting)
+        ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_truncation_is_an_error(meeting, transcript):
     client = FakeClient(_response("{", stop_reason="max_tokens"))
     with pytest.raises(AnalysisError, match="truncada"):
-        ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(transcript, meeting)
+        ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_schema_violation_is_an_error(meeting, transcript):
     client = FakeClient(_response(json.dumps({"summary": 123})))
     with pytest.raises(AnalysisError, match="fora do esquema"):
-        ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(transcript, meeting)
+        ClaudeAnalyzer(system_prompt="SYS", min_words=1, client=client).analyze(transcript, meeting)
 
 
 def test_to_domain_tolerates_bad_dates(meeting):
@@ -147,7 +147,7 @@ def test_prompt_is_loaded_lazily_from_path(tmp_path: Path, meeting, transcript):
     prompt = tmp_path / "analyze_system.md"
     prompt.write_text("PROMPT DO ARQUIVO\n")
     client = FakeClient(_response(json.dumps(SAMPLE_OUT)))
-    analyzer = ClaudeAnalyzer(prompt_path=prompt, client=client)
+    analyzer = ClaudeAnalyzer(prompt_path=prompt, min_words=1, client=client)
 
     analyzer.analyze(transcript, meeting)
 
@@ -157,4 +157,12 @@ def test_prompt_is_loaded_lazily_from_path(tmp_path: Path, meeting, transcript):
 def test_missing_prompt_file_is_an_error(tmp_path: Path, meeting, transcript):
     client = FakeClient(_response("{}"))
     with pytest.raises(AnalysisError, match="prompt não encontrado"):
-        ClaudeAnalyzer(prompt_path=tmp_path / "nao.md", client=client).analyze(transcript, meeting)
+        ClaudeAnalyzer(prompt_path=tmp_path / "nao.md", min_words=1, client=client).analyze(transcript, meeting)
+
+
+def test_short_transcript_is_not_sent(meeting):
+    client = FakeClient(_response("{}"))
+    short = Transcript(segments=[Segment(0, 1, "Tchau, tchau, tchau.")])
+    analysis = ClaudeAnalyzer(system_prompt="SYS", client=client).analyze(short, meeting)
+    assert "muito curta" in analysis.summary and "Tchau" in analysis.summary
+    assert not client.beta.messages.calls

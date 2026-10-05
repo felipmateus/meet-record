@@ -21,11 +21,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from teams_recorder.adapters.outbound.llm_claude import (
+    MIN_WORDS,
     AnalysisOut,
     _strict_schema,
     build_user_message,
     load_prompt,
     to_domain,
+    trivial_analysis,
 )
 from teams_recorder.domain import Analysis, AnalysisError, Meeting, Transcript
 
@@ -41,6 +43,7 @@ class ClaudeCliAnalyzer:
     claude_bin: str = "claude"
     timeout: float = 900.0
     usage_log: Path | None = None
+    min_words: int = MIN_WORDS
 
     def _system(self) -> str:
         if self.system_prompt is None:
@@ -64,8 +67,9 @@ class ClaudeCliAnalyzer:
         ]
 
     def analyze(self, transcript: Transcript, meeting: Meeting) -> Analysis:
-        if not transcript.text.strip():
-            return Analysis(meeting_id=meeting.id, summary="Transcrição vazia: nenhuma fala reconhecida.")
+        trivial = trivial_analysis(transcript, meeting, self.min_words)
+        if trivial is not None:
+            return trivial
         if shutil.which(self.claude_bin) is None and not Path(self.claude_bin).exists():
             raise AnalysisError(f"Claude Code não encontrado ({self.claude_bin}); instale-o ou use llm.provider = \"api\"")
         envelope = self._run(build_user_message(transcript, meeting))

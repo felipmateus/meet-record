@@ -34,7 +34,7 @@ def transcript():
 
 def test_success_maps_structured_output(tmp_path: Path, meeting, transcript, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "success")
-    analyzer = Scripted(system_prompt="SYS", usage_log=tmp_path / "usage.jsonl", model="opus", effort="low")
+    analyzer = Scripted(system_prompt="SYS", min_words=1, usage_log=tmp_path / "usage.jsonl", model="opus", effort="low")
 
     analysis = analyzer.analyze(transcript, meeting)
 
@@ -58,24 +58,24 @@ def test_command_shape():
 def test_error_envelope(meeting, transcript, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "error")
     with pytest.raises(AnalysisError, match="error_during_execution.*Not logged in"):
-        Scripted(system_prompt="SYS").analyze(transcript, meeting)
+        Scripted(system_prompt="SYS", min_words=1).analyze(transcript, meeting)
 
 
 def test_falls_back_to_result_text(meeting, transcript, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "no_structured")
-    analysis = Scripted(system_prompt="SYS").analyze(transcript, meeting)
+    analysis = Scripted(system_prompt="SYS", min_words=1).analyze(transcript, meeting)
     assert analysis.decisions[0].text == "Relatório até quarta."
 
 
 def test_schema_violation(meeting, transcript, monkeypatch):
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "bad_schema")
     with pytest.raises(AnalysisError, match="fora do esquema"):
-        Scripted(system_prompt="SYS").analyze(transcript, meeting)
+        Scripted(system_prompt="SYS", min_words=1).analyze(transcript, meeting)
 
 
 def test_missing_binary(tmp_path: Path, meeting, transcript):
     with pytest.raises(AnalysisError, match="não encontrado"):
-        ClaudeCliAnalyzer(system_prompt="SYS", claude_bin=str(tmp_path / "nao-existe")).analyze(transcript, meeting)
+        ClaudeCliAnalyzer(system_prompt="SYS", min_words=1, claude_bin=str(tmp_path / "nao-existe")).analyze(transcript, meeting)
 
 
 def test_empty_transcript_short_circuits(meeting):

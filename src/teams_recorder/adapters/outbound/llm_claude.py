@@ -28,6 +28,20 @@ from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Dec
 log = logging.getLogger(__name__)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+MIN_WORDS = 20  # abaixo disso não vale uma chamada à LLM (silêncio, ruído, alucinação do whisper)
+
+
+def trivial_analysis(transcript: Transcript, meeting: Meeting, min_words: int = MIN_WORDS) -> Analysis | None:
+    """Análise local para transcrições vazias ou curtas demais; None quando vale analisar."""
+    words = len(transcript.text.split())
+    if words == 0:
+        return Analysis(meeting_id=meeting.id, summary="Transcrição vazia: nenhuma fala reconhecida.")
+    if words < min_words:
+        return Analysis(
+            meeting_id=meeting.id,
+            summary=f"Transcrição muito curta ({words} palavras) para análise: \"{transcript.text.strip()[:120]}\"",
+        )
+    return None
 
 
 # --- esquema de saída -------------------------------------------------------
@@ -105,6 +119,7 @@ class ClaudeAnalyzer:
     usage_log: Path | None = None
     client: "anthropic.Anthropic | None" = None
     use_fallbacks: bool = True
+    min_words: int = MIN_WORDS
 
     def _system(self) -> str:
         if self.system_prompt is None:
@@ -121,8 +136,9 @@ class ClaudeAnalyzer:
         return self.client
 
     def analyze(self, transcript: Transcript, meeting: Meeting) -> Analysis:
-        if not transcript.text.strip():
-            return Analysis(meeting_id=meeting.id, summary="Transcrição vazia: nenhuma fala reconhecida.")
+        trivial = trivial_analysis(transcript, meeting, self.min_words)
+        if trivial is not None:
+            return trivial
         response = self._request(build_user_message(transcript, meeting))
         self._log_usage(meeting.id, response)
         if response.stop_reason == "refusal":
