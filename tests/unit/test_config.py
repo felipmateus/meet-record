@@ -128,3 +128,38 @@ def test_confirmation_settings(tmp_path: Path):
     (tmp_path / "config.toml").write_text("[confirmation]\nenabled = false\ntimeout_seconds = 10\n")
     s = load_settings(tmp_path)
     assert s.confirm_recording is False and s.confirm_timeout_seconds == 10
+
+
+def test_windows_platform_settings(tmp_path: Path, monkeypatch):
+    from teams_recorder.constants import Platform
+
+    monkeypatch.delenv("TREC_TEAMS_PROCESS", raising=False)
+    (tmp_path / "config.toml").write_text('[audio]\nteams_process_name = "MSTeams"\n')
+    win = load_settings(tmp_path, platform=Platform.WINDOWS)
+    mac = load_settings(tmp_path, platform=Platform.MACOS)
+    assert win.platform is Platform.WINDOWS and win.teams_process_name == "ms-teams.exe"
+    assert mac.teams_process_name == "MSTeams"
+    (tmp_path / "config.toml").write_text('[audio]\nteams_process_name_windows = "Teams.exe"\n')
+    assert load_settings(tmp_path, platform=Platform.WINDOWS).teams_process_name == "Teams.exe"
+
+
+def test_windows_keeps_data_in_documents(tmp_path: Path, monkeypatch):
+    """The macOS TCC fallback to Application Support does not apply on Windows."""
+    from teams_recorder.constants import Platform
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    project = tmp_path / "Documents" / "teams-recorder"
+    project.mkdir(parents=True)
+    assert default_data_dir(project, Platform.WINDOWS) == project / "data"
+    assert default_data_dir(project, Platform.MACOS) == APP_SUPPORT_DIR
+
+
+def test_find_tool_looks_in_project_tools(tmp_path: Path, monkeypatch):
+    from teams_recorder.config import find_tool
+
+    monkeypatch.setenv("PATH", "")
+    exe = tmp_path / "tools" / "whisper" / "Release" / "whisper-cli.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    assert find_tool("whisper-cli", tmp_path) == str(exe)
+    assert find_tool("ffmpeg", tmp_path) == "ffmpeg"
