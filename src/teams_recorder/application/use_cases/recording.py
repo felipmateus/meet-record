@@ -90,6 +90,10 @@ class CancelRecording:
                 capture.stop(handle)
             except Exception:  # noqa: BLE001 - cancellation is best effort
                 pass
-        self.repo.delete_meeting(active.meeting.id)
         self.repo.clear_active()
-        self.notifier.notify(Notify.RECORDING_CANCELLED, Notify.RECORDING_CANCELLED_BODY.format(meeting_id=active.meeting.id))
+        self.discard(active.meeting.id)
+
+    def discard(self, meeting_id: str) -> None:
+        """Delete a meeting whose capture already stopped (e.g. discarded after the call ended)."""
+        self.repo.delete_meeting(meeting_id)
+        self.notifier.notify(Notify.RECORDING_CANCELLED, Notify.RECORDING_CANCELLED_BODY.format(meeting_id=meeting_id))
