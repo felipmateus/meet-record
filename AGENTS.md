@@ -18,6 +18,8 @@ TREC_REAL_WHISPER=1 pytest -m slow tests/integration/test_transcriber_whispercpp
 TREC_REAL_CLAUDE=1 pytest -m slow tests/integration/test_llm_claude_real.py           # real API call (spends credit)
 TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real.py   # real Claude Code headless call
 
+scripts/install.sh [--dry-run]         # idempotent installer (deps, .venv, teams-tap, model, config, LaunchAgents); install.command wraps it for Finder
+scripts/uninstall.sh [--all]           # removes this copy's LaunchAgents (+ .venv/build with --all); never data
 scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap
 scripts/build-native-windows.sh        # dotnet publish → native/teams-tap-win/bin/Release/net8.0/win-x64/publish/teams-tap.exe (Windows port, same CLI; untested)
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)

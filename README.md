@@ -14,8 +14,37 @@ Requirements and architecture documentation: `docs/REQUIREMENTS-AND-ARCHITECTURE
 - Phase 4 done: transcript analysis with the Claude API (`trec analyze`): summary, decisions, actions, deadlines and open questions in `analysis.json`.
 - Phase 5 done: call detector, daemon and LaunchAgent (`trec agent install`). Recording, transcription and analysis run on their own.
 - Phase 6 done: daily planner (`trec plan`), scheduled Monday to Friday at 6 pm by the same `trec agent install`, with purging of old audio.
-- Next phase: installer (7).
+- Phase 7 done: installer (`scripts/install.sh`, or double-click `install.command`) and uninstaller (`scripts/uninstall.sh`).
 - Windows port started: `native/teams-tap-win` builds `teams-tap.exe` (WASAPI process loopback + microphone, same CLI as the macOS binary). It compiles but is untested on Windows, and the Python side is still macOS-only. See `native/teams-tap-win/README.md`.
+
+## Installation (phase 7)
+
+On a Mac with macOS 14.2 or later and [Homebrew](https://brew.sh):
+
+```bash
+git clone https://github.com/felipmateus/meet-record.git ~/Projetos/teams-recorder
+~/Projetos/teams-recorder/scripts/install.sh
+```
+
+Or double-click `install.command` in Finder. Keep the project out of Documents, Desktop, Downloads and iCloud: macOS blocks background processes there, and the installer refuses to run in those folders.
+
+The installer can be run again at any time; it only does what is missing:
+
+1. Checks macOS, the project location and whether Teams is installed.
+2. Installs `ffmpeg` and `whisper-cpp` with Homebrew, and asks for the Xcode Command Line Tools if they are missing.
+3. Creates `.venv` with Python 3.11 or later and installs the package.
+4. Builds `teams-tap`.
+5. Asks for your name and the LLM provider, and writes them to `config.toml`. With the `api` provider it creates `.env` with permission 600 for the key.
+6. Downloads the whisper model (574 MB).
+7. Runs `trec doctor`.
+8. Installs the daemon and the 6 pm planner. It skips this while a recording is in progress, and asks before taking over services that run another copy of the project.
+9. Explains the two macOS permissions and can open their settings pages.
+
+Options: `--name "Your name"`, `--provider claude-code|api`, `--skip-model`, `--no-agent`, `--yes` (no questions), `--dry-run` (shows what it would do).
+
+Installing Homebrew and logging in to Claude Code are left to you, since both need your password or browser.
+
+`scripts/uninstall.sh` removes the services of this copy; `--all` also deletes `.venv` and the `teams-tap` build. Recordings, transcripts, plans and models are never deleted.
 
 ## Manual recording (phase 2)
 

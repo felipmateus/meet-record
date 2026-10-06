@@ -33,3 +33,4 @@ that date and the earlier history was not rewritten.
 | 5b | 5 | Fixes from the first real meetings: Teams helpers, Core Audio microphone, per-track diagnostics, noise/limiter, optional VAD |
 | 6 | 6 | Structured transport, Claude planner, CLI plan, scheduled agent, tests, docs |
 | W1 | — | Windows port of the capture binary: teams-tap.exe (C#, WASAPI process loopback and microphone), build scripts, docs |
+| 7 | 7 | Installer (install.sh, install.command), uninstaller, docs |
