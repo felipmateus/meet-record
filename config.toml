@@ -12,10 +12,12 @@ data_dir = "data"
 # Microphone: "default" follows the system's default input (recommended: works with a headset),
 # or the exact device name (e.g. "MacBook Air Microphone").
 mic_device = "default"
-# Microphone backend: "coreaudio" (teams-tap --mic, survives the reconfiguration done by Teams)
+# Microphone backend (macOS only): "coreaudio" (teams-tap --mic, survives the reconfiguration done by Teams)
 # or "ffmpeg" (avfoundation; stopped recording seconds after Teams opened the microphone).
 mic_backend = "coreaudio"
 teams_process_name = "MSTeams"
+# Windows: the Teams process; the root of its process tree is captured.
+teams_process_name_windows = "ms-teams.exe"
 bitrate_kbps = 64
 
 [detector]

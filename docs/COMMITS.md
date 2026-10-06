@@ -35,3 +35,4 @@ that date and the earlier history was not rewritten.
 | W1 | — | Windows port of the capture binary: teams-tap.exe (C#, WASAPI process loopback and microphone), build scripts, docs |
 | 7 | 7 | Installer (install.sh, install.command), uninstaller, docs |
 | 7b | — | Keep-or-discard question when a call starts: port, osascript dialog, daemon logic, config, tests, docs |
+| W2 | — | Windows Python side: platform selection, WASAPI capture adapters with stop files, registry call detector, toast, message box, Task Scheduler, install.ps1, tests, docs |

@@ -2,7 +2,7 @@
 
 `teams-tap.exe` is the Windows counterpart of the macOS `native/teams-tap` binary. It keeps the same command-line contract so the Python adapters can drive either one. It is a C# .NET 8 console app using NAudio for WASAPI, published as a self-contained single-file x64 executable (no .NET install needed on the target machine).
 
-**Status:** compiles, not yet tested on a Windows machine. The Python side (adapters, detector, scheduler) is still macOS-only; see "Not done yet" below.
+**Status:** compiles, not yet tested on a Windows machine. teams-recorder drives it through `capture_wasapi.py` (see the Windows section of the main README).
 
 ## Build
 
@@ -23,8 +23,8 @@ Windows 10 version 2004 (build 19041) or later, or Windows 11. Process loopback 
 ## Usage
 
 ```text
-teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--no-descendants] [--verbose]
-teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--verbose]
+teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]
+teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--stop-file <path>] [--verbose]
 teams-tap --list
 ```
 
@@ -39,12 +39,13 @@ Windows has no SIGTERM, so the recorder stops on any of:
 
 - Ctrl+C or Ctrl+Break in its console. A parent process should start it with `CREATE_NEW_PROCESS_GROUP` and send `CTRL_BREAK_EVENT`.
 - The line `stop` on stdin. A parent should start it with a stdin pipe and write `stop\n`. End of input is ignored.
+- The file given by `--stop-file` appearing; it is checked every 200 ms. Any process can create it, which is how teams-recorder stops the recorders (`trec stop` runs in a different process from `trec start`). A file left over from an earlier run is deleted at start.
 - In `--pid` mode, the target process exiting (`process <pid> exited`).
 
 In every case the file is padded to the stop instant, the WAV header is finalized and the process exits with code 0.
 
-## Not done yet
+## How teams-recorder uses it
 
-- Windows Python adapters (`capture_wasapi`, `capture_mic_wasapi`) that spawn this binary and stop it with `stop` on stdin.
-- A call detector (for example, an active capture session of `ms-teams.exe` on the microphone instead of `pmset` assertions).
-- Task Scheduler instead of launchd, Windows toast notifications, and `ffmpeg`/`whisper-cli` paths for Windows.
+- `WasapiTapCapture` runs `--pid <root ms-teams.exe> --stop-file <data>\run\<meeting>.teams.stop`, and `WasapiMicCapture` runs `--mic default --stop-file <data>\run\<meeting>.mic.stop`, both with the meeting's `--epoch`.
+- To stop, Python creates the stop file and waits up to 10 s for the process to exit, then terminates it.
+- `trec doctor` checks that the binary exists at the path above.

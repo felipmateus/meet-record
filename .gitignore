@@ -13,3 +13,4 @@ native/teams-tap/.build/
 native/teams-tap-win/bin/
 native/teams-tap-win/obj/
 .DS_Store
+tools/

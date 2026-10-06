@@ -19,6 +19,7 @@ from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.adapters.outbound.llm_schema import strict_schema
 from teams_recorder.constants import Bin, Effort, Env, Llm, LlmProvider
@@ -164,7 +165,7 @@ class ClaudeCodeTransport:
         try:
             result = subprocess.run(
                 self.command(system, schema), input=user, capture_output=True, text=True,
-                timeout=self.timeout, check=False, env=claude_code_env(),
+                timeout=self.timeout, check=False, env=claude_code_env(), creationflags=NO_WINDOW,
             )
         except FileNotFoundError as exc:
             raise AnalysisError(Err.CLAUDE_CODE_MISSING.format(binary=self.claude_bin)) from exc

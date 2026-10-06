@@ -14,6 +14,11 @@ CLI_NAME = "trec"
 
 
 # --- enumerations ----------------------------------------------------------
+class Platform(StrEnum):
+    MACOS = "darwin"     # sys.platform values
+    WINDOWS = "win32"
+
+
 class LlmProvider(StrEnum):
     API = "api"                  # Claude API with ANTHROPIC_API_KEY (prepaid credit)
     CLAUDE_CODE = "claude-code"  # Claude Code headless (`claude -p`, subscription)
@@ -43,6 +48,8 @@ class Env:
     REAL_WHISPER = "TREC_REAL_WHISPER"
     REAL_CLAUDE = "TREC_REAL_CLAUDE"
     REAL_CLAUDE_CLI = "TREC_REAL_CLAUDE_CLI"
+    WINDOWS_USER = "USERNAME"
+    WINDOWS_DOMAIN = "USERDOMAIN"
 
 
 # --- external binaries -------------------------------------------------------
@@ -57,6 +64,9 @@ class Bin:
     LAUNCHCTL = "launchctl"
     SWIFT = "swift"
     TEAMS_TAP = "teams-tap"
+    POWERSHELL = "powershell"     # Windows PowerShell 5.1, present on every Windows 10/11
+    SCHTASKS = "schtasks"
+    DOTNET = "dotnet"
 
 
 # --- files and folders -------------------------------------------------------
@@ -82,6 +92,16 @@ class Files:
     NATIVE_BINARY = Path("native") / "teams-tap" / ".build" / "release" / "teams-tap"
     BUILD_NATIVE_SCRIPT = "scripts/build-native.sh"
     DOWNLOAD_MODEL_SCRIPT = "scripts/download-model.sh"
+    NATIVE_BINARY_WINDOWS = Path("native") / "teams-tap-win" / "bin" / "Release" / "net8.0" / "win-x64" / "publish" / "teams-tap.exe"
+    BUILD_NATIVE_SCRIPT_WINDOWS = r"scripts\build-native-windows.ps1"
+    DOWNLOAD_MODEL_SCRIPT_WINDOWS = r"scripts\download-model.ps1"
+    RUN_DIR = "run"                                    # in the data dir: stop files for the Windows recorders
+    STOP_FILE = "{meeting_id}.{track}.stop"            # track: the WAV file stem
+    TOOLS_DIR = "tools"                                # in the project: tools the Windows installer downloads (whisper.cpp)
+    TASKS_DIR = "tasks"                                # in the data dir: Task Scheduler definitions written on install
+    TASK_XML = "{name}.xml"
+    VENV_PYTHONW = Path(".venv") / "Scripts" / "pythonw.exe"   # Windows: runs without a console window
+    CLI_MODULE = "teams_recorder.adapters.inbound.cli"
     APP_SUPPORT_DIR = Path.home() / "Library" / "Application Support" / APP_NAME
     ICLOUD_MARKER = "Mobile Documents"
     TCC_PROTECTED_FOLDERS = ("Documents", "Desktop", "Downloads")
@@ -163,12 +183,54 @@ class Parse:
 
 # --- detection -------------------------------------------------------------------
 class Detector:
-    TEAMS_PROCESS = "MSTeams"
+    TEAMS_PROCESS = "MSTeams"            # macOS; see Windows.TEAMS_PROCESS
     POLL_SECONDS = 1     # pmset is cheap; 1 s keeps the start/stop lag at ~1-2 s / ~5 s
     START_AFTER = 1      # Teams' call assertion is reliable; short false starts are dropped by the 20-word cut
     STOP_AFTER = 5
     CALL_ASSERTIONS = ("PreventUserIdleDisplaySleep", "PreventUserIdleSystemSleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion")
     PMSET_TIMEOUT = 10.0
+
+
+# --- Windows ---------------------------------------------------------------------
+class Windows:
+    TEAMS_PROCESS = "ms-teams.exe"   # new Teams; the root process of its tree is the capture target
+    MIN_BUILD = 19041                # Windows 10 2004: first build with process loopback capture
+    # Microphone usage per app, kept by Windows for the privacy indicator: LastUsedTimeStop is 0
+    # while the app holds the microphone open.
+    MIC_CONSENT_KEY = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone"
+    NON_PACKAGED = "NonPackaged"
+    TEAMS_PACKAGE_PREFIX = "MSTeams_"
+    LAST_USED_START = "LastUsedTimeStart"
+    LAST_USED_STOP = "LastUsedTimeStop"
+    PATH_SEPARATOR = "#"             # NonPackaged keys are the exe path with "\" replaced by "#"
+    CREATE_NO_WINDOW = 0x08000000
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    TH32CS_SNAPPROCESS = 0x2
+    STOP_POLL_SECONDS = 0.2
+    # MessageBoxTimeoutW: Yes/No, question icon, always on top, takes the foreground.
+    MB_FLAGS = 0x4 | 0x20 | 0x40000 | 0x10000
+    IDYES, IDNO, MB_TIMEDOUT = 6, 7, 32000
+    # Toasts are shown under Windows PowerShell's app id, which every Windows has registered.
+    TOAST_APP_ID = r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+    TOAST_SCRIPT = (
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+        "$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+        "$n = $t.GetElementsByTagName('text'); "
+        "$n.Item(0).AppendChild($t.CreateTextNode('{title}')) > $null; "
+        "$n.Item(1).AppendChild($t.CreateTextNode('{body}')) > $null; "
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}').Show([Windows.UI.Notifications.ToastNotification]::new($t))"
+    )
+    POWERSHELL_ARGS = ("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command")
+    TASK_FOLDER = APP_NAME           # Task Scheduler folder: \teams-recorder\daemon and \teams-recorder\planner
+    TASK_DAEMON, TASK_PLANNER = "daemon", "planner"
+    TASK_STATE_SCRIPT = "(Get-ScheduledTask -TaskPath '\\{folder}\\' -TaskName '{name}' -ErrorAction Stop).State"
+    TASK_RUNNING, TASK_DISABLED = "Running", "Disabled"
+    TASK_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
+    TASK_START_DATE = "2026-01-01T{hour:02d}:00:00"
+    TASK_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
+    TASK_RESTART_INTERVAL = "PT1M"
+    TASK_RESTART_COUNT = 999
 
 
 # --- keep-recording question ------------------------------------------------------

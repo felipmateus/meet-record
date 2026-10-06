@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "teams-recorder"
 version = "0.1.0"
-description = "Records, transcribes and analyzes Microsoft Teams meetings on macOS, generating a daily activity plan."
+description = "Records, transcribes and analyzes Microsoft Teams meetings on macOS and Windows, generating a daily activity plan."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

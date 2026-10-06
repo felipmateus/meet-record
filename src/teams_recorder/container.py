@@ -5,16 +5,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
+from teams_recorder.adapters.outbound.capture_wasapi import WasapiMicCapture, WasapiTapCapture
 from teams_recorder.adapters.outbound.capture_mic_coreaudio import CoreAudioMicCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfirmation
+from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecordingConfirmation
+from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
 from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport, StructuredTransport
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
+from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
@@ -43,12 +47,21 @@ from teams_recorder.application.use_cases import (
     StopRecording,
     TranscribeMeeting,
 )
-from teams_recorder.config import Settings
-from teams_recorder.constants import Files, LlmProvider, MicBackend
+from teams_recorder.config import Settings, find_tool
+from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform
 
 
-def teams_tap_binary(project_dir: Path) -> Path:
-    return project_dir / Files.NATIVE_BINARY
+def teams_tap_binary(project_dir: Path, platform: Platform = Platform.MACOS) -> Path:
+    return project_dir / (Files.NATIVE_BINARY_WINDOWS if platform is Platform.WINDOWS else Files.NATIVE_BINARY)
+
+
+@dataclass
+class _PlatformAdapters:
+    notifier: Notifier
+    process_capture: ProcessAudioCapture
+    mic_capture: MicCapture
+    detector: CallDetector
+    confirmation: RecordingConfirmation | None
 
 
 @dataclass
@@ -95,29 +108,56 @@ class Container:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
 
 
-def build_container(settings: Settings, *, headless: bool = False) -> Container:
+def _macos_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
+    binary = teams_tap_binary(settings.project_dir, Platform.MACOS)
     capture_log = settings.capture_log
-    binary = teams_tap_binary(settings.project_dir)
-    transport = build_transport(settings)  # shared by analyzer and planner
     mic_capture: MicCapture = (
-        FfmpegMicCapture(log_path=capture_log)
+        FfmpegMicCapture(ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir), log_path=capture_log)
         if settings.mic_backend is MicBackend.FFMPEG
         else CoreAudioMicCapture(binary, log_path=capture_log)
     )
+    return _PlatformAdapters(
+        notifier=LogNotifier() if headless else MacOSNotifier(),
+        process_capture=CoreAudioTapCapture(binary, log_path=capture_log),
+        mic_capture=mic_capture,
+        detector=PmsetCallDetector(settings.teams_process_name),
+        confirmation=DialogRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
+    )
+
+
+def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
+    binary = teams_tap_binary(settings.project_dir, Platform.WINDOWS)
+    stop_dir = settings.data_dir / Files.RUN_DIR
+    return _PlatformAdapters(
+        notifier=LogNotifier() if headless else ToastNotifier(),
+        process_capture=WasapiTapCapture(binary, stop_dir, log_path=settings.capture_log),
+        mic_capture=WasapiMicCapture(binary, stop_dir, log_path=settings.capture_log),   # audio.mic_backend is macOS-only
+        detector=MicUsageCallDetector(settings.teams_process_name),
+        confirmation=MessageBoxRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
+    )
+
+
+def build_container(settings: Settings, *, headless: bool = False) -> Container:
+    transport = build_transport(settings)  # shared by analyzer and planner
+    platform = (_windows_adapters if settings.platform is Platform.WINDOWS else _macos_adapters)(settings, headless)
+    ffmpeg = find_tool(Bin.FFMPEG, settings.project_dir)
     return Container(
         settings=settings,
         repo=FsMeetingRepository(settings.data_dir),
         clock=SystemClock(),
-        notifier=LogNotifier() if headless else MacOSNotifier(),
-        process_capture=CoreAudioTapCapture(binary, log_path=capture_log),
-        mic_capture=mic_capture,
-        mixer=FfmpegMixer(bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
-        transcriber=WhisperCppTranscriber(settings.whisper_model_path, threads=settings.whisper_threads, vad_model_path=settings.vad_model_path),
+        notifier=platform.notifier,
+        process_capture=platform.process_capture,
+        mic_capture=platform.mic_capture,
+        mixer=FfmpegMixer(ffmpeg=ffmpeg, bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
+        transcriber=WhisperCppTranscriber(
+            settings.whisper_model_path, whisper_cli=find_tool(Bin.WHISPER_CLI, settings.project_dir), ffmpeg=ffmpeg,
+            threads=settings.whisper_threads, vad_model_path=settings.vad_model_path,
+        ),
         analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT, user_name=settings.user_name),
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
-        detector=PmsetCallDetector(settings.teams_process_name),
+        detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
-        confirmation=DialogRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
+        confirmation=platform.confirmation,
     )
 
 

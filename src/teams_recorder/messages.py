@@ -27,6 +27,8 @@ class Ask:
     BODY = "The call is being recorded. Keep this recording?"
     KEEP = "Keep recording"
     DISCARD = "Discard"
+    # Windows message boxes only offer Yes/No; the body explains them.
+    BODY_WINDOWS = "The call is being recorded. Keep this recording?\n\nYes: keep it\nNo: discard it"
 
 
 class Step:
@@ -86,6 +88,7 @@ class Err:
     STEP_ERROR = "{step}: {error}"                      # content of error.txt
     # launchd / config / daemon
     LAUNCHCTL_FAILED = "launchctl {args} failed ({code}): {stderr}"
+    SCHTASKS_FAILED = "schtasks {args} failed ({code}): {stderr}"
     INVALID_PROVIDER = "invalid llm.provider: {value!r}; use one of {options}"
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
@@ -186,10 +189,14 @@ class Cli:
     AGENT_INSTALLED = "LaunchAgent installed and started: {path}"
     PLANNER_SCHEDULED = "Planner scheduled (Mon–Fri {hour:02d}:00): {path}"
     PERMISSIONS_HINT = "On the first recording macOS will ask for Microphone and System Audio Recording permissions."
+    PERMISSIONS_HINT_WINDOWS = "Allow microphone access for desktop apps: Settings > Privacy & security > Microphone."
+    TASK_INSTALLED = "Scheduled task installed and started: {path}"
+    AGENT_ENV_UNSUPPORTED = "--env is not supported on Windows; set the variables in config.toml or the user environment"
     AGENT_REMOVED, AGENT_NOT_INSTALLED = "LaunchAgent removed.", "No daemon LaunchAgent installed."
     PLANNER_REMOVED, PLANNER_NOT_SCHEDULED = "Planner removed.", "No planner scheduled."
     DAEMON_RESTARTED = "daemon restarted."
     PLIST_LINE = "plist: {path} ({state})"
+    TASK_LINE = "task definition: {path} ({state})"
     EXISTS, MISSING_FILE = "exists", "missing"
     LOADED_LINE = "loaded: {state}{details}"
     YES, NO = "yes", "no"
@@ -243,6 +250,7 @@ class Log:
     IO_RETRY = "file access %s failed (%s); attempt %d/%d"
     WARMUP_BINARY_FAILED = "warm-up of %s failed: %s"
     SIGKILL = "process %s did not exit within %.0fs; SIGKILL"
+    FORCED_STOP = "recorder %s did not stop within %.0fs of its stop file; terminating it"
     TRACK_INFO = "track %s: %.1f MB, %.1f s, mean %s dB, peak %s dB"
     TRACK_DISCARDED = "track %s: %.1f MB (discarded)"
     TRACK_ANOMALY = "track anomaly (%s); raw copies kept in %s"
