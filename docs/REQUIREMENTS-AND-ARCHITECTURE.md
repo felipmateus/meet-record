@@ -267,7 +267,7 @@ teams-recorder/
 | 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | Valid `analysis.json` with real actions from the test meeting | Completed on 2026-10-05 |
 | 5 | `PmsetCallDetector` + daemon + launchd + notifications | Real meeting recorded without touching the keyboard | Completed on 2026-10-05 with a simulated call (a process that holds a power assertion and is an audio client) under launchd. Validation with real Teams pending the next meeting |
 | 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Markdown plan generated at 18:00 with accumulated actions | Completed on 2026-10-05; validation with real content pending the first real meeting |
-| 7 | `install.sh`, `trec doctor/status`, README | Installation from scratch for another user of the Mac works | |
+| 7 | `install.sh`, `trec doctor/status`, README | Installation from scratch for another user of the Mac works | Completed on 2026-10-05 for the installer: a from-scratch install in a fresh copy passed every step except the ones skipped on purpose (model download, LaunchAgents). Still pending from the plan: the month's LLM spend in `trec status` |
 
 ### Phase 2 notes
 
@@ -318,3 +318,9 @@ teams-recorder/
 - Plan prompt: new sections "Aguardando terceiros" and "Agenda"; "Vencidas" restricted to the computed overdue ids (a real run listed an action due on the plan date as overdue); unassigned actions flagged under "Conflitos e alertas".
 - Validated with a richer synthetic meeting through Claude Code: title, type, participants, 4 topics, 2 decisions and 5 actions with timestamps, relative dates converted, priority only where "é urgente" was said, small talk ignored, and a "talvez… pensar depois" idea not taken as a decision.
 
+### Installer (2026-10-05)
+
+- `scripts/install.sh` is a bash 3.2-compatible, idempotent script; `install.command` runs it from Finder. It reads settings through `teams_recorder.config.load_settings` instead of parsing `config.toml` itself, and rewrites only the `[user] name` and `[llm] provider` lines.
+- It refuses to run from Documents, Desktop, Downloads or iCloud (the TCC failure described above).
+- Both LaunchAgent labels are global per user, so a second copy of the project would silently take over the first one's services. The installer asks before replacing services whose `WorkingDirectory` is another folder (default: no), and `uninstall.sh` only removes services that point to its own copy.
+- Not automated on purpose: installing Homebrew and logging in to Claude Code (password or browser), and the two TCC permissions (macOS asks on the first recording).

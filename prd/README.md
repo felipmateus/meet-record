@@ -20,7 +20,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | Automation | daemon, agent | Detect Teams calls and chain recording → transcription → analysis with no intervention | Delivered (phase 5) |
 | Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
 | Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
-| Installation | install.sh | Install from scratch on another Mac/user | Pending (phase 7) |
+| Installation | install.sh, uninstall.sh | Install from scratch on another Mac/user | Delivered (phase 7) |
 
 ## 3. Flow inventory
 
@@ -32,7 +32,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | 4 | Automatic recording | `trec daemon`, `trec agent …` | Automation | [→](./pages/04-automation.md) |
 | 5 | Operations and diagnostics | `trec status` / `doctor` / `purge` / `version` | Operations | [→](./pages/05-operations.md) |
 | 6 | Daily plan | `trec plan` | Planning | [→](./pages/06-daily-plan.md) |
-| 7 | Installation | `scripts/install.sh` (future) | Installation | [→](./pages/07-installation.md) |
+| 7 | Installation | `scripts/install.sh` / `install.command` / `scripts/uninstall.sh` | Installation | [→](./pages/07-installation.md) |
 
 Appendices: [state and enumeration dictionary](./appendix/enum-dictionary.md) · [external integrations](./appendix/integrations.md) · [data layout and schemas](./appendix/data-layout.md) · [relationships between flows](./appendix/relationships.md).
 
