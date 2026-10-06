@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.constants import Audio, Bin, Files, Parse, Proc
 from teams_recorder.domain import CaptureError
 from teams_recorder.messages import Err, Log
@@ -32,7 +33,7 @@ class TrackInfo:
 def probe(path: Path, ffmpeg: str = Bin.FFMPEG) -> TrackInfo:
     """Duration (s) and mean/peak volume (dB) of a track, via ffmpeg volumedetect."""
     try:
-        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=Proc.FFMPEG_TIMEOUT, check=False)
+        r = subprocess.run([ffmpeg, "-hide_banner", "-nostdin", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True, timeout=Proc.FFMPEG_TIMEOUT, check=False, creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired):
         return TrackInfo()
     out = r.stderr
@@ -122,7 +123,7 @@ class FfmpegMixer:
         if not usable:
             raise CaptureError(Err.NO_USABLE_TRACK.format(tracks=", ".join(str(t) for t in tracks)))
         try:
-            result = subprocess.run(self.command(usable, out), capture_output=True, text=True, timeout=self.timeout, check=False)
+            result = subprocess.run(self.command(usable, out), capture_output=True, text=True, timeout=self.timeout, check=False, creationflags=NO_WINDOW)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise CaptureError(Err.MIX_FAILED.format(error=exc)) from exc
         if result.returncode != 0 or not out.exists():

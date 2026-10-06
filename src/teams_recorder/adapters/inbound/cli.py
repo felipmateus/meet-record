@@ -6,6 +6,7 @@ import logging.handlers
 import os
 import shutil
 import signal
+import sys
 from datetime import date
 from pathlib import Path
 from typing import NoReturn
@@ -15,9 +16,10 @@ import typer
 from teams_recorder import __version__
 from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
+from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.application.ports import MeetingRepository
-from teams_recorder.config import Settings, load_settings
-from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging
+from teams_recorder.config import Settings, find_tool, load_settings
+from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Platform
 from teams_recorder.container import build_container, teams_tap_binary
 from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
@@ -88,12 +90,13 @@ def status() -> None:
 @app.command(help=Cli.DOCTOR_CMD_HELP)
 def doctor() -> None:
     settings = _settings()
+    windows = settings.platform is Platform.WINDOWS
+    tools = (Bin.POWERSHELL, Bin.SCHTASKS) if windows else (Bin.SWIFT, Bin.OSASCRIPT)
     checks: dict[str, str | None] = {
-        Bin.FFMPEG: shutil.which(Bin.FFMPEG),
-        Bin.WHISPER_CLI: shutil.which(Bin.WHISPER_CLI),
-        Bin.SWIFT: shutil.which(Bin.SWIFT),
-        Bin.OSASCRIPT: shutil.which(Bin.OSASCRIPT),
-        Bin.TEAMS_TAP: _teams_tap_path(settings.project_dir),
+        Bin.FFMPEG: _tool_path(Bin.FFMPEG, settings.project_dir),
+        Bin.WHISPER_CLI: _tool_path(Bin.WHISPER_CLI, settings.project_dir),
+        **{tool: shutil.which(tool) for tool in tools},
+        Bin.TEAMS_TAP: _teams_tap_path(settings),
     }
     ok = True
     for name, found in checks.items():
@@ -106,7 +109,7 @@ def doctor() -> None:
     typer.echo(Cli.WHISPER_MODEL_LINE.format(
         mark=Cli.OK if model_ok else Cli.MISSING_MARK,
         path=settings.whisper_model_path,
-        hint="" if model_ok else Cli.WHISPER_MODEL_HINT.format(script=Files.DOWNLOAD_MODEL_SCRIPT),
+        hint="" if model_ok else Cli.WHISPER_MODEL_HINT.format(script=Files.DOWNLOAD_MODEL_SCRIPT_WINDOWS if windows else Files.DOWNLOAD_MODEL_SCRIPT),
     ))
     if settings.vad_model_path is not None:
         vad_ok = settings.vad_model_path.exists()
@@ -307,13 +310,17 @@ def _setup_logging(path: Path) -> None:
     root.addHandler(logging.StreamHandler())
 
 
-def _agent(extra_env: dict[str, str] | None = None) -> LaunchAgent:
+def _agent(extra_env: dict[str, str] | None = None) -> LaunchAgent | ScheduledTask:
     s = _settings()
+    if s.platform is Platform.WINDOWS:
+        return ScheduledTask(s.project_dir, s.data_dir)
     return LaunchAgent(s.project_dir, s.data_dir, extra_env=extra_env)
 
 
-def _planner_agent(extra_env: dict[str, str] | None = None) -> LaunchAgent:
+def _planner_agent(extra_env: dict[str, str] | None = None) -> LaunchAgent | ScheduledTask:
     s = _settings()
+    if s.platform is Platform.WINDOWS:
+        return ScheduledTask.planner(s.project_dir, s.data_dir, hour=s.plan_hour)
     return LaunchAgent.planner(s.project_dir, s.data_dir, hour=s.plan_hour, extra_env=extra_env)
 
 
@@ -327,14 +334,17 @@ def agent_install(
             _fail(Cli.AGENT_ENV_INVALID.format(item=item))
         k, v = item.split("=", 1)
         extra[k.strip()] = v
+    windows = _settings().platform is Platform.WINDOWS
+    if extra and windows:
+        _fail(Cli.AGENT_ENV_UNSUPPORTED)
     try:
         path = _agent(extra or None).install()
         planner_path = _planner_agent(extra or None).install()
     except RuntimeError as exc:
         _fail(str(exc))
-    typer.echo(Cli.AGENT_INSTALLED.format(path=path))
+    typer.echo((Cli.TASK_INSTALLED if windows else Cli.AGENT_INSTALLED).format(path=path))
     typer.echo(Cli.PLANNER_SCHEDULED.format(hour=_settings().plan_hour, path=planner_path))
-    typer.echo(Cli.PERMISSIONS_HINT)
+    typer.echo(Cli.PERMISSIONS_HINT_WINDOWS if windows else Cli.PERMISSIONS_HINT)
 
 
 @agent_app.command("uninstall", help=Cli.AGENT_UNINSTALL_CMD_HELP)
@@ -357,8 +367,9 @@ def agent_restart() -> None:
 @agent_app.command("status", help=Cli.AGENT_STATUS_CMD_HELP)
 def agent_status() -> None:
     info = _agent().status()
-    typer.echo(Cli.PLIST_LINE.format(path=info.plist, state=Cli.EXISTS if info.plist_exists else Cli.MISSING_FILE))
-    details = Cli.LOADED_DETAILS.format(pid=info.pid, state=info.state) if info.loaded else ""
+    line = Cli.TASK_LINE if _settings().platform is Platform.WINDOWS else Cli.PLIST_LINE
+    typer.echo(line.format(path=info.plist, state=Cli.EXISTS if info.plist_exists else Cli.MISSING_FILE))
+    details = Cli.LOADED_DETAILS.format(pid=info.pid if info.pid is not None else "-", state=info.state) if info.loaded else ""
     typer.echo(Cli.LOADED_LINE.format(state=Cli.YES if info.loaded else Cli.NO, details=details))
     pinfo = _planner_agent().status()
     typer.echo(Cli.PLANNER_LINE.format(state=Cli.SCHEDULED if pinfo.loaded else Cli.NOT_SCHEDULED, hour=_settings().plan_hour))
@@ -400,10 +411,30 @@ def purge() -> None:
         typer.echo(Cli.PURGED_LINE.format(meeting_id=mid))
 
 
-def _teams_tap_path(project_dir: Path) -> str | None:
-    candidate = teams_tap_binary(project_dir)
+def _teams_tap_path(settings: Settings) -> str | None:
+    candidate = teams_tap_binary(settings.project_dir, settings.platform)
     return str(candidate) if candidate.exists() else None
 
 
+def _tool_path(name: str, project_dir: Path) -> str | None:
+    found = find_tool(name, project_dir)
+    return found if Path(found).is_absolute() else None
+
+
+def _attach_streams_to_logs() -> None:
+    """Under pythonw (the Windows scheduled tasks) there is no stdout/stderr: send them to
+    <data>/log/<command>.out.log / .err.log, like launchd does on macOS."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    command = sys.argv[1] if len(sys.argv) > 1 else CLI_NAME
+    log_dir = _settings().log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+    if sys.stdout is None:
+        sys.stdout = open(log_dir / Files.AGENT_OUT_LOG.format(name=command), "a", encoding="utf-8")  # noqa: SIM115
+    if sys.stderr is None:
+        sys.stderr = open(log_dir / Files.AGENT_ERR_LOG.format(name=command), "a", encoding="utf-8")  # noqa: SIM115
+
+
 if __name__ == "__main__":
+    _attach_streams_to_logs()
     app()

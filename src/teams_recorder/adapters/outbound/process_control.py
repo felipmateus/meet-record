@@ -6,12 +6,13 @@ import logging
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import IO
 
 from teams_recorder.adapters.outbound.fs_retry import TRANSIENT_ERRNOS as _FS_TRANSIENT_ERRNOS
-from teams_recorder.constants import Proc
+from teams_recorder.constants import Proc, Windows
 from teams_recorder.domain import CaptureError
 from teams_recorder.messages import Err, Log
 
@@ -26,7 +27,15 @@ SPAWN_RETRIES = Proc.SPAWN_RETRIES
 SPAWN_RETRY_DELAY = Proc.SPAWN_RETRY_DELAY
 
 
+# Windows: console programs started from the background service (pythonw, no console) would
+# each open a console window; this flag keeps them hidden. 0 elsewhere.
+NO_WINDOW = Windows.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
 def is_running(pid: int) -> bool:
+    if sys.platform == "win32":
+        from teams_recorder.adapters.outbound import winproc
+        return winproc.is_running(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -61,7 +70,7 @@ def _popen_with_retry(command: list[str], stderr: IO[bytes] | int) -> subprocess
     last: OSError | None = None
     for attempt in range(1, SPAWN_RETRIES + 1):
         try:
-            return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr)
+            return subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr, creationflags=NO_WINDOW)
         except OSError as exc:
             if exc.errno not in TRANSIENT_ERRNOS:
                 raise
@@ -75,7 +84,7 @@ def _popen_with_retry(command: list[str], stderr: IO[bytes] | int) -> subprocess
 def warmup(binary: Path, args: list[str], timeout: float = Proc.WARMUP_TIMEOUT) -> bool:
     """Runs the binary once (in a harmless mode) to trigger any system evaluation early."""
     try:
-        subprocess.run([str(binary), *args], capture_output=True, timeout=timeout, check=False)
+        subprocess.run([str(binary), *args], capture_output=True, timeout=timeout, check=False, creationflags=NO_WINDOW)
         return True
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning(Log.WARMUP_BINARY_FAILED, binary.name, exc)

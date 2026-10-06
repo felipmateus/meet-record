@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.constants import Audio, Bin, Files, Proc
 from teams_recorder.domain import Segment, Transcript, TranscriptionError
 from teams_recorder.messages import Err
@@ -77,7 +78,7 @@ class WhisperCppTranscriber:
 
     def _run(self, command: list[str], what: str) -> None:
         try:
-            result = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout, check=False)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout, check=False, creationflags=NO_WINDOW)
         except FileNotFoundError as exc:
             raise TranscriptionError(Err.EXECUTABLE_MISSING.format(what=what, command=command[0])) from exc
         except subprocess.TimeoutExpired as exc:

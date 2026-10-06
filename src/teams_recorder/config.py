@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
 import tomllib
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,6 +23,8 @@ from teams_recorder.constants import (
     LlmProvider,
     MicBackend,
     Planner,
+    Platform,
+    Windows,
     ggml_model_file,
 )
 from teams_recorder.messages import Err
@@ -30,6 +34,24 @@ ENV_PROJECT_DIR = Env.PROJECT_DIR
 APP_SUPPORT_DIR = Files.APP_SUPPORT_DIR
 
 E = TypeVar("E", bound=StrEnum)
+
+
+def current_platform() -> Platform:
+    return Platform.WINDOWS if sys.platform == Platform.WINDOWS else Platform.MACOS
+
+
+def find_tool(name: str, project_dir: Path) -> str:
+    """Full path of an external tool: on the PATH, else under <project>/tools (where the Windows
+    installer unpacks whisper.cpp). Falls back to the bare name so errors still name it."""
+    found = shutil.which(name)
+    if found:
+        return found
+    tools = project_dir / Files.TOOLS_DIR
+    if tools.is_dir():
+        for candidate in sorted(tools.rglob(f"{name}*")):
+            if candidate.is_file() and candidate.stem == name:
+                return str(candidate)
+    return name
 
 
 @dataclass(frozen=True)
@@ -61,6 +83,7 @@ class Settings:
     confirm_timeout_seconds: int
     retention_days: int
     anthropic_api_key: str | None
+    platform: Platform = Platform.MACOS
 
     @property
     def has_api_key(self) -> bool:
@@ -133,21 +156,22 @@ def is_tcc_protected(path: Path) -> bool:
     return bool(rel.parts) and rel.parts[0] in Files.TCC_PROTECTED_FOLDERS
 
 
-def resolve_data_dir(project_dir: Path, configured: str | None) -> Path:
+def resolve_data_dir(project_dir: Path, configured: str | None, platform: Platform = Platform.MACOS) -> Path:
     """Explicit `paths.data_dir` wins; a relative value is resolved against the project dir."""
     if not configured:
-        return default_data_dir(project_dir)
+        return default_data_dir(project_dir, platform)
     path = Path(configured).expanduser()
     return path if path.is_absolute() else project_dir / path
 
 
-def default_data_dir(project_dir: Path) -> Path:
-    if is_icloud_synced(project_dir) or is_tcc_protected(project_dir):
+def default_data_dir(project_dir: Path, platform: Platform = Platform.MACOS) -> Path:
+    if platform is Platform.MACOS and (is_icloud_synced(project_dir) or is_tcc_protected(project_dir)):
         return Files.APP_SUPPORT_DIR
     return project_dir / Files.LOCAL_DATA_DIR
 
 
-def load_settings(project_dir: Path | None = None) -> Settings:
+def load_settings(project_dir: Path | None = None, platform: Platform | None = None) -> Settings:
+    platform = platform or current_platform()
     project_dir = (project_dir or default_project_dir()).resolve()
     load_dotenv(project_dir / Files.DOTENV, override=False)
 
@@ -166,14 +190,18 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     user = raw.get("user", {})
     confirmation = raw.get("confirmation", {})
 
-    data_dir = resolve_data_dir(project_dir, paths.get("data_dir"))
+    data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
+    teams_default = (
+        str(audio.get("teams_process_name_windows", Windows.TEAMS_PROCESS)) if platform is Platform.WINDOWS
+        else str(audio.get("teams_process_name", Detector.TEAMS_PROCESS))
+    )
 
     return Settings(
         project_dir=project_dir,
         data_dir=data_dir,
         mic_device=str(audio.get("mic_device", Audio.DEFAULT_MIC_DEVICE)),
         mic_backend=_parse_enum(MicBackend, audio.get("mic_backend", MicBackend.COREAUDIO), Err.INVALID_MIC_BACKEND),
-        teams_process_name=os.environ.get(Env.TEAMS_PROCESS) or str(audio.get("teams_process_name", Detector.TEAMS_PROCESS)),
+        teams_process_name=os.environ.get(Env.TEAMS_PROCESS) or teams_default,
         bitrate_kbps=int(audio.get("bitrate_kbps", Audio.DEFAULT_BITRATE_KBPS)),
         denoise=bool(audio.get("denoise", True)),
         poll_seconds=int(detector.get("poll_seconds", Detector.POLL_SECONDS)),
@@ -196,4 +224,5 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         confirm_timeout_seconds=int(confirmation.get("timeout_seconds", Confirm.TIMEOUT_SECONDS)),
         retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
         anthropic_api_key=os.environ.get(Env.API_KEY) or None,
+        platform=platform,
     )
