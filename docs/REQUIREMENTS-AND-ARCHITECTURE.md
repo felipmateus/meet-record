@@ -333,3 +333,15 @@ teams-recorder/
 - If the call ends first, post-processing stops the capture at hang-up (no recording of what is said after the call), then waits for the answer before transcribing; discard deletes the stopped meeting with `CancelRecording.discard`.
 - Manual recordings adopted by the daemon are not asked about. Settings: `[confirmation] enabled` and `timeout_seconds`.
 - Verified on screen through the window list: the dialog opens on the main display at the modal-panel level and becomes the frontmost app. Not yet observed during a real call or with Teams in full screen, where it may appear on another Space.
+
+### Windows port, Python side (2026-10-06)
+
+- User request: make the whole flow work on Windows too, including the keep-or-discard question. Only adapters changed; domain, application, pipeline, daemon, prompts and LLM code are shared.
+- `Settings.platform` (`Platform.MACOS` / `Platform.WINDOWS`, from `sys.platform`) selects the adapters in `container.py`. `audio.teams_process_name_windows` (default `ms-teams.exe`) replaces `audio.teams_process_name` on Windows; the TCC/iCloud data-dir fallback is macOS-only.
+- Capture: `capture_wasapi` drives `teams-tap.exe`. Stopping cannot use signals or stdin, because `trec stop` runs in another process than `trec start`; the binary gained `--stop-file` and Python creates `<data>/run/<meeting>.<track>.stop`, waits up to 10 s, then terminates the process. The target PID is the root `ms-teams.exe` (Toolhelp32), since process loopback includes the process tree.
+- Detection: `MicUsageCallDetector` reads `HKCU\...\CapabilityAccessManager\ConsentStore\microphone`; Teams (packaged `MSTeams_*` or a non-packaged `ms-teams.exe`) is in a call while its `LastUsedTimeStop` is 0. Same hysteresis as macOS. Heuristic, risk R3: a Teams microphone test outside a call also counts.
+- Service: `ScheduledTask` writes Task Scheduler XML (logon trigger, interactive token, no time limit, restart on failure for the daemon; weekdays at `planner.hour` for the planner) and runs `pythonw -m teams_recorder.adapters.inbound.cli`, which redirects the missing stdout/stderr to `<data>/log/<command>.out.log` / `.err.log`.
+- Notifications: PowerShell toast under Windows PowerShell's app id (no app registration needed). Question: user32 `MessageBoxTimeoutW`, topmost, Yes keeps / No discards, closes after the timeout.
+- Tools: `config.find_tool` finds ffmpeg and whisper-cli on the PATH or under `<project>/tools` (where `install.ps1` unpacks whisper.cpp). `EACCES` is a transient I/O error on Windows (target file held open during `os.replace`).
+- Installer: `scripts/install.ps1` (+ `install.cmd`), `uninstall.ps1`, `download-model.ps1`; both installers now edit `config.toml` through `scripts/config_tool.py`.
+- Verification so far: unit tests with the OS calls faked, the stop-file protocol with real processes, the PowerShell scripts and generated snippets checked with the PowerShell parser (Microsoft.PowerShell.SDK). Nothing has run on Windows yet.

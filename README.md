@@ -1,6 +1,6 @@
 # teams-recorder
 
-Automatically records the audio of Microsoft Teams meetings on macOS, transcribes it locally with whisper.cpp, extracts actions and decisions with the Claude API, and generates a daily activity plan in Markdown.
+Automatically records the audio of Microsoft Teams meetings on macOS and Windows, transcribes it locally with whisper.cpp, extracts actions and decisions with the Claude API, and generates a daily activity plan in Markdown.
 
 The tool targets meetings held in Brazilian Portuguese, and the analysis and plan content it produces is in Portuguese; the code, documentation and CLI are in English.
 
@@ -15,7 +15,7 @@ Requirements and architecture documentation: `docs/REQUIREMENTS-AND-ARCHITECTURE
 - Phase 5 done: call detector, daemon and LaunchAgent (`trec agent install`). Recording, transcription and analysis run on their own.
 - Phase 6 done: daily planner (`trec plan`), scheduled Monday to Friday at 6 pm by the same `trec agent install`, with purging of old audio.
 - Phase 7 done: installer (`scripts/install.sh`, or double-click `install.command`) and uninstaller (`scripts/uninstall.sh`).
-- Windows port started: `native/teams-tap-win` builds `teams-tap.exe` (WASAPI process loopback + microphone, same CLI as the macOS binary). It compiles but is untested on Windows, and the Python side is still macOS-only. See `native/teams-tap-win/README.md`.
+- Windows port: the whole flow has Windows adapters (see [Windows](#windows)). It is built and unit-tested on macOS but **has not run on a Windows PC yet**.
 
 ## Installation (phase 7)
 
@@ -45,6 +45,29 @@ Options: `--name "Your name"`, `--provider claude-code|api`, `--skip-model`, `--
 Installing Homebrew and logging in to Claude Code are left to you, since both need your password or browser.
 
 `scripts/uninstall.sh` removes the services of this copy; `--all` also deletes `.venv` and the `teams-tap` build. Recordings, transcripts, plans and models are never deleted.
+
+## Windows
+
+The same program runs on Windows 10 version 2004 or later and Windows 11. Transcription, analysis, minutes, the daily plan and the keep-or-discard question work the same; only the parts that talk to the operating system change:
+
+| Part | macOS | Windows |
+|---|---|---|
+| Teams audio and microphone | `teams-tap` (Swift, Core Audio) | `teams-tap.exe` (C#, WASAPI), stopped through a stop file |
+| Call detection | Teams' power assertion in `pmset` | Teams holding the microphone, read from the registry Windows keeps for the privacy indicator |
+| Background service | LaunchAgents | Task Scheduler tasks `\teams-recorder\daemon` (at logon) and `\teams-recorder\planner` (Mon–Fri 6 pm) |
+| Notifications | Notification Center | Toasts, shown under "Windows PowerShell" |
+| Keep-or-discard question | Dialog on the main screen | Message box, always on top, with Yes (keep) and No (discard) |
+
+Install from a clone, outside OneDrive, in PowerShell:
+
+```powershell
+git clone https://github.com/felipmateus/meet-record.git C:\Projetos\teams-recorder
+C:\Projetos\teams-recorder\scripts\install.ps1
+```
+
+Or double-click `install.cmd`. The installer uses winget for Python 3.12, ffmpeg and, when `teams-tap.exe` must be built, the .NET 8 SDK. It downloads whisper.cpp into `tools\whisper` and the model into `data\models`, then installs the scheduled tasks. Options mirror the macOS installer: `-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`. `scripts\uninstall.ps1` removes the tasks; `-All` also removes `.venv` and the build.
+
+Windows asks for no permission to capture Teams audio. The microphone needs "Let desktop apps access your microphone" under Settings > Privacy & security > Microphone. In `config.toml`, `audio.teams_process_name_windows` (default `ms-teams.exe`) names the Teams process; `audio.mic_backend` applies only to macOS.
 
 ## Manual recording (phase 2)
 

@@ -11,6 +11,12 @@ This is the heart of the product: a background process that notices when a Teams
 - **Hysteresis:** recording starts on the first positive reading (~1-2 s after the call starts); it stops after 5 consecutive negative ones (~5 s after hanging up). Failed readings are neutral.
 - **Configuration:** `[detector] poll_seconds`, `start_after_positive_polls`, `stop_after_negative_polls`; `[audio] teams_process_name`.
 
+### On Windows
+- Teams is considered in a call while it holds the microphone open, as recorded by Windows for the privacy indicator (`ConsentStore\microphone`, `LastUsedTimeStop` = 0). Same 1 s polling and hysteresis.
+- The daemon and the planner run as Task Scheduler tasks (`trec agent install`), at logon and Monday to Friday at the planner hour.
+- The keep-or-discard question is a Windows message box: Yes keeps, No discards, closes after the timeout.
+- `[TBC]` Not yet observed on a real Windows PC.
+
 ## Interactions
 
 ### Call start

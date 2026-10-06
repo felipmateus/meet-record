@@ -4,7 +4,7 @@
 
 ## 1. System overview
 
-teams-recorder is a personal macOS utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and, in the next phase, consolidates the day's meetings into an activity plan.
+teams-recorder is a personal macOS (and, untested so far, Windows) utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and, in the next phase, consolidates the day's meetings into an activity plan.
 
 It runs in the background with no graphical interface: a daemon watches Teams and starts recording when a call begins; when the call ends, it processes everything on its own and reports through macOS notifications. A command line (`trec`) lets the user operate and inspect each step manually. Audio and transcripts never leave the Mac; only the transcript text is sent to the language model, through the API or through the locally installed Claude Code.
 
@@ -21,6 +21,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
 | Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
 | Installation | install.sh, uninstall.sh | Install from scratch on another Mac/user | Delivered (phase 7) |
+| Windows | install.ps1, Windows adapters | Same flows on Windows 10 2004+/11 | Implemented, not yet run on Windows |
 
 ## 3. Flow inventory
 

@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository. Humans: see `README.md`, 
 
 ## What this is
 
-`teams-recorder` is a macOS background tool that records Microsoft Teams calls (Teams audio + microphone), transcribes them locally with whisper.cpp, extracts decisions/actions with Claude, and will build a daily plan. Python 3.11 orchestrates; a small Swift binary (`native/teams-tap`) does the Core Audio capture. There is no database: **the state of a meeting is the set of files in its folder** (`src/teams_recorder/domain/status.py`).
+`teams-recorder` is a macOS (and Windows, untested on real hardware) background tool that records Microsoft Teams calls (Teams audio + microphone), transcribes them locally with whisper.cpp, extracts decisions/actions with Claude, and will build a daily plan. Python 3.11 orchestrates; a small Swift binary (`native/teams-tap`) does the Core Audio capture, and a C# binary (`native/teams-tap-win`) does the WASAPI capture on Windows. `Settings.platform` (from `sys.platform`) makes `container.py` pick the macOS or Windows adapters. There is no database: **the state of a meeting is the set of files in its folder** (`src/teams_recorder/domain/status.py`).
 
 ## Commands
 
@@ -20,6 +20,7 @@ TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real
 
 scripts/install.sh [--dry-run]         # idempotent installer (deps, .venv, teams-tap, model, config, LaunchAgents); install.command wraps it for Finder
 scripts/uninstall.sh [--all]           # removes this copy's LaunchAgents (+ .venv/build with --all); never data
+scripts\install.ps1 / uninstall.ps1    # Windows counterparts (install.cmd wraps the installer); config edits go through scripts/config_tool.py
 scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap
 scripts/build-native-windows.sh        # dotnet publish → native/teams-tap-win/bin/Release/net8.0/win-x64/publish/teams-tap.exe (Windows port, same CLI; untested)
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)
@@ -34,6 +35,7 @@ native/teams-tap/.build/release/teams-tap --list   # which processes are Core Au
 Rules that bite:
 - **After changing Python code, run `trec agent restart`** or the running daemon keeps the old code. The Swift binary is re-spawned per recording, so a rebuild is enough.
 - Do not run two pytest sessions at once; subprocess-based tests time out under contention.
+- Windows adapters must import and be testable on macOS: keep `ctypes`/`winreg` calls under `if sys.platform == "win32":` and inject the OS call (reader, message box, runner, kill) so tests fake it. Nothing Windows-specific has run on real Windows yet; say so when reporting.
 - Env overrides for testing: `TEAMS_RECORDER_DIR` (project dir), `TREC_LLM_PROVIDER` (`api`|`claude-code`), `TREC_TEAMS_PROCESS` (process name the detector watches; `tests/fixtures/fake_call.py` simulates a Teams call under the name `python3.11`).
 
 ## Architecture (hexagonal)
@@ -54,16 +56,17 @@ Ports and their adapters (`application/ports.py`):
 | Port | Adapter(s) |
 |---|---|
 | `MeetingRepository` | `repository_fs.FsMeetingRepository` (folder per meeting, atomic writes, `.lock`, `current_recording.json`) |
-| `ProcessAudioCapture` | `capture_coreaudio.CoreAudioTapCapture` → `teams-tap --pid` (target + descendant audio clients; Teams' main process emits no audio) |
-| `MicCapture` | `capture_mic_coreaudio` (default, `teams-tap --mic`, survives device reconfiguration) or `capture_mic_ffmpeg` |
+| `ProcessAudioCapture` | `capture_coreaudio.CoreAudioTapCapture` → `teams-tap --pid` (target + descendant audio clients; Teams' main process emits no audio). Windows: `capture_wasapi.WasapiTapCapture` → `teams-tap.exe --pid --stop-file` |
+| `MicCapture` | `capture_mic_coreaudio` (default, `teams-tap --mic`, survives device reconfiguration) or `capture_mic_ffmpeg`. Windows: `capture_wasapi.WasapiMicCapture` |
 | `AudioMixer` | `mixer_ffmpeg` (per-track highpass+afftdn, amix, loudnorm, limiter; keeps raw tracks in `debug/` on anomaly) |
 | `Transcriber` | `transcriber_whispercpp` (ffmpeg → 16 kHz WAV → whisper-cli `-oj`; optional Silero VAD) |
 | `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
-| `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process) |
-| `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock` |
-| `RecordingConfirmation` | `confirm_macos.DialogRecordingConfirmation` (osascript `display dialog`; keep/discard asked by the daemon when it starts a recording; `None` when `[confirmation] enabled = false` or headless) |
+| `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process). Windows: `detector_windows.MicUsageCallDetector` (registry `ConsentStore\microphone`: Teams' `LastUsedTimeStop == 0`) |
+| `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock`. Windows: `notifier_windows.ToastNotifier` (PowerShell toast) |
+| `RecordingConfirmation` | `confirm_macos.DialogRecordingConfirmation` (osascript `display dialog`; keep/discard asked by the daemon when it starts a recording; `None` when `[confirmation] enabled = false` or headless). Windows: `confirm_windows.MessageBoxRecordingConfirmation` (user32 `MessageBoxTimeoutW`) |
 | `MinutesRenderer` | `minutes_markdown.MarkdownMinutesRenderer` (minutes.md from the analysis, no LLM call; labels in `messages.Minutes`) |
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
+| (scheduler, not a port) | `launchd.LaunchAgent` on macOS, `scheduler_windows.ScheduledTask` (schtasks XML, `pythonw -m teams_recorder.adapters.inbound.cli`) on Windows; chosen in `cli._agent()` |
 
 Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`) that wait for a readiness file instead of assuming startup time.
 
