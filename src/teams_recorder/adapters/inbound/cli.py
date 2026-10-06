@@ -17,7 +17,7 @@ from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.application.ports import MeetingRepository
 from teams_recorder.config import Settings, load_settings
-from teams_recorder.constants import CLI_NAME, Audio, Bin, Env, Files, LlmProvider, Logging
+from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging
 from teams_recorder.container import build_container, teams_tap_binary
 from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
@@ -283,7 +283,10 @@ def daemon(
     settings = _settings()
     _setup_logging(settings.daemon_log)
     c = build_container(settings)
-    d = Daemon(c, poll_seconds=settings.poll_seconds, start_after=settings.start_after_positive_polls, stop_after=settings.stop_after_negative_polls)
+    d = Daemon(
+        c, poll_seconds=settings.poll_seconds, start_after=settings.start_after_positive_polls, stop_after=settings.stop_after_negative_polls,
+        confirm_wait=settings.confirm_timeout_seconds + Confirm.WAIT_MARGIN,
+    )
     if once:
         state = c.detector.poll()
         typer.echo(Cli.DETECTOR_STATE.format(name=settings.teams_process_name, state=state.value, pid=c.detector.teams_pid()))

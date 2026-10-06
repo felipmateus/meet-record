@@ -8,6 +8,7 @@ from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCaptu
 from teams_recorder.adapters.outbound.capture_mic_coreaudio import CoreAudioMicCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
+from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfirmation
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
@@ -29,6 +30,7 @@ from teams_recorder.application.ports import (
     Notifier,
     Planner,
     ProcessAudioCapture,
+    RecordingConfirmation,
     Transcriber,
 )
 from teams_recorder.application.use_cases import (
@@ -63,6 +65,7 @@ class Container:
     planner: Planner
     detector: CallDetector
     minutes: MinutesRenderer
+    confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device)
@@ -114,6 +117,7 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=PmsetCallDetector(settings.teams_process_name),
         minutes=MarkdownMinutesRenderer(settings.user_name),
+        confirmation=DialogRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
     )
 
 
