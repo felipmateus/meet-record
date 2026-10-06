@@ -120,3 +120,11 @@ def test_user_name(tmp_path: Path):
     assert load_settings(tmp_path).user_name == ""
     (tmp_path / "config.toml").write_text('[user]\nname = " Felipe "\n')
     assert load_settings(tmp_path).user_name == "Felipe"
+
+
+def test_confirmation_settings(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.confirm_recording is True and s.confirm_timeout_seconds == 30
+    (tmp_path / "config.toml").write_text("[confirmation]\nenabled = false\ntimeout_seconds = 10\n")
+    s = load_settings(tmp_path)
+    assert s.confirm_recording is False and s.confirm_timeout_seconds == 10
