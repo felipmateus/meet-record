@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from teams_recorder.adapters.inbound.daemon import Daemon
-from teams_recorder.application.ports import CallState
+from teams_recorder.application.ports import CallState, ConfirmAnswer
 from teams_recorder.application.use_cases import AnalyzeMeeting, CancelRecording, StartRecording, StopRecording, TranscribeMeeting
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.domain import Meeting, MeetingStatus, derive_status
@@ -24,6 +24,7 @@ class FakeContainer:
     proc: FakeProcessCapture
     mic: FakeMicCapture
     settings: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(capture_log=Path("/fake/log/capture.log")))
+    confirmation: object = None
 
     @property
     def process_capture(self):
@@ -53,10 +54,26 @@ class FakeContainer:
         return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()))
 
 
-def _daemon(repo, notifier, clock, states, **kw):
-    c = FakeContainer(repo, FakeCallDetector(states), notifier, clock, FakeProcessCapture(), FakeMicCapture())
-    inline = lambda fn: fn()  # noqa: E731 - synchronous post-processing in tests
-    return Daemon(c, poll_seconds=0, start_after=2, stop_after=3, sleep=lambda s: None, run_in_background=inline, **kw), c
+def _inline(fn):
+    fn()  # synchronous background work in tests
+
+
+def _daemon(repo, notifier, clock, states, confirmation=None, runner=_inline, **kw):
+    c = FakeContainer(repo, FakeCallDetector(states), notifier, clock, FakeProcessCapture(), FakeMicCapture(), confirmation=confirmation)
+    return Daemon(c, poll_seconds=0, start_after=2, stop_after=3, sleep=lambda s: None, run_in_background=runner, **kw), c
+
+
+class FakeConfirmation:
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.asked = []
+
+    def ask(self, meeting):
+        self.asked.append(meeting.id)
+        answer = self.answers.pop(0) if self.answers else ConfirmAnswer.NO_ANSWER
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
 
 def test_full_call_cycle(repo, notifier, clock):
@@ -154,3 +171,86 @@ def test_dead_capturer_is_logged_once(repo, notifier, clock, caplog):
         d.tick(); d.tick()
     warnings = [r for r in caplog.records if "died during call" in r.getMessage()]
     assert len(warnings) == 1 and "teams-tap" in warnings[0].getMessage()
+
+
+# --- keep-recording question ------------------------------------------------------
+IN, IDLE = CallState.IN_CALL, CallState.IDLE
+
+
+def _run(d, clock, n):
+    for _ in range(n):
+        d.tick()
+        clock.advance(seconds=1)
+
+
+def test_discard_cancels_and_ignores_the_rest_of_the_call(repo, notifier, clock):
+    confirm = FakeConfirmation(ConfirmAnswer.DISCARD)
+    d, _ = _daemon(repo, notifier, clock, [IN] * 6, confirmation=confirm)
+    _run(d, clock, 6)
+    assert d.active is None and repo.list_meetings() == []
+    assert confirm.asked and len(confirm.asked) == 1          # not asked again while the call goes on
+    assert ("Recording cancelled", f"Meeting {confirm.asked[0]} discarded") in notifier.messages
+
+
+def test_after_a_discarded_call_ends_the_next_call_is_recorded(repo, notifier, clock):
+    confirm = FakeConfirmation(ConfirmAnswer.DISCARD, ConfirmAnswer.KEEP)
+    d, _ = _daemon(repo, notifier, clock, [IN, IN, IN, IDLE, IDLE, IDLE, IN, IN], confirmation=confirm)
+    _run(d, clock, 8)
+    assert d.active is not None and len(confirm.asked) == 2
+    assert [m.id for m in repo.list_meetings()] == [d.active.meeting.id]
+
+
+@pytest.mark.parametrize("answer", [ConfirmAnswer.KEEP, ConfirmAnswer.NO_ANSWER, RuntimeError("osascript broke")])
+def test_keep_no_answer_or_failure_keeps_the_recording(repo, notifier, clock, answer):
+    d, _ = _daemon(repo, notifier, clock, [IN, IN, IN, IDLE, IDLE, IDLE], confirmation=FakeConfirmation(answer))
+    _run(d, clock, 6)
+    meetings = repo.list_meetings()
+    assert len(meetings) == 1 and derive_status(repo.files(meetings[0].id)) == MeetingStatus.ANALYZED
+
+
+def test_no_question_for_an_adopted_manual_recording(repo, notifier, clock):
+    confirm = FakeConfirmation(ConfirmAnswer.DISCARD)
+    d, c = _daemon(repo, notifier, clock, [IN, IN], confirmation=confirm)
+    c.start_recording().execute(pid=1)
+    _run(d, clock, 2)
+    assert confirm.asked == [] and d.active is not None
+
+
+def _call_ends_before_the_answer(repo, notifier, clock, answer):
+    """The call ends while the dialog is open: capture stops at hang-up, then the answer decides."""
+    import threading
+    import time
+
+    jobs = []
+    gate = threading.Event()
+
+    class SlowConfirmation(FakeConfirmation):
+        def ask(self, meeting):
+            gate.wait(5)
+            return super().ask(meeting)
+
+    d, _ = _daemon(repo, notifier, clock, [IN, IN, IDLE, IDLE, IDLE], confirmation=SlowConfirmation(answer), runner=jobs.append, confirm_wait=5)
+    _run(d, clock, 5)
+    ask_job, finish_job = jobs
+    asker = threading.Thread(target=ask_job)
+    finisher = threading.Thread(target=finish_job)
+    asker.start(); finisher.start()
+    meeting_id = repo.list_meetings()[0].id
+    deadline = time.monotonic() + 5
+    while derive_status(repo.files(meeting_id)) != MeetingStatus.RECORDED and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert derive_status(repo.files(meeting_id)) == MeetingStatus.RECORDED   # stopped and mixed, waiting for the answer
+    gate.set()
+    asker.join(5); finisher.join(5)
+    return meeting_id
+
+
+def test_discard_after_the_call_ended_deletes_the_recording(repo, notifier, clock):
+    meeting_id = _call_ends_before_the_answer(repo, notifier, clock, ConfirmAnswer.DISCARD)
+    assert repo.list_meetings() == []
+    assert ("Recording cancelled", f"Meeting {meeting_id} discarded") in notifier.messages
+
+
+def test_keep_after_the_call_ended_processes_the_recording(repo, notifier, clock):
+    meeting_id = _call_ends_before_the_answer(repo, notifier, clock, ConfirmAnswer.KEEP)
+    assert derive_status(repo.files(meeting_id)) == MeetingStatus.ANALYZED

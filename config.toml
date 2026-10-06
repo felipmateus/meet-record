@@ -58,6 +58,13 @@ max_tokens = 16000
 # name ("Felipe, você fica com...") are attributed to you. Empty = not sent.
 name = "Felipe"
 
+[confirmation]
+# When a call starts, a dialog asks whether to keep the recording. Recording starts at once
+# either way, so the beginning of the meeting is never lost. "Discard" deletes it and ignores
+# the rest of that call; no answer within timeout_seconds keeps it. false = never ask.
+enabled = true
+timeout_seconds = 30
+
 [planner]
 hour = 18
 retention_days = 30

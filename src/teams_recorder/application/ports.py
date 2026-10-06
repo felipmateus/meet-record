@@ -132,6 +132,19 @@ class MeetingRepository(Protocol):
     def save_open_actions(self, actions: list[Action]) -> None: ...
 
 
+class ConfirmAnswer(StrEnum):
+    KEEP = "keep"            # the user chose to keep the recording
+    DISCARD = "discard"      # the user chose to drop it
+    NO_ANSWER = "no_answer"  # timed out, or the question could not be shown
+
+
+@runtime_checkable
+class RecordingConfirmation(Protocol):
+    def ask(self, meeting: Meeting) -> ConfirmAnswer:
+        """Asks whether to keep a recording that just started. Blocks until answered or timed out."""
+        ...
+
+
 @runtime_checkable
 class Notifier(Protocol):
     def notify(self, title: str, body: str) -> None: ...

@@ -153,6 +153,12 @@ class Parse:
     LAUNCHCTL_PID = "pid = "
     LAUNCHCTL_STATE = "state = "
     OSASCRIPT_NOTIFY = 'display notification "{body}" with title "{title}" subtitle "{subtitle}"'
+    OSASCRIPT_CONFIRM = (
+        'display dialog "{body}" with title "{title}" buttons {{"{discard}", "{keep}"}} '
+        'default button "{keep}" giving up after {timeout} with icon note'
+    )
+    DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
+    DIALOG_GAVE_UP = "gave up:true"
 
 
 # --- detection -------------------------------------------------------------------
@@ -163,6 +169,13 @@ class Detector:
     STOP_AFTER = 5
     CALL_ASSERTIONS = ("PreventUserIdleDisplaySleep", "PreventUserIdleSystemSleep", "NoIdleSleepAssertion", "NoDisplaySleepAssertion")
     PMSET_TIMEOUT = 10.0
+
+
+# --- keep-recording question ------------------------------------------------------
+class Confirm:
+    ENABLED = True
+    TIMEOUT_SECONDS = 30   # without an answer the recording is kept
+    WAIT_MARGIN = 10.0     # extra seconds beyond the dialog timeout before giving up on it
 
 
 # --- processes -------------------------------------------------------------------

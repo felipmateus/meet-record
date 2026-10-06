@@ -20,6 +20,15 @@ class Notify:
     PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
 
 
+class Ask:
+    """The question shown when a call starts (keep or discard the recording)."""
+
+    TITLE = "Teams call detected"
+    BODY = "The call is being recorded. Keep this recording?"
+    KEEP = "Keep recording"
+    DISCARD = "Discard"
+
+
 class Step:
     TRANSCRIPTION = "transcription"
     ANALYSIS = "analysis"
@@ -218,6 +227,12 @@ class Log:
     POSTPROCESS_FAILED = "post-processing of %s failed"
     ORPHAN_FOUND = "orphan recording found (%s); trying to finalize"
     ORPHAN_DISCARDED = "could not finalize the orphan recording; discarding"
+    CONFIRM_ANSWER = "keep-recording answer for %s: %s"
+    CONFIRM_FAILED = "could not ask whether to keep %s; keeping it"
+    CONFIRM_DIALOG_FAILED = "keep-recording dialog failed: %s"
+    DISCARDED_DURING_CALL = "recording %s discarded by the user; ignoring this call until it ends"
+    DISCARDED_AFTER_CALL = "recording %s discarded by the user after the call ended"
+    IGNORED_CALL_ENDED = "the ignored call ended; the next call will be recorded"
     RESUMED = "pending work resumed: %s"
     RESUME_FAILED = "failed to resume pending work"
     STEP_FAILED = "%s failed for meeting %s"

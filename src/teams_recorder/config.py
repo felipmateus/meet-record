@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from teams_recorder.constants import (
     Audio,
+    Confirm,
     Detector,
     Effort,
     Env,
@@ -56,6 +57,8 @@ class Settings:
     llm_max_tokens: int
     plan_hour: int
     user_name: str
+    confirm_recording: bool
+    confirm_timeout_seconds: int
     retention_days: int
     anthropic_api_key: str | None
 
@@ -161,6 +164,7 @@ def load_settings(project_dir: Path | None = None) -> Settings:
     llm = raw.get("llm", {})
     planner = raw.get("planner", {})
     user = raw.get("user", {})
+    confirmation = raw.get("confirmation", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"))
 
@@ -188,6 +192,8 @@ def load_settings(project_dir: Path | None = None) -> Settings:
         llm_max_tokens=int(llm.get("max_tokens", Llm.DEFAULT_MAX_TOKENS)),
         plan_hour=int(planner.get("hour", Planner.DEFAULT_HOUR)),
         user_name=str(user.get("name", "")).strip(),
+        confirm_recording=bool(confirmation.get("enabled", Confirm.ENABLED)),
+        confirm_timeout_seconds=int(confirmation.get("timeout_seconds", Confirm.TIMEOUT_SECONDS)),
         retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
         anthropic_api_key=os.environ.get(Env.API_KEY) or None,
     )

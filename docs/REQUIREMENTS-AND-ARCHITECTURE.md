@@ -98,6 +98,7 @@ Pure Python, no I/O.
 | `Planner` | `plan(analyses, prev, open) -> DailyPlan` | `ClaudePlanner` |
 | `MeetingRepository` | `create`, `save_*`, `load_*`, `list(status)` | `FsMeetingRepository` |
 | `Notifier` | `notify(title, body)` | `MacOSNotifier` |
+| `RecordingConfirmation` | `ask(meeting) -> ConfirmAnswer` (keep, discard, no answer) | `DialogRecordingConfirmation` |
 | `Clock` | `now()` | `SystemClock` / `FakeClock` |
 
 Every port has a fake adapter in `tests/fakes/` so tests run without hardware or network.
@@ -324,3 +325,11 @@ teams-recorder/
 - It refuses to run from Documents, Desktop, Downloads or iCloud (the TCC failure described above).
 - Both LaunchAgent labels are global per user, so a second copy of the project would silently take over the first one's services. The installer asks before replacing services whose `WorkingDirectory` is another folder (default: no), and `uninstall.sh` only removes services that point to its own copy.
 - Not automated on purpose: installing Homebrew and logging in to Claude Code (password or browser), and the two TCC permissions (macOS asks on the first recording).
+
+### Keep-or-discard question (2026-10-06)
+
+- User request: a button asking whether to record each call. New `RecordingConfirmation` port with `ConfirmAnswer` (keep, discard, no answer) and a Python-only adapter, `DialogRecordingConfirmation`, using `osascript display dialog`. Chosen first because it needs no new binary; a notification with buttons or a menu-bar icon would be other adapters of the same port (both need a Swift app bundle).
+- Recording starts before the answer, so the start of the meeting is not lost. The question runs in a background thread so detection keeps running. Discard cancels the recording through `CancelRecording` and the daemon ignores the call until the detector sees it end. No answer (30 s by default) or a failing dialog keeps the recording.
+- If the call ends first, post-processing stops the capture at hang-up (no recording of what is said after the call), then waits for the answer before transcribing; discard deletes the stopped meeting with `CancelRecording.discard`.
+- Manual recordings adopted by the daemon are not asked about. Settings: `[confirmation] enabled` and `timeout_seconds`.
+- Verified on screen through the window list: the dialog opens on the main display at the modal-panel level and becomes the frontmost app. Not yet observed during a real call or with Teams in full screen, where it may appear on another Space.
