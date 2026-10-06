@@ -65,42 +65,12 @@ agent_owner() {   # project folder the installed daemon runs from, if any
 }
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 
-# Reads values from config.toml through the project's own settings loader.
-settings() {
-  "$VENV/bin/python" - <<'PY'
-from teams_recorder.config import load_settings
-from teams_recorder.constants import Files
-s = load_settings()
-print(f"data_dir={s.data_dir}")
-print(f"model_path={s.whisper_model_path}")
-print(f"vad_path={s.vad_model_path or ''}")
-print(f"provider={s.llm_provider.value}")
-print(f"user_name={s.user_name}")
-print(f"active={s.data_dir / Files.ACTIVE_RECORDING}")
-PY
-}
+# Reads values from config.toml through the project's own settings loader (scripts/config_tool.py).
+settings() { "$VENV/bin/python" "$PROJECT_DIR/scripts/config_tool.py" get; }
 setting() { settings | sed -n "s/^$1=//p"; }
 
 # Rewrites `key = "value"` inside one [section] of config.toml, keeping everything else.
-set_config() {   # set_config section key value
-  run "$VENV/bin/python" - "$PROJECT_DIR/config.toml" "$1" "$2" "$3" <<'PY'
-import json, re, sys
-path, section, key, value = sys.argv[1:]
-lines = open(path, encoding="utf-8").read().splitlines(keepends=True)
-current, done = None, False
-for i, line in enumerate(lines):
-    m = re.match(r"\s*\[([^\]]+)\]", line)
-    if m:
-        current = m.group(1).strip()
-    elif current == section and re.match(rf"\s*{re.escape(key)}\s*=", line):
-        lines[i] = f"{key} = {json.dumps(value, ensure_ascii=False)}\n"
-        done = True
-        break
-if not done:
-    sys.exit(f"[{section}] {key} not found in {path}")
-open(path, "w", encoding="utf-8").write("".join(lines))
-PY
-}
+set_config() { run "$VENV/bin/python" "$PROJECT_DIR/scripts/config_tool.py" set "$1" "$2" "$3"; }
 
 printf '%steams-recorder installer%s\n%s\n' "$B" "$N" "$PROJECT_DIR"
 [ "$DRY_RUN" = 1 ] && printf '%sDry run: nothing will be changed.%s\n' "$Y" "$N"
