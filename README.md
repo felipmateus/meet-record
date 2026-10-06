@@ -15,6 +15,7 @@ Requirements and architecture documentation: `docs/REQUIREMENTS-AND-ARCHITECTURE
 - Phase 5 done: call detector, daemon and LaunchAgent (`trec agent install`). Recording, transcription and analysis run on their own.
 - Phase 6 done: daily planner (`trec plan`), scheduled Monday to Friday at 6 pm by the same `trec agent install`, with purging of old audio.
 - Next phase: installer (7).
+- Windows port started: `native/teams-tap-win` builds `teams-tap.exe` (WASAPI process loopback + microphone, same CLI as the macOS binary). It compiles but is untested on Windows, and the Python side is still macOS-only. See `native/teams-tap-win/README.md`.
 
 ## Manual recording (phase 2)
 

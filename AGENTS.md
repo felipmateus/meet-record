@@ -19,6 +19,7 @@ TREC_REAL_CLAUDE=1 pytest -m slow tests/integration/test_llm_claude_real.py     
 TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real.py   # real Claude Code headless call
 
 scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap
+scripts/build-native-windows.sh        # dotnet publish → native/teams-tap-win/bin/Release/net8.0/win-x64/publish/teams-tap.exe (Windows port, same CLI; untested)
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)
 
 trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | minutes [id] [--all] | plan [--date] | purge
@@ -89,7 +90,7 @@ Key invariants:
 - **English only.** Everything written into this repository is in English: code, identifiers, comments, docstrings, log messages, CLI output, notifications, tests, documentation, PRD, run logs and commit messages. The only Portuguese allowed is data and user-facing documents built from LLM content (the labels of `minutes.md` in `messages.Minutes` and the daily-plan section names in the prompt): sample transcripts and analyses used as test fixtures, and the content the LLM produces for the user (meetings are held in Brazilian Portuguese, so prompts must keep asking for Portuguese output while being written in English). Commits before 2026-10-05 are in Portuguese and were not rewritten.
 - **Ask before committing or pushing.** Edit, test and show the diff; commit only with explicit approval.
 - Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative English messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
-- Never commit `.env`, `data/`, `native/teams-tap/.build/` or `.venv/` (already ignored). `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
+- Never commit `.env`, `data/`, `native/teams-tap/.build/`, `native/teams-tap-win/bin|obj/` or `.venv/` (already ignored). `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
 - Ask before: installing/uninstalling/restarting the LaunchAgent on the user's Mac, deleting anything under `data/recordings`, changing macOS permissions, or running tests that spend API credit. The daemon is installed and running on the development machine and records the user's real meetings.
 - Keep `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase status + notes) and `prd/` in sync when a phase or a behavior changes.
 - When a skill is run, the organization requires a `RUN_LOG-<user>-<date>.md` in `docs/run-logs/` listing questions asked and answers given.
