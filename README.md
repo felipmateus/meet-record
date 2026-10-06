@@ -100,6 +100,18 @@ trec daemon --once                                   # diagnostic: does the dete
 
 The daemon polls `pmset -g assertions` every second. Teams, while in a call, keeps the Mac from sleeping, and that assertion is the signal: recording starts on the first confirmation (~1-2 s after the call starts) and stops after 5 readings without a call (~5 s after hanging up). If the daemon crashes in the middle of a recording, it finalizes the orphaned recording on startup and resumes pending meetings. Log in `data/log/teams-recorder.log`; manual `trec start/stop` keeps working, and the daemon adopts a manual recording already in progress.
 
+### Keep or discard each recording
+
+When the daemon starts a recording, a dialog asks whether to keep it. It opens centered on the main screen, above other windows, with two buttons: **Keep recording** (the default, also chosen by pressing Return) and **Discard**.
+
+- Recording starts before the answer, so the beginning of the meeting is never lost.
+- **Discard** stops the recording, deletes its files and ignores the rest of that call. The next call is asked again.
+- No answer within 30 seconds keeps the recording.
+- If the call ends while the dialog is open, the capture stops at hang-up and transcription waits for the answer.
+- Recordings started with `trec start` are not asked about.
+
+Configure it in `config.toml` under `[confirmation]`: `enabled = false` turns the question off, and `timeout_seconds` sets the wait. The dialog takes keyboard focus while it is open. If Teams is in full screen, the dialog may show on another desktop.
+
 ### Microphone and Teams track
 
 Both tracks are aligned to the meeting start: `teams-tap` places every audio buffer at its Core Audio timestamp, so time without audio (start-up, or the system pausing delivery mid-call) is written as silence instead of being dropped. Each padded gap is logged in `data/log/capture.log` as `gap of X s at Y s`.

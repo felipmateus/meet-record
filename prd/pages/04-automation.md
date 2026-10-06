@@ -16,11 +16,19 @@ This is the heart of the product: a background process that notices when a Teams
 ### Call start
 - Starts recording as in [Manual recording](./01-manual-recording.md) using the detected PID. If a manual recording is already active, the daemon adopts it instead of starting another one. Failures are logged and retried on the next cycle.
 
+- Then asks whether to keep the recording, in a dialog centered on the main screen: "Keep recording" (default) or "Discard". Recording does not wait for the answer. Not asked for an adopted manual recording, or when `[confirmation] enabled = false`.
+
+### Keep-or-discard answer
+- **Keep recording**, or no answer within `[confirmation] timeout_seconds` (default 30): the recording continues normally.
+- **Discard** during the call: the recording stops and its files are deleted ("Recording cancelled" notification). The rest of that call is ignored; the next call is asked again.
+- **Discard** after the call ended: the capture already stopped at hang-up; the meeting is deleted instead of transcribed.
+- If the dialog cannot be shown, the recording is kept.
+
 ### During the call
 - Checks every cycle that both recorders are still alive and logs a single warning per recorder that dies.
 
 ### Call end
-- Stops the recording and launches the transcription → analysis sequence in the background, so the detector stays alert for the next call. Each step fails in isolation (`error.txt`).
+- Stops the recording and launches the transcription → analysis sequence in the background (after the keep-or-discard answer, when it is still pending), so the detector stays alert for the next call. Each step fails in isolation (`error.txt`).
 
 ### Startup and crash
 - On startup: if it finds an orphaned recording (pointer + raw tracks), it finalizes it; if the pointer has no tracks, it discards it. It then resumes meetings stalled in `recorded` or `transcribed`.

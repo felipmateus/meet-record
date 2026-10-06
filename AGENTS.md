@@ -61,6 +61,7 @@ Ports and their adapters (`application/ports.py`):
 | `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
 | `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process) |
 | `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock` |
+| `RecordingConfirmation` | `confirm_macos.DialogRecordingConfirmation` (osascript `display dialog`; keep/discard asked by the daemon when it starts a recording; `None` when `[confirmation] enabled = false` or headless) |
 | `MinutesRenderer` | `minutes_markdown.MarkdownMinutesRenderer` (minutes.md from the analysis, no LLM call; labels in `messages.Minutes`) |
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 
