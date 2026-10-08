@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from teams_recorder.application.ports import (
     ActiveRecording,
     AudioMixer,
     Clock,
+    DiskSpace,
     MeetingRepository,
     MicCapture,
     Notifier,
     ProcessAudioCapture,
 )
+from teams_recorder.constants import Audio, raw_bytes_per_hour
 from teams_recorder.domain import CaptureError, Meeting, RepositoryError
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK
 from teams_recorder.messages import Err, Notify
@@ -27,6 +30,8 @@ class StartRecording:
     notifier: Notifier
     clock: Clock
     mic_device: str
+    disk: DiskSpace | None = None
+    raw_bytes_per_hour: int = raw_bytes_per_hour(Audio.DEFAULT_BIT_DEPTH)
 
     def execute(self, pid: int, title: str | None = None) -> ActiveRecording:
         if self.repo.load_active() is not None:
@@ -50,7 +55,13 @@ class StartRecording:
         active = ActiveRecording(meeting, process_handle, mic_handle)
         self.repo.save_active(active)
         self.notifier.notify(Notify.RECORDING_STARTED, Notify.RECORDING_STARTED_BODY.format(meeting_id=meeting.id))
+        self._warn_if_low_disk()
         return active
+
+    def _warn_if_low_disk(self) -> None:
+        free = self.disk.free_bytes() if self.disk else None
+        if free is not None and free < Audio.LOW_DISK_HOURS * self.raw_bytes_per_hour:
+            self.notifier.notify(Notify.LOW_DISK, Notify.LOW_DISK_BODY.format(free=free / 1e9, hours=free / self.raw_bytes_per_hour))
 
 
 @dataclass
@@ -63,15 +74,27 @@ class StopRecording:
     clock: Clock
 
     def execute(self, active: ActiveRecording) -> Meeting:
+        return self.finalize(self.stop_capture(active))
+
+    def stop_capture(self, active: ActiveRecording, ended_at: datetime | None = None) -> Meeting:
+        """Fast part: stop both recorders and release the active-recording pointer.
+
+        Done before mixing, which can take many minutes for a long meeting: while the pointer
+        is held, a new call would be taken for this recording and not be recorded.
+        """
         meeting = active.meeting
-        tap = self.process_capture.stop(active.process_handle)
-        mic = self.mic_capture.stop(active.mic_handle)
-        meeting.ended_at = self.clock.now()
-        self.mixer.mix([tap, mic], self.repo.path(meeting.id, AUDIO))
-        for track in (TAP_TRACK, MIC_TRACK):
-            self.repo.delete_file(meeting.id, track)
+        self.process_capture.stop(active.process_handle)
+        self.mic_capture.stop(active.mic_handle)
+        meeting.ended_at = ended_at or self.clock.now()
         self.repo.save_meta(meeting)
         self.repo.clear_active()
+        return meeting
+
+    def finalize(self, meeting: Meeting) -> Meeting:
+        """Slow part: mix the raw tracks into audio.m4a, then delete them."""
+        self.mixer.mix([self.repo.path(meeting.id, TAP_TRACK), self.repo.path(meeting.id, MIC_TRACK)], self.repo.path(meeting.id, AUDIO))
+        for track in (TAP_TRACK, MIC_TRACK):
+            self.repo.delete_file(meeting.id, track)
         minutes = int((meeting.duration_seconds or 0) // 60)
         self.notifier.notify(Notify.RECORDING_STOPPED, Notify.RECORDING_STOPPED_BODY.format(minutes=minutes))
         return meeting

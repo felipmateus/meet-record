@@ -114,6 +114,11 @@ class Files:
     PLAN_JSON = "{day}.json"
 
 
+def raw_bytes_per_hour(bit_depth: int) -> int:
+    """Disk used per hour by both raw tracks before mixing (1.04 GB at 16-bit, 2.07 GB at 32-bit)."""
+    return Audio.SAMPLE_RATE * Audio.RAW_CHANNELS * (bit_depth // 8) * 3600
+
+
 def ggml_model_file(name: str) -> str:
     return f"ggml-{name}.bin"
 
@@ -163,6 +168,14 @@ class Audio:
     DEFAULT_WHISPER_THREADS = 0     # 0 = let whisper-cli decide
     DEFAULT_VAD_MODEL = "silero-v5.1.2"
     VAD_ARGS = ["-vt", "0.5", "-vsd", "300", "-vp", "150"]
+    MIX_TIMEOUT_FACTOR = 2.0        # mixing may take up to 2x the meeting length (never less than Proc.FFMPEG_TIMEOUT)
+    PARTIAL_INFIX = ".partial"      # mixing writes audio.partial.m4a and renames it only on success
+    BIT_DEPTHS = (16, 32)           # raw WAV sample format: 16-bit integer or 32-bit float
+    DEFAULT_BIT_DEPTH = 16          # enough for speech and transcription; 32 doubles the size
+    RAW_CHANNELS = 3                # Teams track (stereo) + microphone (mono)
+    WAV_CODECS = {16: "pcm_s16le", 32: "pcm_f32le"}   # ffmpeg microphone backend
+    LOW_DISK_HOURS = 2.0            # warn at recording start when less than this much recording fits
+    CRITICAL_DISK_BYTES = 1_000_000_000  # warn once during a call below this
 
 
 # --- output formats of external tools (parsing) -------------------------------------
