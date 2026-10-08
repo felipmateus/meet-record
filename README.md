@@ -137,6 +137,10 @@ Configure it in `config.toml` under `[confirmation]`: `enabled = false` turns th
 
 ### Microphone and Teams track
 
+When the call ends the recorders stop at once and the "recording in progress" marker is released; mixing, transcription and analysis then run in the background, so a call that starts right after is recorded normally. Mixing writes `audio.partial.m4a` and renames it to `audio.m4a` only on success, with a time limit of twice the meeting length (at least 10 minutes). If mixing fails or the daemon stops before it, the raw tracks stay in the meeting folder and the next daemon start mixes them again. The time limit only stops an ffmpeg that hangs: an 86-minute meeting mixed in 11 minutes.
+
+The raw tracks are 16-bit WAV by default, about 1 GB per hour of meeting until they are mixed; `audio.bit_depth = 32` in `config.toml` records 32-bit float instead (about 2 GB per hour, no gain for transcription). A notification warns when a recording starts with room for less than 2 hours, and again during a call if less than 1 GB is left; `trec doctor` shows the free space.
+
 Both tracks are aligned to the meeting start: `teams-tap` places every audio buffer at its Core Audio timestamp, so time without audio (start-up, or the system pausing delivery mid-call) is written as silence instead of being dropped. Each padded gap is logged in `data/log/capture.log` as `gap of X s at Y s`.
 
 `teams-tap` handles both sides: `--pid` captures Teams (the main process and the helpers that actually emit audio) and `--mic default` records the microphone through AVAudioEngine, following the system default input and surviving the reconfiguration Teams performs when it opens the microphone. `teams-tap --list` shows who the current audio clients are. The `ffmpeg` microphone backend remains available in `config.toml` (`audio.mic_backend`).

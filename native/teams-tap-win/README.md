@@ -23,13 +23,13 @@ Windows 10 version 2004 (build 19041) or later, or Windows 11. Process loopback 
 ## Usage
 
 ```text
-teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]
-teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--stop-file <path>] [--verbose]
+teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]
+teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stop-file <path>] [--verbose]
 teams-tap --list
 ```
 
-- `--pid` records what the process plays, plus its whole process tree (Windows resolves the tree, so the `ms-teams.exe` helper processes are included). Output is 48 kHz 16-bit stereo PCM. `--no-descendants` captures everything except that tree instead, which is only useful for diagnosis. `--wait-audio` retries activation for that many seconds while the target is starting (default 20).
-- `--mic` records the microphone to 48 kHz mono float. `default` follows the Windows default input device and restarts capture when it changes. Any other value is matched against the device's friendly name.
+- `--pid` records what the process plays, plus its whole process tree (Windows resolves the tree, so the `ms-teams.exe` helper processes are included). Output is 48 kHz stereo, 16-bit PCM by default or 32-bit float with `--bits 32`. `--no-descendants` captures everything except that tree instead, which is only useful for diagnosis. `--wait-audio` retries activation for that many seconds while the target is starting (default 20).
+- `--mic` records the microphone to 48 kHz mono, with the same `--bits` choice. `default` follows the Windows default input device and restarts capture when it changes. Any other value is matched against the device's friendly name.
 - `--list` prints the processes that have audio sessions on output devices, as `pid`, `ppid`, `emitting` (session active) and the executable name.
 - `--epoch` aligns the file to a shared start instant. Time without audio is written as silence, so tracks stay aligned and the file length matches wall time. Gaps are logged on stderr as `gap of X s at Y s`.
 

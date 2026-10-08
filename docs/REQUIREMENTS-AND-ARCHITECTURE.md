@@ -345,3 +345,14 @@ teams-recorder/
 - Tools: `config.find_tool` finds ffmpeg and whisper-cli on the PATH or under `<project>/tools` (where `install.ps1` unpacks whisper.cpp). `EACCES` is a transient I/O error on Windows (target file held open during `os.replace`).
 - Installer: `scripts/install.ps1` (+ `install.cmd`), `uninstall.ps1`, `download-model.ps1`; both installers now edit `config.toml` through `scripts/config_tool.py`.
 - Verification so far: unit tests with the OS calls faked, the stop-file protocol with real processes, the PowerShell scripts and generated snippets checked with the PowerShell parser (Microsoft.PowerShell.SDK). Nothing has run on Windows yet.
+
+### Long meetings and back-to-back calls (2026-10-08)
+
+- Incident 1 (2026-10-06 20:15): a call that started 25 s after the previous one ended was taken for it and not recorded. The active-recording pointer was released only after mixing, so the daemon adopted the finishing recording as a manual one.
+- Incident 2 (2026-10-08): an 86-minute meeting failed at mixing after the fixed 600 s ffmpeg limit; the killed ffmpeg left an `audio.m4a` with no index, which the status rule took for a finished recording, and the pointer stayed set, so the next call would have been lost too. The raw tracks were intact and the meeting was recovered.
+- `StopRecording` is split into `stop_capture` (stop recorders, save `ended_at`, release the pointer; run in the detector loop at hang-up) and `finalize` (mix, delete tracks; in the background). The keep-or-discard wait now happens between the two, so a discarded call is never mixed.
+- Mixing writes `audio.partial.m4a` and renames on success; its time limit is `max(600 s, 2 × meeting length)`.
+- `Pipeline.after_stop` turns a mixing failure into `error.txt` (step "mixing") and keeps the tracks; `resume_pending` (daemon start) mixes every non-active meeting that has raw tracks and no audio, clearing a previous mixing error. `Daemon.recover` only stops and releases an orphan (with `ended_at` from the tracks' last write) and leaves the mix to `resume_pending`, so detection starts at once.
+- New `DiskSpace` port: notification when a recording starts with room for less than 2 h of raw audio (about 2.1 GB/h on macOS), once per call below 1 GB, and a `trec doctor` line.
+- Raw track format: `audio.bit_depth` (16 default, or 32) is passed to both recorders as `--bits` (macOS: AVAudioFile converts the Float32 processing format to the file format on write; Windows: the engine's AUTOCONVERTPCM for the tap, an explicit float-to-int16 step for the microphone; ffmpeg backend: `pcm_s16le`/`pcm_f32le`). 16-bit halves the disk use (about 1.04 GB/h) and moves the 4 GB WAV limit of the stereo Teams track from about 3.1 h to 6.2 h. The disk warnings use the configured depth. Mono for the Teams track was not adopted.
+- Recovery measured on the 86-minute meeting: mixing 11 min (the old fixed 600 s limit was too short), transcription 29 min, analysis 2 min.

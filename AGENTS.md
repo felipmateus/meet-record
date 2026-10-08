@@ -62,6 +62,7 @@ Ports and their adapters (`application/ports.py`):
 | `Transcriber` | `transcriber_whispercpp` (ffmpeg → 16 kHz WAV → whisper-cli `-oj`; optional Silero VAD) |
 | `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
 | `CallDetector` | `detector_pmset` (parses `pmset -g assertions` for the Teams process). Windows: `detector_windows.MicUsageCallDetector` (registry `ConsentStore\microphone`: Teams' `LastUsedTimeStop == 0`) |
+| `DiskSpace` | `disk_space.DataDirDiskSpace` (free bytes on the data volume; low-space notifications at recording start and during a call, and in `trec doctor`) |
 | `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock`. Windows: `notifier_windows.ToastNotifier` (PowerShell toast) |
 | `RecordingConfirmation` | `confirm_macos.DialogRecordingConfirmation` (osascript `display dialog`; keep/discard asked by the daemon when it starts a recording; `None` when `[confirmation] enabled = false` or headless). Windows: `confirm_windows.MessageBoxRecordingConfirmation` (user32 `MessageBoxTimeoutW`) |
 | `MinutesRenderer` | `minutes_markdown.MarkdownMinutesRenderer` (minutes.md from the analysis, no LLM call; labels in `messages.Minutes`) |
