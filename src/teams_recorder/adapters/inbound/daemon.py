@@ -15,15 +15,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Callable
 
 from teams_recorder.application.ports import ActiveRecording, CallState, ConfirmAnswer
-from teams_recorder.constants import Confirm, Detector, Proc
+from teams_recorder.constants import Audio, Confirm, Detector, Proc
 from teams_recorder.container import Container
 from teams_recorder.domain import Meeting, TeamsRecorderError, derive_status
 from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
-from teams_recorder.messages import Err, Log
+from teams_recorder.messages import Err, Log, Notify
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class Daemon:
     workers: list[threading.Thread] = field(default_factory=list)
     questions: dict[str, _Question] = field(default_factory=dict)   # meeting id -> keep-recording question
     ignoring_call: bool = False   # the user discarded this call's recording; wait until it ends
+    disk_warned: set[str] = field(default_factory=set)   # meetings already warned about a nearly full disk
 
     # --- lifecycle --------------------------------------------------------
     def run(self) -> None:
@@ -88,6 +90,7 @@ class Daemon:
         self._apply_answer()
         if self.active is not None:
             self._watch_capturers()
+            self._watch_disk()
         if state == CallState.UNKNOWN:
             return  # reading failed; counts for neither side
         if state == CallState.IN_CALL:
@@ -103,6 +106,18 @@ class Daemon:
                 log.info(Log.IGNORED_CALL_ENDED)
             if self.active is not None and self.negatives >= self.stop_after:
                 self._finish_call()
+
+    def _watch_disk(self) -> None:
+        """Warn once per call when the disk is about to fill: the rest of the recording would be lost."""
+        assert self.active is not None
+        disk = getattr(self.container, "disk", None)
+        meeting_id = self.active.meeting.id
+        if disk is None or meeting_id in self.disk_warned:
+            return
+        free = disk.free_bytes()
+        if free is not None and free < Audio.CRITICAL_DISK_BYTES:
+            self.disk_warned.add(meeting_id)
+            self.container.notifier.notify(Notify.DISK_CRITICAL, Notify.DISK_CRITICAL_BODY.format(free=free / 1e9))
 
     def _watch_capturers(self) -> None:
         """Warn (once per capturer) if a capture process died during the call."""
@@ -175,27 +190,30 @@ class Daemon:
         log.info(Log.CALL_ENDED, active.meeting.id)
         pipeline = self.container.pipeline()
         question = self.questions.pop(active.meeting.id, None)
+        if question is not None and question.done.is_set() and question.answer is ConfirmAnswer.DISCARD:
+            self.container.cancel_recording().execute(active)   # answered in the same tick the call ended
+            return
+        # Stop the recorders and release the active pointer here, in the detector loop: a call that
+        # starts while the previous one is still mixing must be recorded, not taken for it.
+        try:
+            meeting = self.container.stop_recording().stop_capture(active)
+        except Exception:  # noqa: BLE001
+            log.exception(Log.POSTPROCESS_FAILED, active.meeting.id)
+            return
 
         def job() -> None:
             try:
-                if question is None:
-                    meeting = pipeline.run_after_call(active)
-                elif question.done.is_set() and question.answer is ConfirmAnswer.DISCARD:
-                    self.container.cancel_recording().execute(active)   # answered in the same tick the call ended
+                if question is not None and not question.done.is_set():
+                    question.done.wait(self.confirm_wait)   # wait for the answer before spending time on it
+                if question is not None and question.answer is ConfirmAnswer.DISCARD:
+                    self.container.cancel_recording().discard(meeting.id)
+                    log.info(Log.DISCARDED_AFTER_CALL, meeting.id)
                     return
-                else:
-                    # Stop capturing at hang-up, then wait for the answer before spending time on it.
-                    meeting = self.container.stop_recording().execute(active)
-                    question.done.wait(self.confirm_wait)
-                    if question.answer is ConfirmAnswer.DISCARD:
-                        self.container.cancel_recording().discard(meeting.id)
-                        log.info(Log.DISCARDED_AFTER_CALL, meeting.id)
-                        return
-                    pipeline.process(meeting.id)
+                pipeline.after_stop(meeting)
                 status = derive_status(self.container.repo.files(meeting.id))
                 log.info(Log.PROCESSED, meeting.id, status.value)
             except Exception:  # noqa: BLE001
-                log.exception(Log.POSTPROCESS_FAILED, active.meeting.id)
+                log.exception(Log.POSTPROCESS_FAILED, meeting.id)
 
         self._background(job)
 
@@ -209,13 +227,26 @@ class Daemon:
         files = repo.files(active.meeting.id)
         if TAP_TRACK in files or MIC_TRACK in files:
             log.warning(Log.ORPHAN_FOUND, active.meeting.id)
+            # Only stop and release here; mixing (minutes for a long meeting) is left to
+            # resume_pending in the background so detection starts at once.
+            ended_at = self._last_write(active)
             try:
-                self.container.stop_recording().execute(active)
+                self.container.stop_recording().stop_capture(active, ended_at=ended_at)
             except TeamsRecorderError:
                 log.exception(Log.ORPHAN_DISCARDED)
                 self.container.cancel_recording().execute(active)
         else:
             repo.clear_active()
+
+    def _last_write(self, active: ActiveRecording) -> datetime | None:
+        """When the recorders last wrote: the real end of a call the daemon did not see end."""
+        times: list[float] = []
+        for track in (TAP_TRACK, MIC_TRACK):
+            try:
+                times.append(self.container.repo.path(active.meeting.id, track).stat().st_mtime)
+            except OSError:
+                continue
+        return datetime.fromtimestamp(max(times)) if times else None
 
     def _resume_pending(self) -> None:
         try:

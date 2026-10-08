@@ -14,6 +14,7 @@ from typing import NoReturn
 import typer
 
 from teams_recorder import __version__
+from teams_recorder.adapters.outbound.disk_space import DataDirDiskSpace
 from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
@@ -126,6 +127,10 @@ def doctor() -> None:
         mode = env_file.stat().st_mode & 0o777
         if mode & 0o077:
             typer.echo(Cli.ENV_PERMISSIONS.format(mode=oct(mode)))
+    free = DataDirDiskSpace(settings.data_dir).free_bytes()
+    if free is not None:
+        low = free < Audio.LOW_DISK_HOURS * settings.raw_bytes_per_hour
+        typer.echo(Cli.DISK_LINE.format(mark=Cli.WARNING if low else Cli.OK, free=free / 1e9, hours=free / settings.raw_bytes_per_hour, path=settings.data_dir))
     typer.echo(Cli.DATA_IN.format(path=settings.data_dir))
     llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
     raise typer.Exit(code=0 if ok and llm_ok else 1)

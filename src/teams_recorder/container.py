@@ -12,6 +12,7 @@ from teams_recorder.adapters.outbound.clock import SystemClock
 from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfirmation
 from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecordingConfirmation
 from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
+from teams_recorder.adapters.outbound.disk_space import DataDirDiskSpace
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
@@ -27,6 +28,7 @@ from teams_recorder.application.ports import (
     AudioMixer,
     CallDetector,
     Clock,
+    DiskSpace,
     MeetingAnalyzer,
     MeetingRepository,
     MicCapture,
@@ -79,9 +81,11 @@ class Container:
     detector: CallDetector
     minutes: MinutesRenderer
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
+    disk: DiskSpace | None = None
 
     def start_recording(self) -> StartRecording:
-        return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device)
+        return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
+                              self.settings.raw_bytes_per_hour)
 
     def stop_recording(self) -> StopRecording:
         return StopRecording(self.repo, self.process_capture, self.mic_capture, self.mixer, self.notifier, self.clock)
@@ -112,13 +116,13 @@ def _macos_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
     binary = teams_tap_binary(settings.project_dir, Platform.MACOS)
     capture_log = settings.capture_log
     mic_capture: MicCapture = (
-        FfmpegMicCapture(ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir), log_path=capture_log)
+        FfmpegMicCapture(ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir), log_path=capture_log, bit_depth=settings.bit_depth)
         if settings.mic_backend is MicBackend.FFMPEG
-        else CoreAudioMicCapture(binary, log_path=capture_log)
+        else CoreAudioMicCapture(binary, log_path=capture_log, bit_depth=settings.bit_depth)
     )
     return _PlatformAdapters(
         notifier=LogNotifier() if headless else MacOSNotifier(),
-        process_capture=CoreAudioTapCapture(binary, log_path=capture_log),
+        process_capture=CoreAudioTapCapture(binary, log_path=capture_log, bit_depth=settings.bit_depth),
         mic_capture=mic_capture,
         detector=PmsetCallDetector(settings.teams_process_name),
         confirmation=DialogRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
@@ -130,8 +134,8 @@ def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
     stop_dir = settings.data_dir / Files.RUN_DIR
     return _PlatformAdapters(
         notifier=LogNotifier() if headless else ToastNotifier(),
-        process_capture=WasapiTapCapture(binary, stop_dir, log_path=settings.capture_log),
-        mic_capture=WasapiMicCapture(binary, stop_dir, log_path=settings.capture_log),   # audio.mic_backend is macOS-only
+        process_capture=WasapiTapCapture(binary, stop_dir, log_path=settings.capture_log, bit_depth=settings.bit_depth),
+        mic_capture=WasapiMicCapture(binary, stop_dir, log_path=settings.capture_log, bit_depth=settings.bit_depth),   # audio.mic_backend is macOS-only
         detector=MicUsageCallDetector(settings.teams_process_name),
         confirmation=MessageBoxRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
     )
@@ -158,6 +162,7 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
         confirmation=platform.confirmation,
+        disk=DataDirDiskSpace(settings.data_dir),
     )
 
 

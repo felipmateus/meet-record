@@ -19,7 +19,9 @@ from teams_recorder.messages import Err
 
 
 class CoreAudioMicCapture:
-    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = Proc.STOP_TIMEOUT, startup_grace: float = Proc.MIC_STARTUP_GRACE) -> None:
+    def __init__(self, binary: Path, log_path: Path | None = None, stop_timeout: float = Proc.STOP_TIMEOUT, startup_grace: float = Proc.MIC_STARTUP_GRACE,
+                 bit_depth: int = Audio.DEFAULT_BIT_DEPTH) -> None:
+        self.bit_depth = bit_depth
         self.binary = Path(binary)
         self.log_path = log_path
         self.stop_timeout = stop_timeout
@@ -27,7 +29,7 @@ class CoreAudioMicCapture:
         self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
     def command(self, device: str, out: Path, epoch: float | None = None) -> list[str]:
-        cmd = [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out)]
+        cmd = [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out), "--bits", str(self.bit_depth)]
         return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:
