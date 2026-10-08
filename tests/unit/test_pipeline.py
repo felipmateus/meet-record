@@ -80,3 +80,50 @@ def test_resume_pending_only_touches_unfinished(repo, notifier, clock):
 
     assert results == {recorded.id: MeetingStatus.ANALYZED, transcribed.id: MeetingStatus.ANALYZED}
     assert derive_status(repo.files(recording.id)) == MeetingStatus.RECORDING
+
+
+# --- recordings stopped but never mixed ---------------------------------------------------
+def _stopped_not_mixed(repo, start, clock):
+    from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
+
+    active = start.execute(pid=1)
+    for track in (TAP_TRACK, MIC_TRACK):
+        repo.touch(active.meeting.id, track)
+    repo.clear_active()                     # what stop_capture leaves behind if mixing never ran
+    return active.meeting.id
+
+
+def test_resume_pending_mixes_stopped_recordings(repo, notifier, clock):
+    start, pipeline = _pipeline(repo, notifier, clock)
+    meeting_id = _stopped_not_mixed(repo, start, clock)
+    assert pipeline.resume_pending() == {meeting_id: MeetingStatus.ANALYZED}
+
+
+def test_resume_pending_skips_the_recording_in_progress(repo, notifier, clock):
+    from teams_recorder.domain.status import TAP_TRACK
+
+    start, pipeline = _pipeline(repo, notifier, clock)
+    active = start.execute(pid=1)
+    repo.touch(active.meeting.id, TAP_TRACK)
+    assert pipeline.resume_pending() == {}
+
+
+def test_mixing_failure_keeps_tracks_marks_error_and_is_retried(repo, notifier, clock):
+    from teams_recorder.domain import CaptureError
+    from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
+
+    start, pipeline = _pipeline(repo, notifier, clock)
+    meeting_id = _stopped_not_mixed(repo, start, clock)
+    real_mix = pipeline.stop.mixer.mix
+
+    def failing(tracks, out):
+        raise CaptureError("ffmpeg failed to mix: timed out")
+
+    pipeline.stop.mixer.mix = failing
+    pipeline.resume_pending()
+    files = repo.files(meeting_id)
+    assert ERROR in files and TAP_TRACK in files and MIC_TRACK in files and AUDIO not in files
+    assert ("Mixing failed", f"Meeting {meeting_id}: ffmpeg failed to mix: timed out") in notifier.messages
+
+    pipeline.stop.mixer.mix = real_mix          # next daemon start: retried from the raw tracks
+    assert pipeline.resume_pending() == {meeting_id: MeetingStatus.ANALYZED}

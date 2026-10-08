@@ -56,3 +56,37 @@ def test_find_pid_none_when_absent():
     def broken(cmd, **kw):
         raise OSError("no pgrep")
     assert find_pid("MSTeams", runner=broken) is None
+
+
+def test_mix_timeout_grows_with_the_meeting():
+    mixer = FfmpegMixer(timeout=600)
+    assert mixer.timeout_for(60) == 600                 # short meetings keep the floor
+    assert mixer.timeout_for(5165) == 10330             # the 86-minute meeting that failed at 600 s
+
+
+def _fake_ffmpeg(tmp_path: Path, exit_code: int) -> str:
+    """Writes some bytes to its .m4a output (not to the probe's `-`) and exits with `exit_code`."""
+    script = tmp_path / "ffmpeg"
+    script.write_text(f"#!/bin/sh\nfor a; do out=$a; done\ncase $out in *.m4a) printf partial > \"$out\";; esac\nexit {exit_code}\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def _tracks(tmp_path: Path) -> list[Path]:
+    tracks = [tmp_path / "tap.wav", tmp_path / "mic.wav"]
+    for t in tracks:
+        t.write_bytes(b"RIFF" + b"0" * 4096)
+    return tracks
+
+
+def test_failed_mix_leaves_no_audio_file(tmp_path: Path):
+    out = tmp_path / "audio.m4a"
+    with pytest.raises(CaptureError):
+        FfmpegMixer(ffmpeg=_fake_ffmpeg(tmp_path, 1)).mix(_tracks(tmp_path), out)
+    assert not out.exists() and not FfmpegMixer.partial_path(out).exists()
+
+
+def test_successful_mix_is_renamed_into_place(tmp_path: Path):
+    out = tmp_path / "audio.m4a"
+    assert FfmpegMixer(ffmpeg=_fake_ffmpeg(tmp_path, 0)).mix(_tracks(tmp_path), out) == out
+    assert out.read_text() == "partial" and not FfmpegMixer.partial_path(out).exists()

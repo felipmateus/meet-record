@@ -25,6 +25,7 @@ class FakeContainer:
     mic: FakeMicCapture
     settings: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(capture_log=Path("/fake/log/capture.log")))
     confirmation: object = None
+    disk: object = None
 
     @property
     def process_capture(self):
@@ -132,10 +133,12 @@ def test_recover_finishes_orphan_recording(repo, notifier, clock):
     repo.touch(orphan.meeting.id, TAP_TRACK)
     repo.touch(orphan.meeting.id, MIC_TRACK)
 
-    d.recover()
-
+    d.recover()                                    # stops and releases at once; mixing is left for later
     assert repo.load_active() is None
-    assert derive_status(repo.files(orphan.meeting.id)) == MeetingStatus.RECORDED
+    assert AUDIO not in repo.files(orphan.meeting.id)
+
+    d._resume_pending()                            # runs in the background on startup
+    assert derive_status(repo.files(orphan.meeting.id)) == MeetingStatus.ANALYZED
 
 
 def test_recover_clears_pointer_without_tracks(repo, notifier, clock):
@@ -229,17 +232,17 @@ def _call_ends_before_the_answer(repo, notifier, clock, answer):
             gate.wait(5)
             return super().ask(meeting)
 
-    d, _ = _daemon(repo, notifier, clock, [IN, IN, IDLE, IDLE, IDLE], confirmation=SlowConfirmation(answer), runner=jobs.append, confirm_wait=5)
+    d, c = _daemon(repo, notifier, clock, [IN, IN, IDLE, IDLE, IDLE], confirmation=SlowConfirmation(answer), runner=jobs.append, confirm_wait=5)
     _run(d, clock, 5)
     ask_job, finish_job = jobs
+    meeting_id = repo.list_meetings()[0].id
+    # At hang-up the recorders are stopped and the pointer released, before the answer and before mixing.
+    assert repo.load_active() is None and c.proc.stopped and AUDIO not in repo.files(meeting_id)
     asker = threading.Thread(target=ask_job)
     finisher = threading.Thread(target=finish_job)
     asker.start(); finisher.start()
-    meeting_id = repo.list_meetings()[0].id
-    deadline = time.monotonic() + 5
-    while derive_status(repo.files(meeting_id)) != MeetingStatus.RECORDED and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert derive_status(repo.files(meeting_id)) == MeetingStatus.RECORDED   # stopped and mixed, waiting for the answer
+    time.sleep(0.05)
+    assert AUDIO not in repo.files(meeting_id)     # nothing is mixed while the question is open
     gate.set()
     asker.join(5); finisher.join(5)
     return meeting_id
@@ -254,3 +257,41 @@ def test_discard_after_the_call_ended_deletes_the_recording(repo, notifier, cloc
 def test_keep_after_the_call_ended_processes_the_recording(repo, notifier, clock):
     meeting_id = _call_ends_before_the_answer(repo, notifier, clock, ConfirmAnswer.KEEP)
     assert derive_status(repo.files(meeting_id)) == MeetingStatus.ANALYZED
+
+
+# --- long meetings and back-to-back calls ----------------------------------------------
+def test_call_starting_while_the_previous_one_is_mixing_is_recorded(repo, notifier, clock):
+    """2026-10-06 20:15: a call that began 25 s after the previous one ended was taken for it and lost."""
+    jobs = []
+    d, c = _daemon(repo, notifier, clock, [IN, IN, IDLE, IDLE, IDLE, IN, IN], runner=jobs.append)
+    _run(d, clock, 5)
+    first = repo.list_meetings()[0].id
+    assert repo.load_active() is None and len(jobs) == 1    # stopped and released; mixing still queued
+
+    _run(d, clock, 2)                                       # the next call starts before the mix ran
+    assert d.active is not None and d.active.meeting.id != first
+
+    jobs[0]()                                               # the first meeting's mix and processing
+    assert derive_status(repo.files(first)) == MeetingStatus.ANALYZED
+
+
+class FakeDisk:
+    def __init__(self, free):
+        self.free = free
+
+    def free_bytes(self):
+        return self.free
+
+
+def test_nearly_full_disk_is_warned_once_per_call(repo, notifier, clock):
+    d, c = _daemon(repo, notifier, clock, [IN] * 6)
+    c.disk = FakeDisk(500_000_000)
+    _run(d, clock, 6)
+    assert [t for t, _ in notifier.messages].count("Disk almost full") == 1
+
+
+def test_enough_disk_is_not_warned(repo, notifier, clock):
+    d, c = _daemon(repo, notifier, clock, [IN] * 4)
+    c.disk = FakeDisk(50_000_000_000)
+    _run(d, clock, 4)
+    assert "Disk almost full" not in [t for t, _ in notifier.messages]

@@ -163,3 +163,22 @@ def test_find_tool_looks_in_project_tools(tmp_path: Path, monkeypatch):
     exe.write_text("")
     assert find_tool("whisper-cli", tmp_path) == str(exe)
     assert find_tool("ffmpeg", tmp_path) == "ffmpeg"
+
+
+def test_bit_depth_setting(tmp_path: Path):
+    import pytest
+
+    assert load_settings(tmp_path).bit_depth == 16
+    (tmp_path / "config.toml").write_text("[audio]\nbit_depth = 32\n")
+    s = load_settings(tmp_path)
+    assert s.bit_depth == 32 and s.raw_bytes_per_hour == 2 * load_settings(tmp_path / "x").raw_bytes_per_hour
+    (tmp_path / "config.toml").write_text("[audio]\nbit_depth = 24\n")
+    with pytest.raises(ValueError, match="bit_depth"):
+        load_settings(tmp_path)
+
+
+def test_raw_bytes_per_hour():
+    from teams_recorder.constants import raw_bytes_per_hour
+
+    assert raw_bytes_per_hour(16) == 1_036_800_000      # 48 kHz x 3 channels x 2 bytes x 3600 s
+    assert raw_bytes_per_hour(32) == 2_073_600_000
