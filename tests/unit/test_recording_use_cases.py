@@ -95,3 +95,20 @@ def test_start_recording_rolls_back_if_process_capture_fails(repo, notifier, clo
     assert repo.list_meetings() == []
     assert repo.load_active() is None
     assert mic.handles == []
+
+
+class _Disk:
+    def __init__(self, free):
+        self.free = free
+
+    def free_bytes(self):
+        return self.free
+
+
+@pytest.mark.parametrize("free, warned", [(1_000_000_000, True), (40_000_000_000, False), (None, False)])
+def test_start_warns_when_little_recording_fits(repo, notifier, clock, free, warned):
+    from teams_recorder.application.use_cases import StartRecording
+    from tests.fakes import FakeMicCapture, FakeProcessCapture
+
+    StartRecording(repo, FakeProcessCapture(), FakeMicCapture(), notifier, clock, "mic", _Disk(free)).execute(pid=1)
+    assert ("Low disk space" in [t for t, _ in notifier.messages]) is warned

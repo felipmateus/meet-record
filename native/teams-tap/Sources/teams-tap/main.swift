@@ -2,7 +2,7 @@
 // Core Audio Process Tap (macOS 14.2+) and records it to WAV until it receives
 // SIGINT/SIGTERM or until the target process exits.
 //
-// Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--verbose]
+// Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--verbose]
 // Output: exit code 0 on success; error messages on stderr.
 
 import AVFoundation
@@ -35,6 +35,7 @@ struct Arguments {
     var includeDescendants = true       // include the target's child processes (Teams plays audio through a helper)
     var mic: String?                    // microphone mode: "default" (follows the default input) or a device name
     var epoch: Double?                  // shared start instant (Unix seconds): both tracks are aligned to it
+    var bits = 16                       // WAV sample format: 16 (integer PCM) or 32 (float)
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -62,9 +63,13 @@ struct Arguments {
             case "--epoch":
                 guard let v = it.next(), let e = Double(v) else { fail("--epoch requires Unix seconds") }
                 args.epoch = e
+            case "--bits":
+                guard let v = it.next(), let b = Int(v), b == 16 || b == 32 else { fail("--bits requires 16 or 32") }
+                args.bits = b
             case "--help", "-h":
-                print("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--no-descendants] [--verbose]")
-                print("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
+                print("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--wait-audio <s>] [--no-descendants] [--verbose]")
+                print("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
+                print("       --bits: WAV sample format, 16-bit integer (default) or 32-bit float")
                 print("       --epoch aligns the file to a shared start instant; time without audio is written as silence")
                 print("       teams-tap --list        lists the processes that are audio clients (pid, parent, bundle, emitting?)")
                 exit(0)
@@ -81,6 +86,20 @@ struct Arguments {
         guard args.out != nil else { fail("--out is required") }
         return args
     }
+}
+
+/// WAV file settings. Audio is processed as Float32 and AVAudioFile converts on write, so 16-bit
+/// files halve the size (32-bit float adds nothing audible for speech or transcription).
+func wavSettings(sampleRate: Double, channels: AVAudioChannelCount, bits: Int) -> [String: Any] {
+    [
+        AVFormatIDKey: kAudioFormatLinearPCM,
+        AVSampleRateKey: sampleRate,
+        AVNumberOfChannelsKey: channels,
+        AVLinearPCMBitDepthKey: bits,
+        AVLinearPCMIsFloatKey: bits == 32,
+        AVLinearPCMIsBigEndianKey: false,
+        AVLinearPCMIsNonInterleaved: false,
+    ]
 }
 
 // MARK: - Audio processes
@@ -237,6 +256,7 @@ final class ProcessTapRecorder {
     let waitAudioSeconds: Double
     let includeDescendants: Bool
     let epoch: Double?
+    let bits: Int
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -246,7 +266,8 @@ final class ProcessTapRecorder {
     private let queue = DispatchQueue(label: "local.teams-recorder.teams-tap.io")
     private var stopped = false
 
-    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool, epoch: Double?) {
+    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool, epoch: Double?, bits: Int) {
+        self.bits = bits
         self.pid = pid
         self.url = url
         self.verbose = verbose
@@ -289,15 +310,7 @@ final class ProcessTapRecorder {
         format = fmt
         if verbose { log("format: \(fmt.sampleRate) Hz, \(fmt.channelCount) channels, \(fmt.commonFormat.rawValue)") }
 
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: fmt.sampleRate,
-            AVNumberOfChannelsKey: fmt.channelCount,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false,
-        ]
+        let settings = wavSettings(sampleRate: fmt.sampleRate, channels: fmt.channelCount, bits: bits)
         do {
             let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
             writer = TimelineWriter(file: file, format: fmt, epoch: epoch)
@@ -313,7 +326,7 @@ final class ProcessTapRecorder {
         }
         check(status, "create IOProc")
         check(AudioDeviceStart(aggregateID, ioProcID), "start capture")
-        log("teams-tap: recording process \(pid) to \(url.path)")
+        log("teams-tap: recording process \(pid) to \(url.path) (\(bits)-bit)")
     }
 
     func stop() {
@@ -391,7 +404,7 @@ final class ProcessTapRecorder {
 
 // MARK: - Microphone (AVAudioEngine)
 
-/// Records the microphone to 48 kHz mono Float32 WAV. Uses AVAudioEngine because it notifies
+/// Records the microphone to 48 kHz mono WAV (16-bit or 32-bit float, see --bits). Uses AVAudioEngine because it notifies
 /// configuration changes (Teams reconfigures the input device when it opens the microphone;
 /// capture via ffmpeg/avfoundation stopped receiving frames at that moment) and because it
 /// follows the system's default input when the user switches to a headset.
@@ -400,6 +413,7 @@ final class MicRecorder {
     let deviceName: String
     let verbose: Bool
     let epoch: Double?
+    let bits: Int
     private let engine = AVAudioEngine()
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
     private var writer: TimelineWriter?
@@ -408,7 +422,8 @@ final class MicRecorder {
     private var restarts = 0
     private var stopped = false
 
-    init(url: URL, deviceName: String, verbose: Bool, epoch: Double?) {
+    init(url: URL, deviceName: String, verbose: Bool, epoch: Double?, bits: Int) {
+        self.bits = bits
         self.url = url
         self.deviceName = deviceName
         self.verbose = verbose
@@ -416,10 +431,7 @@ final class MicRecorder {
     }
 
     func start() {
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48000.0, AVNumberOfChannelsKey: 1,
-            AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false,
-        ]
+        let settings = wavSettings(sampleRate: 48000, channels: 1, bits: bits)
         do {
             let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
             writer = TimelineWriter(file: file, format: outFormat, epoch: epoch)
@@ -437,7 +449,7 @@ final class MicRecorder {
             self.installTapAndRun(retrying: true)
         }
         installTapAndRun(retrying: false)
-        log("teams-tap: recording microphone (\(deviceName)) to \(url.path)")
+        log("teams-tap: recording microphone (\(deviceName)) to \(url.path) (\(bits)-bit)")
     }
 
     private func installTapAndRun(retrying: Bool) {
@@ -540,11 +552,11 @@ if args.list {
 var stopAll: () -> Void = {}
 
 if let micName = args.mic {
-    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose, epoch: args.epoch)
+    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose, epoch: args.epoch, bits: args.bits)
     mic.start()
     stopAll = { mic.stop() }
 } else {
-    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants, epoch: args.epoch)
+    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants, epoch: args.epoch, bits: args.bits)
     recorder.start()
     stopAll = { recorder.stop() }
 }

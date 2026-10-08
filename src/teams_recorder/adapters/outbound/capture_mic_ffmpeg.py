@@ -18,7 +18,9 @@ class FfmpegMicCapture:
         sample_rate: int = Audio.SAMPLE_RATE,
         stop_timeout: float = Proc.STOP_TIMEOUT,
         startup_grace: float = Proc.MIC_STARTUP_GRACE,
+        bit_depth: int = Audio.DEFAULT_BIT_DEPTH,
     ) -> None:
+        self.bit_depth = bit_depth
         self.ffmpeg = ffmpeg
         self.log_path = log_path
         self.sample_rate = sample_rate
@@ -31,7 +33,7 @@ class FfmpegMicCapture:
         return [
             self.ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostdin", "-y",
             "-f", "avfoundation", "-i", f":{device}",
-            "-ac", "1", "-ar", str(self.sample_rate),
+            "-ac", "1", "-ar", str(self.sample_rate), "-c:a", Audio.WAV_CODECS[self.bit_depth],
             str(out),
         ]
 

@@ -19,6 +19,10 @@ teams_process_name = "MSTeams"
 # Windows: the Teams process; the root of its process tree is captured.
 teams_process_name_windows = "ms-teams.exe"
 bitrate_kbps = 64
+# Raw WAV tracks while recording: 16 (integer, default; about 1 GB per hour of meeting) or
+# 32 (float; about 2 GB per hour). 16-bit is enough for speech and transcription; 32 adds headroom
+# but no audible or transcription gain. The final audio.m4a is the same either way.
+bit_depth = 16
 
 [detector]
 # Reads `pmset -g assertions` every poll_seconds. Recording starts after start_after_positive_polls

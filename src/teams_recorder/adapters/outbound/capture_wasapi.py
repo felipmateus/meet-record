@@ -39,6 +39,7 @@ class _StopFileRecorder:
         stop_timeout: float = Proc.STOP_TIMEOUT,
         startup_grace: float | None = None,
         wait_audio: float = Audio.WAIT_AUDIO_SECONDS,
+        bit_depth: int = Audio.DEFAULT_BIT_DEPTH,
         is_alive: Callable[[int], bool] = process_control.is_running,
         kill: Callable[[int], None] = _default_kill,
     ) -> None:
@@ -47,6 +48,7 @@ class _StopFileRecorder:
         self.log_path = log_path
         self.stop_timeout = stop_timeout
         self.startup_grace = self.DEFAULT_STARTUP_GRACE if startup_grace is None else startup_grace
+        self.bit_depth = bit_depth
         self.wait_audio = wait_audio  # tap only: seconds teams-tap retries activation while Teams starts its audio
         self.is_alive = is_alive
         self.kill = kill
@@ -99,7 +101,7 @@ class WasapiTapCapture(_StopFileRecorder):
     """What Teams plays: WASAPI process loopback on the Teams process tree."""
 
     def command(self, pid: int, out: Path, epoch: float | None = None) -> list[str]:
-        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio)), "--stop-file", str(self.stop_file(out))]
+        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio)), "--bits", str(self.bit_depth), "--stop-file", str(self.stop_file(out))]
         return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def start(self, pid: int, out: Path, epoch: float | None = None) -> CaptureHandle:
@@ -112,7 +114,7 @@ class WasapiMicCapture(_StopFileRecorder):
     DEFAULT_STARTUP_GRACE = Proc.MIC_STARTUP_GRACE
 
     def command(self, device: str, out: Path, epoch: float | None = None) -> list[str]:
-        cmd = [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out), "--stop-file", str(self.stop_file(out))]
+        cmd = [str(self.binary), "--mic", device or Audio.DEFAULT_MIC_DEVICE, "--out", str(out), "--bits", str(self.bit_depth), "--stop-file", str(self.stop_file(out))]
         return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:

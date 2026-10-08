@@ -12,6 +12,10 @@ class Notify:
     RECORDING_STARTED_BODY = "Meeting {meeting_id}"
     RECORDING_STOPPED = "Recording stopped"
     RECORDING_STOPPED_BODY = "{minutes} min. Transcribing…"
+    LOW_DISK = "Low disk space"
+    LOW_DISK_BODY = "{free:.1f} GB free: about {hours:.1f} h of recording"
+    DISK_CRITICAL = "Disk almost full"
+    DISK_CRITICAL_BODY = "{free:.1f} GB free; the recording may stop. Free up space now."
     RECORDING_CANCELLED = "Recording cancelled"
     RECORDING_CANCELLED_BODY = "Meeting {meeting_id} discarded"
     STEP_FAILED = "{step} failed"                       # step: "Transcription" / "Analysis"
@@ -32,6 +36,7 @@ class Ask:
 
 
 class Step:
+    MIXING = "mixing"
     TRANSCRIPTION = "transcription"
     ANALYSIS = "analysis"
 
@@ -90,6 +95,7 @@ class Err:
     LAUNCHCTL_FAILED = "launchctl {args} failed ({code}): {stderr}"
     SCHTASKS_FAILED = "schtasks {args} failed ({code}): {stderr}"
     INVALID_PROVIDER = "invalid llm.provider: {value!r}; use one of {options}"
+    INVALID_BIT_DEPTH = "invalid audio.bit_depth: {value!r} (use one of {options})"
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
     NO_DETECTOR = "daemon without a configured detector"
@@ -134,6 +140,7 @@ class Cli:
     OPEN_ACTIONS = "Open actions: {count}"
     # doctor
     CHECK = "[{mark}] {name}: {value}"
+    DISK_LINE = "[{mark}] free disk: {free:.1f} GB (about {hours:.1f} h of recording) in {path}"
     OK, MISSING_MARK, INFO, WARNING = "ok ", "MISSING", "info", "WARNING"
     NOT_FOUND = "not found"
     CLAUDE_CLI_LINE = "[{mark}] claude (Claude Code CLI): {value}  → current provider: {provider}"
@@ -241,6 +248,8 @@ class Log:
     DISCARDED_AFTER_CALL = "recording %s discarded by the user after the call ended"
     IGNORED_CALL_ENDED = "the ignored call ended; the next call will be recorded"
     RESUMED = "pending work resumed: %s"
+    STOPPED_NOT_MIXED = "meeting %s was stopped but not mixed; mixing it now"
+    MIX_TIMEOUT = "mixing %s s of audio with a %.0f s time limit"
     RESUME_FAILED = "failed to resume pending work"
     STEP_FAILED = "%s failed for meeting %s"
     NOTIFICATION_FAILED = "notification failed: %s"

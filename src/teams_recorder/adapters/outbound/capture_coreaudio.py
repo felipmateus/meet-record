@@ -20,7 +20,9 @@ class CoreAudioTapCapture:
         stop_timeout: float = Proc.STOP_TIMEOUT,
         startup_grace: float = Proc.TAP_STARTUP_GRACE,
         wait_audio: float = Audio.WAIT_AUDIO_SECONDS,
+        bit_depth: int = Audio.DEFAULT_BIT_DEPTH,
     ) -> None:
+        self.bit_depth = bit_depth
         self.binary = Path(binary)
         self.log_path = log_path
         self.stop_timeout = stop_timeout
@@ -29,7 +31,7 @@ class CoreAudioTapCapture:
         self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
     def command(self, pid: int, out: Path, epoch: float | None = None) -> list[str]:
-        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio))]
+        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio)), "--bits", str(self.bit_depth)]
         return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def warmup(self) -> bool:

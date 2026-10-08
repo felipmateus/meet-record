@@ -26,6 +26,7 @@ from teams_recorder.constants import (
     Platform,
     Windows,
     ggml_model_file,
+    raw_bytes_per_hour,
 )
 from teams_recorder.messages import Err
 
@@ -62,6 +63,7 @@ class Settings:
     mic_backend: MicBackend
     teams_process_name: str
     bitrate_kbps: int
+    bit_depth: int
     denoise: bool
     poll_seconds: int
     start_after_positive_polls: int
@@ -84,6 +86,10 @@ class Settings:
     retention_days: int
     anthropic_api_key: str | None
     platform: Platform = Platform.MACOS
+
+    @property
+    def raw_bytes_per_hour(self) -> int:
+        return raw_bytes_per_hour(self.bit_depth)
 
     @property
     def has_api_key(self) -> bool:
@@ -170,6 +176,16 @@ def default_data_dir(project_dir: Path, platform: Platform = Platform.MACOS) -> 
     return project_dir / Files.LOCAL_DATA_DIR
 
 
+def _parse_bit_depth(value: object) -> int:
+    try:
+        bits = int(str(value))
+    except ValueError:
+        bits = 0
+    if bits not in Audio.BIT_DEPTHS:
+        raise ValueError(Err.INVALID_BIT_DEPTH.format(value=value, options=Audio.BIT_DEPTHS))
+    return bits
+
+
 def load_settings(project_dir: Path | None = None, platform: Platform | None = None) -> Settings:
     platform = platform or current_platform()
     project_dir = (project_dir or default_project_dir()).resolve()
@@ -203,6 +219,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         mic_backend=_parse_enum(MicBackend, audio.get("mic_backend", MicBackend.COREAUDIO), Err.INVALID_MIC_BACKEND),
         teams_process_name=os.environ.get(Env.TEAMS_PROCESS) or teams_default,
         bitrate_kbps=int(audio.get("bitrate_kbps", Audio.DEFAULT_BITRATE_KBPS)),
+        bit_depth=_parse_bit_depth(audio.get("bit_depth", Audio.DEFAULT_BIT_DEPTH)),
         denoise=bool(audio.get("denoise", True)),
         poll_seconds=int(detector.get("poll_seconds", Detector.POLL_SECONDS)),
         start_after_positive_polls=int(detector.get("start_after_positive_polls", Detector.START_AFTER)),

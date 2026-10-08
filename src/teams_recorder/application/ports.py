@@ -151,5 +151,12 @@ class Notifier(Protocol):
 
 
 @runtime_checkable
+class DiskSpace(Protocol):
+    def free_bytes(self) -> int | None:
+        """Free space where recordings are written; None when it cannot be read."""
+        ...
+
+
+@runtime_checkable
 class Clock(Protocol):
     def now(self) -> datetime: ...

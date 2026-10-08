@@ -18,7 +18,8 @@ internal interface IRecorder
 /// process tree itself, so Teams' helper processes are included without enumerating them.
 internal sealed class ProcessTapRecorder : IRecorder
 {
-    private static readonly WaveFormat CaptureFormat = new(48000, 16, 2);   // converted by the audio engine
+    // The audio engine converts to this format (AUTOCONVERTPCM): 16-bit PCM by default, or 32-bit float.
+    private readonly WaveFormat CaptureFormat;
     private const long BufferDuration100ns = 2_000_000;                     // 200 ms
 
     private readonly uint _pid;
@@ -33,8 +34,9 @@ internal sealed class ProcessTapRecorder : IRecorder
     private readonly AutoResetEvent _dataEvent = new(false);
     private bool _stopped;
 
-    public ProcessTapRecorder(uint pid, string path, bool includeTree, double? epoch, double waitAudioSeconds)
+    public ProcessTapRecorder(uint pid, string path, bool includeTree, double? epoch, double waitAudioSeconds, int bits)
     {
+        CaptureFormat = bits == 32 ? WaveFormat.CreateIeeeFloatWaveFormat(48000, 2) : new WaveFormat(48000, 16, 2);
         _pid = pid; _path = path; _includeTree = includeTree; _epoch = epoch; _waitAudioSeconds = waitAudioSeconds;
     }
 
@@ -121,12 +123,12 @@ internal sealed class ProcessTapRecorder : IRecorder
     }
 }
 
-/// Records the microphone to 48 kHz mono float WAV. Follows the default input device: when the
+/// Records the microphone to 48 kHz mono WAV (16-bit PCM or 32-bit float, see --bits). Follows the default input device: when the
 /// user switches to a headset (or the device disappears) capture restarts on the new default,
 /// and the shared timeline keeps the file continuous.
 internal sealed class MicRecorder : IRecorder, IMMNotificationClient
 {
-    private static readonly WaveFormat OutFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 1);
+    private readonly WaveFormat OutFormat;   // 48 kHz mono: 16-bit PCM by default, or 32-bit float
 
     private readonly string _deviceName;
     private readonly string _path;
@@ -139,8 +141,9 @@ internal sealed class MicRecorder : IRecorder, IMMNotificationClient
     private int _restarts;
     private volatile bool _stopping;
 
-    public MicRecorder(string deviceName, string path, double? epoch)
+    public MicRecorder(string deviceName, string path, double? epoch, int bits)
     {
+        OutFormat = bits == 32 ? WaveFormat.CreateIeeeFloatWaveFormat(48000, 1) : new WaveFormat(48000, 16, 1);
         _deviceName = deviceName; _path = path; _epoch = epoch;
     }
 
@@ -181,7 +184,7 @@ internal sealed class MicRecorder : IRecorder, IMMNotificationClient
                 return;
             }
             var capture = new WasapiCapture(device, true, 100);
-            _converter = new Converter(capture.WaveFormat, OutFormat.SampleRate);
+            _converter = new Converter(capture.WaveFormat, OutFormat.SampleRate, OutFormat.BitsPerSample);
             capture.DataAvailable += OnData;
             capture.RecordingStopped += OnStopped;
             Program.Verbose($"microphone: {device.FriendlyName}, {capture.WaveFormat}");
@@ -202,10 +205,10 @@ internal sealed class MicRecorder : IRecorder, IMMNotificationClient
     {
         var converter = _converter;
         if (converter == null || e.BytesRecorded == 0 || !ReferenceEquals(sender, _capture)) return;
-        byte[] floats = converter.Convert(e.Buffer, e.BytesRecorded, out int frames);
+        byte[] samples = converter.Convert(e.Buffer, e.BytesRecorded, out int frames);
         if (frames == 0) return;
         double host = Timeline.NowSeconds() - frames / (double)OutFormat.SampleRate;
-        _timeline!.Write(floats, frames * OutFormat.BlockAlign, host);
+        _timeline!.Write(samples, frames * OutFormat.BlockAlign, host);
     }
 
     private void OnStopped(object? sender, StoppedEventArgs e)
@@ -258,16 +261,17 @@ internal sealed class MicRecorder : IRecorder, IMMNotificationClient
     }
 
     /// Converts the device's native format (float or integer PCM, any channel count and rate)
-    /// to mono float at the output rate, with a linear resampler that keeps state across chunks.
+    /// to mono at the output rate and bit depth, with a linear resampler that keeps state across chunks.
     private sealed class Converter
     {
-        private readonly int _channels, _bits, _inRate, _outRate;
+        private readonly int _channels, _bits, _inRate, _outRate, _outBits;
         private readonly bool _isFloat;
         private double _pos;          // fractional read position into the current chunk
         private float _last;          // last input sample of the previous chunk
 
-        public Converter(WaveFormat inFormat, int outRate)
+        public Converter(WaveFormat inFormat, int outRate, int outBits)
         {
+            _outBits = outBits;
             _channels = inFormat.Channels; _bits = inFormat.BitsPerSample; _inRate = inFormat.SampleRate; _outRate = outRate;
             _isFloat = inFormat.Encoding == WaveFormatEncoding.IeeeFloat
                 || (inFormat is WaveFormatExtensible ext && ext.SubFormat == NAudio.Dmo.AudioMediaSubtypes.MEDIASUBTYPE_IEEE_FLOAT);
@@ -304,6 +308,17 @@ internal sealed class MicRecorder : IRecorder, IMMNotificationClient
                 output = list.ToArray();
             }
             outFrames = output.Length;
+            if (_outBits == 16)
+            {
+                var pcm = new byte[output.Length * 2];
+                for (int i = 0; i < output.Length; i++)
+                {
+                    short v = (short)Math.Round(Math.Clamp(output[i], -1f, 1f) * short.MaxValue);
+                    pcm[2 * i] = (byte)v;
+                    pcm[2 * i + 1] = (byte)(v >> 8);
+                }
+                return pcm;
+            }
             var bytes = new byte[output.Length * 4];
             Buffer.BlockCopy(output, 0, bytes, 0, bytes.Length);
             return bytes;

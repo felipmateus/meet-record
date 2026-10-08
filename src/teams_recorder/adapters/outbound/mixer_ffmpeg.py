@@ -122,10 +122,26 @@ class FfmpegMixer:
         self._preserve_if_anomalous(tracks, durations, out.parent)
         if not usable:
             raise CaptureError(Err.NO_USABLE_TRACK.format(tracks=", ".join(str(t) for t in tracks)))
+        timeout = self.timeout_for(max(durations.values(), default=0.0))
+        log.info(Log.MIX_TIMEOUT, round(max(durations.values(), default=0.0)), timeout)
+        # Write to a temporary name and rename on success: a killed ffmpeg leaves an m4a with no
+        # index (unplayable), which must never look like a finished audio.m4a.
+        partial = self.partial_path(out)
         try:
-            result = subprocess.run(self.command(usable, out), capture_output=True, text=True, timeout=self.timeout, check=False, creationflags=NO_WINDOW)
+            result = subprocess.run(self.command(usable, partial), capture_output=True, text=True, timeout=timeout, check=False, creationflags=NO_WINDOW)
         except (OSError, subprocess.TimeoutExpired) as exc:
+            partial.unlink(missing_ok=True)
             raise CaptureError(Err.MIX_FAILED.format(error=exc)) from exc
-        if result.returncode != 0 or not out.exists():
+        if result.returncode != 0 or not partial.exists():
+            partial.unlink(missing_ok=True)
             raise CaptureError(Err.MIX_FAILED_CODE.format(code=result.returncode, tail=result.stderr.strip()[-500:]))
+        partial.replace(out)
         return out
+
+    def timeout_for(self, seconds_of_audio: float) -> float:
+        """Long meetings need long mixes: an 86-minute call did not mix within a fixed 10 minutes."""
+        return max(self.timeout, seconds_of_audio * Audio.MIX_TIMEOUT_FACTOR)
+
+    @staticmethod
+    def partial_path(out: Path) -> Path:
+        return out.with_name(f"{out.stem}{Audio.PARTIAL_INFIX}{out.suffix}")

@@ -36,3 +36,25 @@ def test_headless_has_no_dialog_on_either_platform(tmp_path: Path):
     for platform in Platform:
         c = build_container(load_settings(tmp_path, platform=platform), headless=True)
         assert isinstance(c.notifier, LogNotifier) and c.confirmation is None
+
+
+def test_bit_depth_reaches_every_recorder(tmp_path: Path):
+    (tmp_path / "config.toml").write_text("[audio]\nbit_depth = 32\n")
+    for platform in Platform:
+        c = build_container(load_settings(tmp_path, platform=platform))
+        tap = c.process_capture.command(1, tmp_path / "m" / "tap.wav")
+        mic = c.mic_capture.command("default", tmp_path / "m" / "mic.wav")
+        assert tap[tap.index("--bits") + 1] == "32" and mic[mic.index("--bits") + 1] == "32"
+
+
+def test_default_recorders_write_16_bit(tmp_path: Path):
+    c = build_container(load_settings(tmp_path, platform=Platform.MACOS))
+    tap = c.process_capture.command(1, tmp_path / "m" / "tap.wav")
+    assert tap[tap.index("--bits") + 1] == "16"
+
+
+def test_ffmpeg_microphone_codec_follows_bit_depth():
+    from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
+
+    assert "pcm_s16le" in FfmpegMicCapture().command("0", Path("m.wav"))
+    assert "pcm_f32le" in FfmpegMicCapture(bit_depth=32).command("0", Path("m.wav"))
