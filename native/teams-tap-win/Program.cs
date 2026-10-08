@@ -1,11 +1,11 @@
 // teams-tap for Windows: same command-line contract as the macOS tool (native/teams-tap),
 // so the Python adapters can drive either one.
 //
-//   teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]
+//   teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]
 //       Records what process <pid> and its descendants play (WASAPI process loopback,
-//       Windows 10 2004 / build 19041 or later). 48 kHz 16-bit stereo PCM.
-//   teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--stop-file <path>] [--verbose]
-//       Records the microphone to 48 kHz mono float, following the default input device.
+//       Windows 10 2004 / build 19041 or later). 48 kHz stereo, 16-bit PCM (default) or 32-bit float.
+//   teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stop-file <path>] [--verbose]
+//       Records the microphone to 48 kHz mono (16-bit or 32-bit float), following the default input device.
 //   teams-tap --list
 //       Lists the processes that have audio sessions on output devices (pid, parent, active?, exe).
 //
@@ -40,6 +40,7 @@ internal static class Program
         string? output = null, mic = null, stopFile = null;
         double? epoch = null;
         double waitAudio = 20;
+        int bits = 16;
         bool list = false, includeTree = true;
 
         for (int i = 0; i < argv.Length; i++)
@@ -56,6 +57,10 @@ internal static class Program
                     case "--wait-audio": waitAudio = double.Parse(Next("seconds"), System.Globalization.CultureInfo.InvariantCulture); break;
                     case "--mic": mic = Next("'default' or a device name"); break;
                     case "--stop-file": stopFile = Next("a path"); break;
+                    case "--bits":
+                        bits = int.Parse(Next("16 or 32"));
+                        if (bits != 16 && bits != 32) Fail("--bits requires 16 or 32");
+                        break;
                     case "--no-descendants": includeTree = false; break;
                     case "--list": list = true; break;
                     case "--verbose": case "-v": _verbose = true; break;
@@ -75,8 +80,8 @@ internal static class Program
 
         if (stopFile != null) { try { File.Delete(stopFile); } catch (IOException) { } }   // a stale file must not stop us at once
         IRecorder recorder = mic != null
-            ? new MicRecorder(mic, output!, epoch)
-            : new ProcessTapRecorder(pid, output!, includeTree, epoch, waitAudio);
+            ? new MicRecorder(mic, output!, epoch, bits)
+            : new ProcessTapRecorder(pid, output!, includeTree, epoch, waitAudio, bits);
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; Done.Set(); };   // before Start, so Ctrl+C never skips finalizing the WAV
         recorder.Start();
 
@@ -117,8 +122,8 @@ internal static class Program
 
     private static void PrintUsage()
     {
-        Console.WriteLine("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]");
-        Console.WriteLine("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--stop-file <path>] [--verbose]   records the microphone (48 kHz mono), following the default input");
+        Console.WriteLine("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--wait-audio <s>] [--stop-file <path>] [--no-descendants] [--verbose]");
+        Console.WriteLine("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stop-file <path>] [--verbose]   records the microphone (48 kHz mono), following the default input");
         Console.WriteLine("       teams-tap --list        lists the processes with audio sessions on output devices (pid, parent, active?, exe)");
         Console.WriteLine("       --epoch aligns the file to a shared start instant; time without audio is written as silence");
         Console.WriteLine("       stop with Ctrl+C / Ctrl+Break, the line \"stop\" on stdin, or by creating the --stop-file");
