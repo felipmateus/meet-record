@@ -288,6 +288,9 @@ class Planner:
 
 class Stories:
     ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
+    DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
     # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
     CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
                       "decisions", "others_actions", "open_questions", "risks")
+    # Story fields the writer sees for each recent story, to recognise an action it already covers.
+    EXISTING_FIELDS = ("id", "title", "narrative")

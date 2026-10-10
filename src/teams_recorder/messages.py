@@ -92,6 +92,7 @@ class Err:
     STORY_GUIDE_MISSING = "user story guide not found: {path} (set [stories] guide in config.toml)"
     STORY_GUIDE_EMPTY = "user story guide is empty: {path}"
     PLAN_MISSING = "no plan for {day}; create it with `trec plan --date {day}`"
+    STORIES_ALREADY_PUBLISHED = "the stories of {day} were already published; drafting them again would put the same work on the board twice. Edit them on the board instead"
     # repository
     FILE_MISSING = "file not found: {path}"
     BAD_JSON = "invalid JSON in {path}: {error}"
@@ -316,6 +317,7 @@ class Prompt:
     STORIES_DATE = "Plan date: {date} ({weekday})"
     STORIES_ACTIONS = "\n## Candidate actions (JSON; cite these ids in source_action_ids and skipped)\n"
     STORIES_MEETINGS = "\n## Context: analyses of the meetings these actions came from (JSON)\n"
+    STORIES_EXISTING = "\n## Existing stories from recent days (JSON; never duplicate them: cite their id in duplicate_of)\n"
     STORY_GUIDE_HEADER = "\n\n# User story guide\n\nThe user's own rules. Follow them for format, style and what counts as a story.\n\n"
     FIELD_STORY_TITLE = "Short story title, as the guide asks"
     FIELD_STORY_NARRATIVE = "The story sentence in the guide's format (persona, capability, benefit)"
@@ -324,6 +326,7 @@ class Prompt:
     FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
     FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
     FIELD_SKIPPED_REASON = "Short reason why this action is not a story"
+    FIELD_SKIPPED_DUPLICATE = "id of the existing story that already covers this action, or null"
 
 
 class Minutes:
@@ -392,7 +395,8 @@ class StoryDoc:
     AT = " (dito em {at})"
     BULLET = "- {text}"
     SKIPPED = "## Ações que não viraram história"
-    SKIPPED_LINE = "- `{id}` {description} — {reason}"
+    SKIPPED_LINE = "- `{id}` {description} — {reason}{covered_by}"
+    DUPLICATE_OF = " (já coberta por: {title})"
     UNKNOWN_ACTION = "(ação fora do plano)"
     NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
     FOOTER = "---\n_Rascunho gerado automaticamente seguindo o guia de user stories. Confira cada história antes de publicar._"

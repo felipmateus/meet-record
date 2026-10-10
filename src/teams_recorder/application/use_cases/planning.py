@@ -6,7 +6,18 @@ from datetime import date, timedelta
 
 from teams_recorder.application.ports import Clock, MeetingRepository, Notifier, Planner, StoryRenderer, StoryWriter
 from teams_recorder.constants import Planner as PlannerDefaults
-from teams_recorder.domain import Action, Analysis, DailyPlan, MeetingStatus, RepositoryError, StoryDrafts, derive_status, merge_open_actions
+from teams_recorder.constants import Stories as StoryDefaults
+from teams_recorder.domain import (
+    Action,
+    Analysis,
+    DailyPlan,
+    MeetingStatus,
+    RepositoryError,
+    StoryDrafts,
+    UserStory,
+    derive_status,
+    merge_open_actions,
+)
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Notify
 
@@ -40,23 +51,31 @@ class BuildDailyPlan:
 class DraftUserStories:
     """Drafts user stories from a saved daily plan's new actions.
 
-    The drafts are files for the user to review (`plans/<day>.stories.*`); nothing is
-    published. A day without new actions gets an empty set without calling the writer.
+    The drafts are files for the user to review (`plans/<day>.stories.*`). A day without new
+    actions gets an empty set without calling the writer. The stories of the previous
+    `dedup_days` days go to the writer so a topic raised again does not become a second story,
+    and a day whose stories were already published is never drafted again (that would put
+    the same work on the board twice).
     """
 
     repo: MeetingRepository
     writer: StoryWriter
     renderer: StoryRenderer
     notifier: Notifier
+    dedup_days: int = StoryDefaults.DEDUP_DAYS
 
     def execute(self, day: date) -> StoryDrafts:
         plan = self.repo.load_plan(day)
         if plan is None:
             raise RepositoryError(Err.PLAN_MISSING.format(day=day.isoformat()))
+        already_drafted = self.repo.load_story_drafts(day)
+        if already_drafted is not None and already_drafted.has_publications:
+            raise RepositoryError(Err.STORIES_ALREADY_PUBLISHED.format(day=day.isoformat()))
         actions = plan.new_actions
-        drafts = self.writer.draft(day, actions, self._source_analyses(actions)) if actions else StoryDrafts(day=day)
+        existing = recent_stories(self.repo, day, self.dedup_days)
+        drafts = self.writer.draft(day, actions, self._source_analyses(actions), existing) if actions else StoryDrafts(day=day)
         drafts.day = day
-        self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions))
+        self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions, existing))
         if drafts.stories:
             self.notifier.notify(
                 Notify.STORIES_READY,
@@ -71,6 +90,11 @@ class DraftUserStories:
             for mid in meeting_ids
             if self.repo.exists(mid) and ANALYSIS in self.repo.files(mid)
         ]
+
+
+def recent_stories(repo: MeetingRepository, day: date, days: int) -> list[UserStory]:
+    """The stories drafted in the `days` days before `day`, oldest first."""
+    return [story for drafts in repo.recent_story_drafts(day, days) for story in drafts.stories]
 
 
 @dataclass

@@ -12,7 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript
+from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript, UserStory
 
 
 class CallState(StrEnum):
@@ -100,14 +100,17 @@ class Planner(Protocol):
 
 @runtime_checkable
 class StoryWriter(Protocol):
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis]) -> StoryDrafts:
-        """Drafts user stories from the given actions; `analyses` are the meetings they came from (context)."""
+    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
+        """Drafts user stories from the given actions. `analyses` are the meetings they came from (context);
+        `existing` are recent stories, which an action already covered by one of them must not duplicate."""
         ...
 
 
 @runtime_checkable
 class StoryRenderer(Protocol):
-    def render(self, drafts: StoryDrafts, actions: list[Action]) -> str: ...
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
+        """The review document; `existing` names the stories that left-out duplicates point to."""
+        ...
 
 
 @runtime_checkable
