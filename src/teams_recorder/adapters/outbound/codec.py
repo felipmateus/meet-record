@@ -19,6 +19,7 @@ from teams_recorder.domain import (
     Meeting,
     MeetingType,
     Priority,
+    Publication,
     Segment,
     SkippedAction,
     StoryDrafts,
@@ -180,6 +181,9 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
         "source_meetings": list(s.source_meetings),
         "priority": s.priority.value if s.priority else None,
         "due": _d(s.due),
+        "publications": [
+            {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
+        ],
     }
 
 
@@ -195,6 +199,9 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         source_meetings=list(d.get("source_meetings", [])),
         priority=Priority(d["priority"]) if d.get("priority") else None,
         due=_parse_d(d.get("due")),
+        publications=[
+            Publication(x["destination"], x["ref"], datetime.fromisoformat(x["published_at"])) for x in d.get("publications", [])
+        ],
     )
 
 
@@ -202,7 +209,7 @@ def story_drafts_to_dict(drafts: StoryDrafts) -> dict[str, Any]:
     return {
         "day": drafts.day.isoformat(),
         "stories": [story_to_dict(s) for s in drafts.stories],
-        "skipped": [{"action_id": k.action_id, "reason": k.reason} for k in drafts.skipped],
+        "skipped": [{"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of} for k in drafts.skipped],
     }
 
 
@@ -210,5 +217,5 @@ def story_drafts_from_dict(d: dict[str, Any]) -> StoryDrafts:
     return StoryDrafts(
         day=date.fromisoformat(d["day"]),
         stories=[story_from_dict(x) for x in d.get("stories", [])],
-        skipped=[SkippedAction(x["action_id"], x.get("reason", "")) for x in d.get("skipped", [])],
+        skipped=[SkippedAction(x["action_id"], x.get("reason", ""), x.get("duplicate_of")) for x in d.get("skipped", [])],
     )

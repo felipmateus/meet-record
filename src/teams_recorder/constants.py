@@ -116,6 +116,7 @@ class Files:
     PLAN_JSON = "{day}.json"
     STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
     STORIES_JSON = "{day}.stories.json"
+    STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
