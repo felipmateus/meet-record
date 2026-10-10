@@ -1,3 +1,5 @@
+import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 
@@ -7,9 +9,11 @@ from teams_recorder.adapters.inbound.cli import app
 from teams_recorder.adapters.outbound.launchd import AgentStatus
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.config import ENV_PROJECT_DIR
-from teams_recorder.domain import Meeting, Publication, StoryDrafts, UserStory
+from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
+from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
+from teams_recorder.domain import Action, DailyPlan, Meeting, Publication, StoryDrafts, UserStory
 from teams_recorder.domain.status import AUDIO
-from teams_recorder.messages import Err, Notify
+from teams_recorder.messages import Cli, Err, Notify
 
 runner = CliRunner()
 
@@ -257,3 +261,170 @@ def test_unknown_story_destination_stops_the_command(tmp_path: Path, monkeypatch
     message = Err.INVALID_DESTINATION.format(value="trello", options=("backlog-md",))
     assert result.exit_code != 0 and str(result.exception) == message
     assert not (project / "data" / "plans" / "2026-10-06.md").exists()
+
+
+
+FAKE_BACKLOG = Path(__file__).resolve().parents[1] / "fixtures" / "fake_backlog_cli.py"
+BOARD_CONFIG = 'statuses: ["Triagem", "To Do", "In Progress", "Done"]\nauto_commit: false\nremote_operations: false\n'
+DAY = date(2026, 10, 9)
+
+
+def _board_project(tmp_path: Path, monkeypatch, *, publish: bool = False, board: str = BOARD_CONFIG, dedup_days: int = 30) -> Path:
+    """A project publishing to a Backlog.md board in its own folder, through the scripted `backlog` on PATH."""
+    project = _project(tmp_path, monkeypatch)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "backlog").write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_BACKLOG}" "$@"\n')
+    (bin_dir / "backlog").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_BACKLOG_LOG", str(tmp_path / "backlog-calls.jsonl"))
+    monkeypatch.setattr("teams_recorder.adapters.outbound.notifier_macos.MacOSNotifier.notify", lambda self, t, b: None)
+    (project / "backlog").mkdir()
+    (project / "backlog" / "config.yml").write_text(board)
+    (project / "guide.md").write_text("# Guia\n")
+    (project / "config.toml").write_text(
+        f'[stories]\nenabled = true\nguide = "guide.md"\ndestinations = ["backlog-md"]\npublish = {str(publish).lower()}\n'
+        f'dedup_days = {dedup_days}\n[stories.backlog_md]\nproject_dir = "."\n'
+    )
+    return project
+
+
+def _drafts(project: Path, *titles: str, day: date = DAY, plan: bool = True) -> FsMeetingRepository:
+    fs = FsMeetingRepository(project / "data")
+    if plan:
+        fs.save_plan(DailyPlan(day, "# plano\n", new_actions=[Action("Exportar horas", "usuário", "m1", id="a1")]))
+    fs.save_story_drafts(StoryDrafts(day, [UserStory(t, "Como gestor, quero isso", source_action_ids=["a1"]) for t in titles]), "#\n")
+    return fs
+
+
+def _backlog_calls(tmp_path: Path) -> int:
+    log = tmp_path / "backlog-calls.jsonl"
+    return len(log.read_text().splitlines()) if log.exists() else 0
+
+
+def _published(title: str, ref: str) -> str:
+    return Cli.PUBLISHED_LINE.format(title=title, destination="backlog-md", ref=ref)
+
+
+def test_publish_needs_destinations(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    result = runner.invoke(app, ["publish", "--date", "2026-10-09"])
+    assert result.exit_code == 1 and Cli.NO_DESTINATIONS in result.output
+
+
+def test_publish_needs_drafts_and_notifies_the_error(tmp_path: Path, monkeypatch):
+    _board_project(tmp_path, monkeypatch)
+    notified: list[tuple[str, str]] = []
+    monkeypatch.setattr("teams_recorder.adapters.outbound.notifier_macos.LogNotifier.notify", lambda self, t, b: notified.append((t, b)))
+    result = runner.invoke(app, ["publish", "--date", "2026-10-09"])
+    assert result.exit_code == 1 and Err.STORIES_MISSING.format(day="2026-10-09") in result.output
+    assert notified == [(Notify.PUBLISH_FAILED, Notify.PUBLISH_ERROR_BODY.format(day="2026-10-09", error=Err.STORIES_MISSING.format(day="2026-10-09")))]
+
+
+def test_publish_sends_each_story_once(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch)
+    fs = _drafts(project, "Exportar horas", "Validar filtros")
+
+    first = runner.invoke(app, ["publish", "--date", "2026-10-09"])
+
+    assert first.exit_code == 0, first.output
+    assert _published("Exportar horas", "TASK-1") in first.output and _published("Validar filtros", "TASK-2") in first.output
+    assert [s.publication("backlog-md").ref for s in fs.load_story_drafts(DAY).stories] == ["TASK-1", "TASK-2"]
+
+    again = runner.invoke(app, ["publish", "--date", "2026-10-09"])
+
+    assert again.exit_code == 0 and Cli.ALREADY_PUBLISHED.format(count=2) in again.output
+    assert _backlog_calls(tmp_path) == 2
+
+
+def test_publish_only_selected_stories(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch)
+    _drafts(project, "Um", "Dois")
+    result = runner.invoke(app, ["publish", "--date", "2026-10-09", "--only", "2"])
+    assert result.exit_code == 0 and _published("Dois", "TASK-1") in result.output and _backlog_calls(tmp_path) == 1
+    bad = runner.invoke(app, ["publish", "--date", "2026-10-09", "--only", "x"])
+    assert bad.exit_code == 1 and Cli.INVALID_ONLY.format(value="x") in bad.output
+
+
+def test_publish_failure_exits_1(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch)
+    _drafts(project, "Um")
+    monkeypatch.setenv("FAKE_BACKLOG_MODE", "fail")
+    result = runner.invoke(app, ["publish", "--date", "2026-10-09"])
+    assert result.exit_code == 1
+    assert Cli.PUBLISH_FAILURE_LINE.format(title="Um", destination="backlog-md", error="").rstrip() in result.output
+
+
+def _plan_with_one_story(monkeypatch):
+    monkeypatch.setattr(ClaudePlanner, "plan", lambda self, day, analyses, previous, open_actions: DailyPlan(
+        day, "# plano\n", new_actions=[Action("Exportar horas", "usuário", "m1", id="a1")]))
+    monkeypatch.setattr(ClaudeStoryWriter, "draft", lambda self, day, actions, analyses, existing: StoryDrafts(
+        day, [UserStory("Exportar horas", "Como gestor, quero isso", source_action_ids=[a.id for a in actions])]))
+
+
+def test_plan_drafts_and_publishes(tmp_path: Path, monkeypatch):
+    _board_project(tmp_path, monkeypatch, publish=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    _plan_with_one_story(monkeypatch)
+
+    result = runner.invoke(app, ["plan", "--date", "2026-10-09", "--purge"])
+
+    assert result.exit_code == 0, result.output
+    assert _published("Exportar horas", "TASK-1") in result.output
+    assert Cli.PURGED_RETENTION.format(count=0) in result.output
+
+
+def test_plan_keeps_the_plan_and_purges_when_publishing_fails(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch, publish=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("FAKE_BACKLOG_MODE", "fail")
+    _plan_with_one_story(monkeypatch)
+
+    result = runner.invoke(app, ["plan", "--date", "2026-10-09", "--purge"])
+
+    assert result.exit_code == 1
+    assert Cli.PURGED_RETENTION.format(count=0) in result.output                  # the purge still ran
+    assert (project / "data" / "plans" / "2026-10-09.md").exists()
+    assert FsMeetingRepository(project / "data").load_story_drafts(DAY).stories[0].publications == []
+
+
+def test_stories_publish_right_after_drafting(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch, publish=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    _plan_with_one_story(monkeypatch)
+    _drafts(project)   # the plan with one new action; no stories yet
+
+    result = runner.invoke(app, ["stories", "--date", "2026-10-09"])
+
+    assert result.exit_code == 0, result.output
+    assert _published("Exportar horas", "TASK-1") in result.output
+
+
+def test_plan_on_an_empty_day_publishes_nothing(tmp_path: Path, monkeypatch):
+    _board_project(tmp_path, monkeypatch, publish=True)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
+    assert result.exit_code == 0, result.output
+    assert Cli.NOTHING_TO_PUBLISH in result.output and _backlog_calls(tmp_path) == 0
+
+
+def test_doctor_lists_the_destination_and_its_problems(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch, publish=True, board=BOARD_CONFIG.replace('"Triagem", ', ""))
+    result = runner.invoke(app, ["doctor"])
+    line = Cli.DESTINATION_LINE.format(mark=Cli.MISSING_MARK, destination="backlog-md", state=Cli.DESTINATION_NOT_READY)
+    problem = Err.BACKLOG_STATUS_MISSING.format(status="Triagem", config=project.resolve() / "backlog" / "config.yml")
+    assert line in result.output and Cli.DESTINATION_PROBLEM.format(problem=problem) in result.output
+
+
+def test_status_counts_the_stories_waiting_in_the_window(tmp_path: Path, monkeypatch):
+    project = _board_project(tmp_path, monkeypatch, dedup_days=2)
+    monkeypatch.setattr("teams_recorder.adapters.outbound.clock.SystemClock.now", lambda self: datetime(2026, 10, 10, 9, 0))
+    fs = _drafts(project, "Hoje", day=date(2026, 10, 10))
+    _drafts(project, "Ontem", day=date(2026, 10, 9))
+    _drafts(project, "Fora da janela", day=date(2026, 10, 8))
+    published = UserStory("Publicada", "n", publications=[Publication("backlog-md", "TASK-9", datetime(2026, 10, 10, 8, 0))])
+    fs.save_story_drafts(StoryDrafts(date(2026, 10, 10), [*fs.load_story_drafts(date(2026, 10, 10)).stories, published]), "#\n")
+
+    result = runner.invoke(app, ["status"])
+
+    assert Cli.STORIES_WAITING.format(count=2) in result.output        # today and yesterday, not the published one
