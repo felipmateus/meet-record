@@ -16,6 +16,7 @@ Make destinations a configuration switch: parse `[stories] publish`, `destinatio
 - `StoryDestination(StrEnum)` with `BACKLOG_MD = "backlog-md"`; `Bin.BACKLOG`; `Stories.PUBLISH`, `DEDUP_DAYS`, `BACKLOG_STATUS`, `BACKLOG_LABELS` — techspec §6.
 - `Settings`: `stories_publish`, `story_destinations`, `story_dedup_days`, `backlog_project_dir` (relative to the project, `~` expanded, `"."` = the project), `backlog_status`, `backlog_labels`. Unknown destination → `ValueError(Err.INVALID_DESTINATION)`.
 - Without the new keys nothing is published (defaults keep today's behavior).
+- Publishers expose `destination` as their `StoryDestination` (a `StrEnum`, so it satisfies the port's `str` property and is stored as its value in each `Publication`).
 - `_PUBLISHERS` registry, `build_story_publishers(settings)` in configured order, `Container.story_publishers`, `Container.publish_user_stories()`, and `dedup_days` from settings in `draft_user_stories()` — techspec §7.
 - `config.toml` documents the new keys with publishing still off (`publish = false`); it is switched on in 7.0 after validation.
 </requirements>

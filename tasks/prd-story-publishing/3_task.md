@@ -22,11 +22,12 @@ Introduce the `StoryPublisher` port and the `PublishUserStories` use case: send 
 
 ## Subtasks
 
-- [ ] 3.1 Declare `StoryPublisher` in `application/ports.py`.
-- [ ] 3.2 Implement `PublishReport` and `PublishUserStories` in `application/use_cases/planning.py`; export it.
-- [ ] 3.3 Add the strings to `messages.py`.
-- [ ] 3.4 Add `FakeStoryPublisher` to `tests/fakes` (records calls, returns refs, can fail per story or always).
-- [ ] 3.5 Write the unit and integration tests below.
+- [x] 3.1 Declare `StoryPublisher` in `application/ports.py`.
+- [x] 3.2 Implement `PublishReport` and `PublishUserStories` in `application/use_cases/planning.py`; export it.
+- [x] 3.3 Add the strings to `messages.py`.
+- [x] 3.4 Add `FakeStoryPublisher` to `tests/fakes` (records calls, returns refs, can fail per story or always).
+- [x] 3.5 Write the unit and integration tests below.
+- [x] 3.6 Show each publication under its story in the drafts document (`StoryDoc.PUBLISHED`, techspec §5.3), so the re-rendered document records where the story went.
 
 ## Implementation details
 
@@ -42,8 +43,8 @@ See techspec §2 (why fan-out lives in the use case), §4.1 and §4.2.
 
 ## Task tests
 
-- [ ] Unit tests — `tests/unit/test_planning_use_cases.py`: all of the success criteria above with `InMemoryMeetingRepository`, `FakeStoryPublisher`, `FakeStoryRenderer` and `FakeClock`; no drafts → `RepositoryError`; notification titles and counts for success and failure.
-- [ ] Integration tests — `tests/integration/test_repository_fs.py` (or a new `test_publish_flow.py`): with `FsMeetingRepository` and `MarkdownStoryRenderer`, a publisher that fails on the second story leaves a `.stories.json` with the first publication and a `.stories.md` that shows it; reloading and rerunning publishes only the rest.
+- [x] Unit tests — `tests/unit/test_planning_use_cases.py`: all of the success criteria above with `InMemoryMeetingRepository`, `FakeStoryPublisher`, `FakeStoryRenderer` and `FakeClock`; no drafts → `RepositoryError`; notification titles and counts for success and failure.
+- [x] Integration tests — `tests/integration/test_publish_flow.py`: with `FsMeetingRepository` and `MarkdownStoryRenderer`, a publisher that fails on the second story leaves a `.stories.json` with the first publication and a `.stories.md` that shows it; reloading and rerunning publishes only the rest.
 - [ ] E2E tests — not applicable (covered in 7.0).
 
 ## Relevant files

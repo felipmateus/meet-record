@@ -64,13 +64,13 @@ class StoryRenderer(Protocol):
 
 `execute(day, only: list[int] | None = None) -> PublishReport`
 
-1. Load the day's drafts; none → `RepositoryError(Err.STORIES_MISSING)`.
-2. Select the stories: all, or the 1-based numbers in `only` (the numbers of the drafts document); an out-of-range number → error before publishing anything.
+1. Load the day's drafts; none → `RepositoryError(Err.STORIES_MISSING)`. Load the day's plan; none → `RepositoryError(Err.PLAN_MISSING)` (its new actions are needed to re-render the document faithfully).
+2. Select the stories: all when `only` is None, or the 1-based numbers in `only` (the numbers of the drafts document; an empty list selects nothing); an out-of-range number → `PublishError(Err.INVALID_STORY_NUMBER)` before publishing anything.
 3. For each selected story, for each publisher: skip when `story.publication(destination)` exists; otherwise call `publish`, append a `Publication(destination, ref, clock.now())` and **save the drafts (JSON and re-rendered Markdown) immediately**, so an interrupted run never loses a ref (FR3, reliability). The re-render gets the plan's new actions and `recent_stories(repo, day, dedup_days)`, like the first render, so duplicate lines keep the covering story's title.
 4. A `PublishError` (or any `TeamsRecorderError`) is collected in the report and the loop goes on (FR4).
 5. Notify once: published count, or the failure count.
 
-`PublishReport`: `published: list[(story, destination, ref)]`, `already: int`, `failures: list[(story, destination, error)]`.
+`PublishReport`: `published: list[PublishedStory]` (story, publication), `already_published: int`, `failures: list[PublishFailure]` (story, destination, error text). The port exposes `destination` as a read-only property (AGENTS.md: ports declare methods).
 
 ### 4.3 `DraftUserStories` changes
 
@@ -165,7 +165,9 @@ Run once against a throwaway project (`backlog init --no-git` in a temporary fol
 | Destination not ready (binary, project, status) | `PublishError` per story with the fix; other destinations go on; doctor shows the same problems |
 | CLI failure / timeout / id not found | `PublishError` with the output tail; recorded in the report |
 | Interrupted run | refs saved per story; rerun publishes only what is missing |
-| Any failure | one notification `Notify.PUBLISH_FAILED` with counts; success: `Notify.STORIES_PUBLISHED` |
+| Any failure | one notification `Notify.PUBLISH_FAILED` with counts; success: `Notify.STORIES_PUBLISHED`; nothing new: no notification |
+| Saving the drafts fails right after a destination accepted a story | the error propagates; that story may be sent again on the next run (rare; the duplicate is archived on the board) |
+| A publisher raises something other than a `TeamsRecorderError` | it propagates (no report, no notification); adapters must map every failure to `PublishError` |
 
 ## 11. Security and privacy
 
