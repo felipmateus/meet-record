@@ -9,6 +9,8 @@ from .errors import (
 )
 from .models import (
     Action,
+    ActionKind,
+    ActionRoute,
     ActionStatus,
     Analysis,
     DailyPlan,
@@ -27,14 +29,17 @@ from .models import (
     earliest_due,
     meeting_id_for,
     merge_open_actions,
+    route_of,
+    story_kind,
     strongest_priority,
+    task_card,
 )
 from .status import MeetingStatus, derive_status, next_step
 
 __all__ = [
-    "Action", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
+    "Action", "ActionKind", "ActionRoute", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
     "Segment", "Transcript", "meeting_id_for", "merge_open_actions",
-    "Publication", "SkippedAction", "StoryDrafts", "UserStory", "earliest_due", "strongest_priority",
+    "Publication", "SkippedAction", "StoryDrafts", "UserStory", "earliest_due", "route_of", "story_kind", "strongest_priority", "task_card",
     "MeetingStatus", "derive_status", "next_step",
     "AnalysisError", "CaptureError", "MeetingNotFound", "PublishError", "RepositoryError",
     "TeamsRecorderError", "TranscriptionError",
