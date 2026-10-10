@@ -72,6 +72,7 @@ class Bin:
     SCHTASKS = "schtasks"
     DOTNET = "dotnet"
     BACKLOG = "backlog"           # Backlog.md CLI (npm i -g backlog.md / brew install backlog-md)
+    GIT = "git"
 
 
 # --- files and folders -------------------------------------------------------
@@ -200,6 +201,9 @@ class Parse:
         'display dialog "{body}" with title "{title}" buttons {{"{discard}", "{keep}"}} '
         'default button "{keep}" giving up after {timeout} with icon note'
     )
+    BACKLOG_TASK_ID = r"^Task (\S+) - "            # `backlog task create --plain`: "Task TASK-7 - <title>"
+    BACKLOG_STATUS = r"^statuses:.*[\[,]\s*[\"']?{status}[\"']?\s*[,\]]"   # status: re.escape'd column name
+    BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
     DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
     DIALOG_GAVE_UP = "gave up:true"
 
@@ -289,6 +293,25 @@ class Logging:
 class Planner:
     DEFAULT_HOUR = 18
     RETENTION_DAYS = 30
+
+
+class BacklogMd:
+    """The Backlog.md CLI and project layout (checked against Backlog.md 1.53.0, techspec §9)."""
+
+    TASKS_DIR = "backlog"
+    ROOT_CONFIG = "backlog.config.yml"     # a config at the project root; the tasks still live in ./backlog
+    CONFIG_FILES = (Path(TASKS_DIR) / "config.yml", Path(".backlog") / "config.yml", Path(ROOT_CONFIG))
+    CREATE = ("task", "create")
+    DESC, STATUS, LABEL, PRIORITY, AC, PLAIN = "--desc", "-s", "-l", "--priority", "--ac", "--plain"
+    END_OF_OPTIONS = "--"                  # the title goes after it, so a title starting with "-" is not a flag
+    LABEL_SEPARATOR = ","                  # the CLI splits -l values at commas
+    SHIM_SUFFIXES = (".cmd", ".bat")       # Windows shims run under cmd.exe, which cuts multi-line arguments
+    GIT_MARKER = ".git"                    # a folder (or file, in worktrees) that marks a Git work tree
+    GIT_DIR = "-C"
+    GIT_CHECK_IGNORE = ("check-ignore", "-q")
+    GIT_IGNORED, GIT_NOT_IGNORED = 0, 1    # `git check-ignore -q` exit codes; anything else is an error
+    TIMEOUT = 60.0
+    TAIL_LINES = 3
 
 
 class Stories:
