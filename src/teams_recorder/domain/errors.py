@@ -18,7 +18,7 @@ class AnalysisError(TeamsRecorderError):
 
 
 class PublishError(TeamsRecorderError):
-    """A destination (a board) could not take a story."""
+    """Publishing failed: a destination (a board) could not take a story, or the selection was invalid."""
 
 
 class RepositoryError(TeamsRecorderError):
