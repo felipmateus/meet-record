@@ -31,7 +31,7 @@ First confirm, against the real `backlog` CLI in a throwaway folder, the points 
 - [ ] 5.3 With the user's approval, run the one-time setup at the project root and check `git status`.
 - [ ] 5.4 Implement `adapters/outbound/publisher_backlogmd.py` (command, body, priority, ref parsing, error mapping).
 - [ ] 5.5 Implement `problems()` and the publish guard (git-ignore, config checks).
-- [ ] 5.6 Add the constants and messages; register the builder in `container.py`.
+- [ ] 5.6 Add the constants and messages; register the builder in `container.py`, with a test that every `StoryDestination` has a builder; in `config.toml`, name `backlog-md` as the available destination and say that `./backlog` is git-ignored (both true only from this task on).
 - [ ] 5.7 Add the scripted stand-in `tests/fixtures/fake_backlog_cli.py` (records arguments and cwd, prints a task id in the spike's format, can fail on demand).
 - [ ] 5.8 Write the unit, integration and opt-in real tests below.
 

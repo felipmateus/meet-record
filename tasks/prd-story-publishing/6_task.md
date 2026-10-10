@@ -14,8 +14,8 @@ Expose publishing to the user: a `trec publish` command, automatic publishing ri
 
 <requirements>
 - `trec publish [--date YYYY-MM-DD] [--only 1,3]` per techspec §8: one line per published story (`title → destination ref`), already-published and failure lines, exit 1 on any failure; no LLM prerequisites; invalid `--only` → clear error.
-- After a successful draft, publish when `stories_publish` is true; a publishing failure exits 1 after the purge and never undoes the plan or the drafts.
-- `trec doctor`: one line per configured destination with `problems()`; affects the exit code only when `stories_publish` is true.
+- After a successful draft, publish when `story_auto_publish` is true; a publishing failure exits 1 after the purge and never undoes the plan or the drafts.
+- `trec doctor`: one line per configured destination with `problems()`; affects the exit code only when `story_auto_publish` is true.
 - `trec status`: "Stories waiting to be published: N" over the last `dedup_days` days, when publishing is configured.
 - All strings in `messages.py`; help texts without square brackets (Typer's rich markup).
 </requirements>
@@ -26,7 +26,7 @@ Expose publishing to the user: a `trec publish` command, automatic publishing ri
 - [ ] 6.2 Chain publishing after drafting in the shared helper used by `plan` and `stories`; keep the exit-code rules.
 - [ ] 6.3 Add the destination lines to `doctor`.
 - [ ] 6.4 Add the waiting-stories line to `status`.
-- [ ] 6.5 Add the CLI strings.
+- [ ] 6.5 Add the CLI strings; mention `trec publish` in the `config.toml` comment of `[stories] publish` and in `Stories.PUBLISH`.
 - [ ] 6.6 Write the unit and integration tests below.
 
 ## Implementation details

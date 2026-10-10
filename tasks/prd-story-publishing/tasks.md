@@ -8,7 +8,7 @@
 - [x] 1.0 Publication state and story persistence
 - [x] 2.0 Duplicate check across days and the redraft lock
 - [x] 3.0 Publisher port and the publish use case
-- [ ] 4.0 Destinations switch: configuration and registry
+- [x] 4.0 Destinations switch: configuration and registry
 - [ ] 5.0 Backlog.md spike, in-repository setup and the Backlog.md publisher
 - [ ] 6.0 CLI: `trec publish`, publishing after drafts, `doctor` and `status`
 - [ ] 7.0 Real-data validation and documentation

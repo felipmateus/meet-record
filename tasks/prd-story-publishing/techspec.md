@@ -128,7 +128,7 @@ labels = ["teams-recorder"]
 **One-time setup** (documented in the README, checked by `trec doctor`): add the entries to `.gitignore`; run `backlog init --no-git` at the project root without agent instructions (so Backlog.md does not edit `AGENTS.md` / `CLAUDE.md`; exact flag confirmed in the spike); add `Triagem` to `statuses` in the generated config. No-git mode keeps `autoCommit`, `remoteOperations` and `checkActiveBranches` off, which matters inside this Git repository.
 
 - `constants.StoryDestination(StrEnum)`: `BACKLOG_MD = "backlog-md"`. `Bin.BACKLOG = "backlog"`. `Stories.PUBLISH = False`, `Stories.DEDUP_DAYS = 30`, `Stories.BACKLOG_STATUS = "Triagem"`, `Stories.BACKLOG_LABELS`.
-- `Settings`: `stories_publish`, `story_destinations: tuple[StoryDestination, …]`, `story_dedup_days`, `backlog_project_dir: Path | None` (relative to the project dir, `~` expanded, like `story_guide`), `backlog_status`, `backlog_labels`. An unknown destination → `ValueError(Err.INVALID_DESTINATION)` through `_parse_enum`.
+- `Settings`: `story_auto_publish`, `story_destinations: tuple[StoryDestination, …]`, `story_dedup_days`, `backlog_project_dir: Path | None` (relative to the project dir, `~` expanded, like `story_guide`), `backlog_status`, `backlog_labels`. An unknown destination → `ValueError(Err.INVALID_DESTINATION)` through `_parse_enum`.
 - Defaults keep current behavior: without the new keys nothing is published.
 
 ## 7. Composition root (`container.py`)
@@ -139,8 +139,8 @@ labels = ["teams-recorder"]
 ## 8. CLI (`adapters/inbound/cli.py`)
 
 - `trec publish [--date YYYY-MM-DD] [--only 1,3]`: prints one line per published story (`title → destination ref`), skipped ones as "already published", failures; exit 1 on any failure. No LLM prerequisites needed.
-- `trec stories` and `trec plan`: after a successful draft, publish when `stories_publish`; a publishing failure exits 1 after the purge (same pattern as drafting failures) and never undoes the plan or the drafts.
-- `trec doctor`: one line per configured destination with `problems()` (ok, or each problem); counts in the exit code only when `stories_publish` is true.
+- `trec stories` and `trec plan`: after a successful draft, publish when `story_auto_publish`; a publishing failure exits 1 after the purge (same pattern as drafting failures) and never undoes the plan or the drafts.
+- `trec doctor`: one line per configured destination with `problems()` (ok, or each problem); counts in the exit code only when `story_auto_publish` is true.
 - `trec status`: "Stories waiting to be published: N" over the last `dedup_days` days, when publishing is configured.
 - All new strings in `messages.Cli`, `Notify`, `Err`, `StoryDoc`. Help texts avoid square brackets (Typer's rich markup swallows `[...]`).
 
