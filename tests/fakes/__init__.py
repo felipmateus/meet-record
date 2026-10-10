@@ -16,6 +16,7 @@ from teams_recorder.domain import (
     Decision,
     Meeting,
     MeetingNotFound,
+    PublishError,
     RepositoryError,
     Segment,
     SkippedAction,
@@ -316,6 +317,25 @@ class FakeStoryWriter:
                    for a in actions if not a.description.startswith("Email")]
         skipped = [SkippedAction(a.id, "not product work") for a in actions if a.description.startswith("Email")]
         return StoryDrafts(day=day, stories=stories, skipped=skipped)
+
+
+class FakeStoryPublisher:
+    """Publishes to memory; fails for the story titles in `fail_on`, or for every story with `fail_all`."""
+
+    def __init__(self, destination: str = "fake-board", fail_on: set[str] | None = None, fail_all: bool = False) -> None:
+        self.destination = destination
+        self.fail_on = fail_on or set()
+        self.fail_all = fail_all
+        self.calls: list[tuple[UserStory, date]] = []
+
+    def publish(self, story: UserStory, day: date) -> str:
+        self.calls.append((story, day))
+        if self.fail_all or story.title in self.fail_on:
+            raise PublishError(f"{self.destination} refused {story.title}")
+        return f"{self.destination}-{len(self.calls)}"
+
+    def problems(self) -> list[str]:
+        return ["not ready"] if self.fail_all else []
 
 
 class FakeStoryRenderer:

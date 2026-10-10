@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from teams_recorder.application.use_cases import BuildDailyPlan, DraftUserStories, PurgeOldAudio
+from teams_recorder.application.use_cases import BuildDailyPlan, DraftUserStories, PublishUserStories, PurgeOldAudio
 from teams_recorder.domain import (
     Action,
     ActionStatus,
@@ -12,13 +12,14 @@ from teams_recorder.domain import (
     DailyPlan,
     Meeting,
     Publication,
+    PublishError,
     RepositoryError,
     StoryDrafts,
     UserStory,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
-from teams_recorder.messages import Err
-from tests.fakes import FakeAnalyzer, FakePlanner, FakeStoryRenderer, FakeStoryWriter, FakeTranscriber
+from teams_recorder.messages import Err, Notify
+from tests.fakes import FakeAnalyzer, FakePlanner, FakeStoryPublisher, FakeStoryRenderer, FakeStoryWriter, FakeTranscriber
 
 
 def _analyzed(repo, clock, title):
@@ -167,3 +168,97 @@ def test_unpublished_drafts_can_be_drafted_again(repo, notifier, clock):
 
     assert [s.title for s in drafts.stories] == ["Story for Export hours"]
     assert writer.calls[0][3] == []      # the day's own earlier drafts are not "existing" stories
+
+
+def _publish_setup(repo, clock, titles=("One", "Two", "Three")):
+    day = clock.now().date()
+    stories = [UserStory(t, "n", id=f"s{i}") for i, t in enumerate(titles, 1)]
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Export hours", "me", "m0", id="f1")]))
+    repo.save_story_drafts(StoryDrafts(day, stories), "# drafts")
+    return day, stories
+
+
+def test_publish_sends_every_story_to_every_destination_once(repo, notifier, clock):
+    day, stories = _publish_setup(repo, clock)
+    board, other = FakeStoryPublisher("board"), FakeStoryPublisher("other")
+    uc = PublishUserStories(repo, [board, other], FakeStoryRenderer(), notifier, clock)
+
+    report = uc.execute(day)
+
+    assert len(report.published) == 6 and report.already_published == 0 and not report.failures
+    saved = repo.load_story_drafts(day)
+    assert [p.destination for p in saved.stories[0].publications] == ["board", "other"]
+    assert saved.stories[0].publication("board").published_at == clock.now()
+    assert notifier.messages[-1] == (Notify.STORIES_PUBLISHED, Notify.STORIES_PUBLISHED_BODY.format(count=6))
+
+    again = uc.execute(day)
+
+    assert again.published == [] and again.already_published == 6 and len(board.calls) == 3   # nothing sent twice
+    assert len(notifier.messages) == 1                                                # nothing new: no notification
+
+
+def test_publish_failure_does_not_stop_other_destinations(repo, notifier, clock):
+    day, _ = _publish_setup(repo, clock)
+    board, broken = FakeStoryPublisher("board"), FakeStoryPublisher("broken", fail_all=True)
+
+    report = PublishUserStories(repo, [broken, board], FakeStoryRenderer(), notifier, clock).execute(day)
+
+    assert len(report.published) == 3 and len(report.failures) == 3
+    assert report.failures[0].destination == "broken" and "refused One" in report.failures[0].error
+    assert report.published[0].publication.ref == "board-1"
+    assert notifier.messages[-1] == (Notify.PUBLISH_FAILED, Notify.PUBLISH_FAILED_BODY.format(failed=3, published=3))
+
+
+def test_publish_saves_each_success_before_the_next_story(repo, notifier, clock):
+    day, _ = _publish_setup(repo, clock)
+    renderer = FakeStoryRenderer()
+
+    report = PublishUserStories(repo, [FakeStoryPublisher("board", fail_on={"Two"})], renderer, notifier, clock).execute(day)
+
+    saved = repo.load_story_drafts(day)
+    assert [bool(s.publications) for s in saved.stories] == [True, False, True]
+    assert len(renderer.calls) == 2                                   # one save per success
+    _, actions, _ = renderer.calls[0]
+    assert [a.id for a in actions] == ["f1"]                          # re-rendered with the plan's actions
+    assert [o.story.title for o in report.failures] == ["Two"]
+
+
+def test_publish_only_selected_numbers_and_validates_them_first(repo, notifier, clock):
+    day, _ = _publish_setup(repo, clock)
+    board = FakeStoryPublisher("board")
+    uc = PublishUserStories(repo, [board], FakeStoryRenderer(), notifier, clock)
+
+    with pytest.raises(PublishError, match=re.escape(Err.INVALID_STORY_NUMBER.format(number=9, day=day.isoformat(), count=3))):
+        uc.execute(day, only=[2, 9])
+    assert not board.calls                                             # nothing published before the error
+
+    report = uc.execute(day, only=[2, 2])
+
+    assert [o.story.title for o in report.published] == ["Two"]
+    assert uc.execute(day, only=[]).published == []                     # an empty selection publishes nothing
+
+
+def test_publish_needs_drafts(repo, notifier, clock):
+    day = clock.now().date()
+    with pytest.raises(RepositoryError, match=re.escape(Err.STORIES_MISSING.format(day=day.isoformat()))):
+        PublishUserStories(repo, [FakeStoryPublisher()], FakeStoryRenderer(), notifier, clock).execute(day)
+
+
+def test_publish_rerenders_with_recent_stories(repo, notifier, clock):
+    day, _ = _publish_setup(repo, clock, titles=("One",))
+    earlier = UserStory("Earlier", "n", id="e1")
+    repo.save_story_drafts(StoryDrafts(day - timedelta(days=3), [earlier]), "#")
+    renderer = FakeStoryRenderer()
+
+    PublishUserStories(repo, [FakeStoryPublisher()], renderer, notifier, clock, dedup_days=30).execute(day)
+
+    assert renderer.calls[0][2] == [earlier]
+
+
+def test_publish_needs_the_plan_to_rerender_the_document(repo, notifier, clock):
+    day = clock.now().date()
+    repo.save_story_drafts(StoryDrafts(day, [UserStory("One", "n")]), "# drafts")
+    board = FakeStoryPublisher()
+    with pytest.raises(RepositoryError, match=re.escape(Err.PLAN_MISSING.format(day=day.isoformat()))):
+        PublishUserStories(repo, [board], FakeStoryRenderer(), notifier, clock).execute(day)
+    assert not board.calls and repo.story_drafts[day][1] == "# drafts"

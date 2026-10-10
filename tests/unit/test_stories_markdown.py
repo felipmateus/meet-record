@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
-from teams_recorder.domain import Action, Priority, SkippedAction, StoryDrafts, UserStory
+from teams_recorder.domain import Action, Priority, Publication, SkippedAction, StoryDrafts, UserStory
 from teams_recorder.messages import StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -45,3 +45,9 @@ def test_duplicates_name_the_covering_story():
     md = MarkdownStoryRenderer().render(drafts, actions, [UserStory("Exportar horas por projeto", "n", id="s-old")])
     assert "- `a1` Exportar horas de novo — já coberta" + StoryDoc.DUPLICATE_OF.format(title="Exportar horas por projeto") in md
     assert "- `a2` Outra — já coberta" + StoryDoc.DUPLICATE_OF.format(title="s-gone") in md   # unknown story: its id
+
+
+def test_publications_are_listed_under_the_story():
+    story = UserStory("Exportar horas", "n", publications=[Publication("backlog-md", "TASK-7", datetime(2026, 10, 9, 18, 5))])
+    md = MarkdownStoryRenderer().render(StoryDrafts(DAY, [story]), [Action("a", "usuário", "m", id="a1")], [])
+    assert "## 1. Exportar horas\n" + StoryDoc.PUBLISHED.format(destination="backlog-md", ref="TASK-7") in md
