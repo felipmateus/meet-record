@@ -141,7 +141,7 @@ labels = ["teams-recorder"]
 - `trec publish [--date YYYY-MM-DD] [--only 1,3]`: prints one line per published story (`title → destination ref`), skipped ones as "already published", failures; exit 1 on any failure. No LLM prerequisites needed.
 - `trec stories` and `trec plan`: after a successful draft, publish when `story_auto_publish`; a publishing failure exits 1 after the purge (same pattern as drafting failures) and never undoes the plan or the drafts.
 - `trec doctor`: one line per configured destination with `problems()` (ok, or each problem); counts in the exit code only when `story_auto_publish` is true.
-- `trec status`: "Stories waiting to be published: N" over the last `dedup_days` days, when publishing is configured.
+- `trec status`: "Stories waiting to be published: N" over the last `dedup_days` days (today included), when destinations are configured.
 - All new strings in `messages.Cli`, `Notify`, `Err`, `StoryDoc`. Help texts avoid square brackets (Typer's rich markup swallows `[...]`).
 
 ## 9. Spike before the adapter (risks to confirm with the real CLI)
@@ -176,7 +176,7 @@ Run once against a throwaway project (`backlog init --no-git` in a temporary fol
 | Destination not ready (binary, project, status) | `PublishError` per story with the fix; other destinations go on; doctor shows the same problems |
 | CLI failure / timeout / id not found | `PublishError` with the output tail; recorded in the report |
 | Interrupted run | refs saved per story; rerun publishes only what is missing |
-| Any failure | one notification `Notify.PUBLISH_FAILED` with counts; success: `Notify.STORIES_PUBLISHED`; nothing new: no notification |
+| Any failure | one notification `Notify.PUBLISH_FAILED`: with counts when stories failed (the use case), with the error when publishing stopped before or between stories (the CLI); success: `Notify.STORIES_PUBLISHED`; nothing new: no notification |
 | Saving the drafts fails right after a destination accepted a story | the error propagates; that story may be sent again on the next run (rare; the duplicate is archived on the board) |
 | A publisher raises something other than a `TeamsRecorderError` | it propagates (no report, no notification); adapters must map every failure to `PublishError` |
 

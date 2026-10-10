@@ -10,7 +10,7 @@
 - [x] 3.0 Publisher port and the publish use case
 - [x] 4.0 Destinations switch: configuration and registry
 - [x] 5.0 Backlog.md spike, in-repository setup and the Backlog.md publisher
-- [ ] 6.0 CLI: `trec publish`, publishing after drafts, `doctor` and `status`
+- [x] 6.0 CLI: `trec publish`, publishing after drafts, `doctor` and `status`
 - [ ] 7.0 Real-data validation and documentation
 
 ## Dependencies

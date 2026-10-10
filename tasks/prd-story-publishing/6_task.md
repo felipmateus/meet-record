@@ -22,12 +22,12 @@ Expose publishing to the user: a `trec publish` command, automatic publishing ri
 
 ## Subtasks
 
-- [ ] 6.1 Add the `publish` command and the `--only` parser.
-- [ ] 6.2 Chain publishing after drafting in the shared helper used by `plan` and `stories`; keep the exit-code rules.
-- [ ] 6.3 Add the destination lines to `doctor`.
-- [ ] 6.4 Add the waiting-stories line to `status`.
-- [ ] 6.5 Add the CLI strings; mention `trec publish` in the `config.toml` comment of `[stories] publish` and in `Stories.PUBLISH`.
-- [ ] 6.6 Write the unit and integration tests below.
+- [x] 6.1 Add the `publish` command and the `--only` parser.
+- [x] 6.2 Chain publishing after drafting in the shared helper used by `plan` and `stories`; keep the exit-code rules.
+- [x] 6.3 Add the destination lines to `doctor`.
+- [x] 6.4 Add the waiting-stories line to `status`.
+- [x] 6.5 Add the CLI strings; mention `trec publish` in the `config.toml` comment of `[stories] publish` and in `Stories.PUBLISH`.
+- [x] 6.6 Write the unit and integration tests below.
 
 ## Implementation details
 
@@ -42,8 +42,8 @@ See techspec §8 and §10. Reuse the existing `_draft_stories` and `_day` helper
 
 ## Task tests
 
-- [ ] Unit tests — `--only` parser (valid list, spaces, duplicates, non-numbers, zero) in `tests/unit/test_cli_helpers.py` or alongside the CLI helpers.
-- [ ] Integration tests — `tests/integration/test_cli.py`: publish without drafts; publish with drafts and `fake_backlog_cli.py` on `PATH`; rerun idempotency; `--only`; failure exit code; `plan` on an empty day with publishing on (no publisher call, exit 0); `stories` → publish chain; `doctor` destination lines and exit code with publishing on and off; `status` waiting count.
+- [x] Unit tests — `--only` parser (valid list, spaces, duplicates, non-numbers, zero) in `tests/unit/test_cli_helpers.py`.
+- [x] Integration tests — `tests/integration/test_cli.py`: publish without drafts; publish with drafts and `fake_backlog_cli.py` on `PATH`; rerun idempotency; `--only`; failure exit code; `plan` on an empty day with publishing on (no publisher call, exit 0); `stories` → publish chain; `doctor` destination lines and exit code with publishing on and off; `status` waiting count.
 - [ ] E2E tests — covered in 7.0.
 
 ## Relevant files
