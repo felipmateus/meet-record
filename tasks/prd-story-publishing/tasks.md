@@ -5,7 +5,7 @@
 
 ## Tasks
 
-- [ ] 1.0 Publication state and story persistence
+- [x] 1.0 Publication state and story persistence
 - [ ] 2.0 Duplicate check across days and the redraft lock
 - [ ] 3.0 Publisher port and the publish use case
 - [ ] 4.0 Destinations switch: configuration and registry

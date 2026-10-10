@@ -22,12 +22,12 @@ Give the domain a way to record where a story was published and which existing s
 
 ## Subtasks
 
-- [ ] 1.1 Add `Publication`, `UserStory.publications` / `publication()`, `StoryDrafts.has_publications` and `SkippedAction.duplicate_of`; export them from `domain/__init__.py`.
-- [ ] 1.2 Add `PublishError` to `domain/errors.py`.
-- [ ] 1.3 Extend `codec` (story and drafts encoders/decoders) with the new fields and defaults for old JSON.
-- [ ] 1.4 Add `Files.STORIES_GLOB`, the port method `recent_story_drafts` and its `FsMeetingRepository` implementation.
-- [ ] 1.5 Implement `recent_story_drafts` in `InMemoryMeetingRepository` (tests/fakes).
-- [ ] 1.6 Write the unit and integration tests below.
+- [x] 1.1 Add `Publication`, `UserStory.publications` / `publication()`, `StoryDrafts.has_publications` and `SkippedAction.duplicate_of`; export them from `domain/__init__.py`.
+- [x] 1.2 Add `PublishError` to `domain/errors.py`.
+- [x] 1.3 Extend `codec` (story and drafts encoders/decoders) with the new fields and defaults for old JSON.
+- [x] 1.4 Add `Files.STORIES_GLOB`, the port method `recent_story_drafts` and its `FsMeetingRepository` implementation.
+- [x] 1.5 Implement `recent_story_drafts` in `InMemoryMeetingRepository` (tests/fakes).
+- [x] 1.6 Write the unit and integration tests below.
 
 ## Implementation details
 
@@ -42,9 +42,9 @@ See techspec §3 (domain), §4.1 (repository port) and §5.3 (codec, repository)
 
 ## Task tests
 
-- [ ] Unit tests — `tests/unit/test_models.py`: `publication()` finds by destination and returns None otherwise; `has_publications` false for empty and unpublished drafts, true with one publication.
-- [ ] Integration tests — `tests/integration/test_repository_fs.py`: round trip with publications and `duplicate_of`; legacy JSON without the new keys; `recent_story_drafts` window boundaries (day before, first day, day outside, the `before` day itself); `latest_plan_before` unaffected by `.stories.json` files.
-- [ ] E2E tests — not applicable.
+- [x] Unit tests — `tests/unit/test_models.py`: `publication()` finds by destination and returns None otherwise; `has_publications` false for empty and unpublished drafts, true with one publication.
+- [x] Integration tests — `tests/integration/test_repository_fs.py`: round trip with publications and `duplicate_of`; legacy JSON without the new keys; `recent_story_drafts` window boundaries (day before, first day, day outside, the `before` day itself); `latest_plan_before` unaffected by `.stories.json` files.
+- [x] E2E tests — not applicable.
 
 ## Relevant files
 
