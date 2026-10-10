@@ -1,7 +1,11 @@
+import re
 from pathlib import Path
 
+import pytest
+
 from teams_recorder.config import APP_SUPPORT_DIR, default_data_dir, is_icloud_synced, is_tcc_protected, load_settings
-from teams_recorder.constants import Effort, LlmProvider, MicBackend
+from teams_recorder.constants import Effort, LlmProvider, MicBackend, Stories, StoryDestination
+from teams_recorder.messages import Err
 
 
 def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
@@ -195,3 +199,44 @@ def test_stories_settings(tmp_path: Path):
 
     (tmp_path / "config.toml").write_text('[stories]\nguide = "~/guia.md"\n')
     assert load_settings(tmp_path).story_guide_path == Path("~/guia.md").expanduser()
+
+
+def test_publishing_settings_default_to_off(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert not s.story_auto_publish and s.story_destinations == () and s.story_dedup_days == Stories.DEDUP_DAYS
+    assert s.backlog_project_dir is None and s.backlog_status == Stories.BACKLOG_STATUS and s.backlog_labels == Stories.BACKLOG_LABELS
+
+
+def test_publishing_settings_from_toml(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        '[stories]\npublish = true\ndestinations = ["backlog-md"]\ndedup_days = 7\n'
+        '[stories.backlog_md]\nproject_dir = "."\nstatus = "Inbox"\nlabels = ["work", "meetings"]\n'
+    )
+    s = load_settings(tmp_path)
+    assert s.story_auto_publish and s.story_destinations == (StoryDestination.BACKLOG_MD,) and s.story_dedup_days == 7
+    assert s.backlog_project_dir == tmp_path.resolve()          # "." = the project folder
+    assert s.backlog_status == "Inbox" and s.backlog_labels == ("work", "meetings")
+
+
+def test_backlog_project_dir_resolution(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[stories.backlog_md]\nproject_dir = "boards/work"\n')
+    assert load_settings(tmp_path).backlog_project_dir == tmp_path.resolve() / "boards" / "work"
+    (tmp_path / "config.toml").write_text('[stories.backlog_md]\nproject_dir = "~/boards"\n')
+    assert load_settings(tmp_path).backlog_project_dir == Path("~/boards").expanduser()
+
+
+def test_list_keys_accept_a_single_value_and_destinations_reject_unknown_ones(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[stories]\ndestinations = "backlog-md"\n[stories.backlog_md]\nlabels = "work"\n')
+    s = load_settings(tmp_path)
+    assert s.story_destinations == (StoryDestination.BACKLOG_MD,) and s.backlog_labels == ("work",)
+    (tmp_path / "config.toml").write_text('[stories]\ndestinations = ["backlog-md", "trello"]\n')
+    message = Err.INVALID_DESTINATION.format(value="trello", options=tuple(d.value for d in StoryDestination))
+    with pytest.raises(ValueError, match=re.escape(message)):
+        load_settings(tmp_path)
+
+
+def test_the_repository_config_loads(tmp_path: Path):
+    repo_config = Path(__file__).resolve().parents[2] / "config.toml"
+    (tmp_path / "config.toml").write_text(repo_config.read_text(encoding="utf-8"))   # a copy: no .env loaded
+    s = load_settings(tmp_path)
+    assert s.stories_enabled and s.backlog_project_dir == tmp_path.resolve()

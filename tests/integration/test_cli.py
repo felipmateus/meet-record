@@ -247,3 +247,13 @@ def test_plan_refuses_to_redraft_a_published_day_but_keeps_the_plan(tmp_path: Pa
     assert (project / "data" / "plans" / "2026-10-06.md").exists()
     assert (project / "data" / "plans" / "2026-10-06.stories.md").read_text() == "# published\n"
     assert notified[-1][0] == Notify.STORIES_FAILED
+
+
+def test_unknown_story_destination_stops_the_command(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    (project / "config.toml").write_text('[stories]\ndestinations = ["trello"]\n')
+    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
+    message = Err.INVALID_DESTINATION.format(value="trello", options=("backlog-md",))
+    assert result.exit_code != 0 and str(result.exception) == message
+    assert not (project / "data" / "plans" / "2026-10-06.md").exists()
