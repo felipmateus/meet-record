@@ -155,6 +155,15 @@ trec plan --purge              # same + deletes audio from old meetings (retenti
 
 New actions come from the day's analyses (deterministic); overdue ones are open actions whose deadline has passed; the model writes the Markdown and the priorities and points out which open actions were completed according to the analyses, and may only cite existing ids. The accumulated list lives in `data/plans/open_actions.json`. The `local.teams-recorder.planner` LaunchAgent runs `trec plan --purge` at 6 pm (config `planner.hour`), Monday to Friday.
 
+### User story drafts
+
+```bash
+trec stories                   # drafts user stories from today's plan into data/plans/YYYY-MM-DD.stories.md
+trec stories --date 2026-10-09 # redrafts a given day (the plan must exist)
+```
+
+With `[stories] enabled = true` in `config.toml`, `trec plan` (and so the 6 pm planner) drafts them right after the plan. The model reads the plan's new actions and the meetings they came from, leaves out what is not a story (emails, meetings, reminders) and groups related actions, always following the guide in `[stories] guide` (default `prompts/user_story_guide.md`): edit that file to change how stories are written. Drafts are for review; nothing is published to any board.
+
 On first run, macOS asks for two permissions: **Microphone** (for ffmpeg) and **Screen & System Audio Recording** (for teams-tap), under System Settings > Privacy & Security. Without the second one, the Teams track comes out silent.
 
 ## Development
