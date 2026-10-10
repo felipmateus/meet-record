@@ -14,7 +14,7 @@ class TranscriptionError(TeamsRecorderError):
 
 
 class AnalysisError(TeamsRecorderError):
-    """LLM analysis or planning failed."""
+    """LLM analysis, planning or story drafting failed."""
 
 
 class RepositoryError(TeamsRecorderError):

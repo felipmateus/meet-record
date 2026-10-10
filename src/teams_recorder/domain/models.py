@@ -159,6 +159,52 @@ class DailyPlan:
     overdue_action_ids: list[str] = field(default_factory=list)
 
 
+@dataclass
+class UserStory:
+    """A user story drafted from one or more of the user's actions. A draft until the user publishes it."""
+
+    title: str
+    narrative: str  # "As a <persona>, I want <capability>, so that <benefit>", in the user's language
+    acceptance_criteria: list[str] = field(default_factory=list)
+    details: str = ""  # other sections the user's story guide asks for, in Markdown
+    open_questions: list[str] = field(default_factory=list)
+    source_action_ids: list[str] = field(default_factory=list)
+    source_meetings: list[str] = field(default_factory=list)
+    priority: Priority | None = None  # the strongest priority among the source actions
+    due: date | None = None           # the earliest due date among the source actions
+    id: str = field(default_factory=_new_action_id)
+
+
+@dataclass(frozen=True)
+class SkippedAction:
+    """An action that did not become a story, and why."""
+
+    action_id: str
+    reason: str
+
+
+@dataclass
+class StoryDrafts:
+    """The user story drafts written from one day's plan. Nothing in here has been published."""
+
+    day: date
+    stories: list[UserStory] = field(default_factory=list)
+    skipped: list[SkippedAction] = field(default_factory=list)
+
+
+_PRIORITY_RANK = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+
+
+def strongest_priority(actions: list[Action]) -> Priority | None:
+    stated = [a.priority for a in actions if a.priority is not None]
+    return min(stated, key=_PRIORITY_RANK.__getitem__) if stated else None
+
+
+def earliest_due(actions: list[Action]) -> date | None:
+    dues = [a.due for a in actions if a.due is not None]
+    return min(dues) if dues else None
+
+
 def merge_open_actions(current: list[Action], plan: DailyPlan) -> list[Action]:
     """Apply a plan to the open-actions list: drop completed, flag overdue, append new ones."""
     completed = set(plan.completed_action_ids)
