@@ -53,6 +53,8 @@ class MarkdownStoryRenderer:
     def _story(self, n: int, story: UserStory, by_id: dict[str, Action]) -> list[str]:
         out = [StoryDoc.STORY_TITLE.format(n=n, title=story.title)]
         meta: list[str] = []
+        if story.kind:
+            meta.append(StoryDoc.KIND.format(label=StoryDoc.KIND_LABELS[story.kind.value]))
         if story.priority:
             meta.append(StoryDoc.PRIORITY.format(label=Minutes.PRIORITY_LABELS[story.priority.value]))
         if story.due:

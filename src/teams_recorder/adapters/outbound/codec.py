@@ -11,6 +11,7 @@ from typing import Any
 from teams_recorder.constants import Audio
 from teams_recorder.domain import (
     Action,
+    ActionKind,
     ActionStatus,
     Analysis,
     DailyPlan,
@@ -83,6 +84,7 @@ def action_to_dict(a: Action) -> dict[str, Any]:
         "status": a.status.value,
         "priority": a.priority.value if a.priority else None,
         "at": a.at,
+        "kind": a.kind.value if a.kind else None,
     }
 
 
@@ -96,6 +98,7 @@ def action_from_dict(d: dict[str, Any]) -> Action:
         status=ActionStatus(d.get("status", ActionStatus.OPEN)),
         priority=Priority(d["priority"]) if d.get("priority") else None,
         at=d.get("at"),
+        kind=ActionKind(d["kind"]) if d.get("kind") else None,
     )
 
 
@@ -184,6 +187,7 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
         "publications": [
             {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
         ],
+        "kind": s.kind.value if s.kind else None,
     }
 
 
@@ -202,6 +206,7 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         publications=[
             Publication(x["destination"], x["ref"], datetime.fromisoformat(x["published_at"])) for x in d.get("publications", [])
         ],
+        kind=ActionKind(d["kind"]) if d.get("kind") else None,
     )
 
 

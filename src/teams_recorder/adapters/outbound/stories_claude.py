@@ -34,6 +34,7 @@ from teams_recorder.domain import (
     StoryDrafts,
     UserStory,
     earliest_due,
+    story_kind,
     strongest_priority,
 )
 from teams_recorder.messages import Err, Prompt, StoryDoc
@@ -111,6 +112,7 @@ def to_drafts(out: StoriesOut, day: date, actions: list[Action], existing: list[
             source_meetings=list(dict.fromkeys(a.source_meeting for a in sources)),
             priority=strongest_priority(sources),
             due=earliest_due(sources),
+            kind=story_kind(sources),
         ))
     used = {i for story in stories for i in story.source_action_ids}
     reasons = {k.action_id: k.reason.strip() for k in out.skipped}

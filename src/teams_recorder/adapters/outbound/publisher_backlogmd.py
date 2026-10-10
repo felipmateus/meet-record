@@ -66,7 +66,8 @@ class BacklogMdPublisher:
 
     def command(self, story: UserStory, day: date) -> list[str]:
         cmd = [self.binary, *BacklogMd.CREATE, BacklogMd.DESC, self.body(story, day), BacklogMd.STATUS, self.status]
-        for label in (*self.labels, day.isoformat()):
+        kind = [story.kind.value] if story.kind else []
+        for label in (*self.labels, *kind, day.isoformat()):
             cmd += [BacklogMd.LABEL, label]
         if story.priority is not None:
             cmd += [BacklogMd.PRIORITY, story.priority.value]

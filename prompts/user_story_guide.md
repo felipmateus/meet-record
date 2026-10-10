@@ -4,10 +4,19 @@ This file is sent to the model every time it drafts user stories (`[stories] gui
 
 ## What becomes a story
 
-- A story is a change that delivers value to someone: an end user, a client, the team, or a system the team runs.
-- Turn into stories: new features, changes in behavior, integrations, reports and dashboards, data fixes, investigations with a concrete deliverable (spikes), and technical work that unblocks a feature.
-- Do not turn into stories: sending emails or messages, scheduling or attending meetings, asking someone for information, reviewing a document, approvals, personal reminders. Skip them with a short reason.
+- A story is product work: a change in how the product behaves for its users (a feature) or a fix for something that should work and does not (a bug).
+- The meeting analysis already classifies actions; only features, bugs and actions extracted before classification existed reach this step. Technical and operation work become task cards and management and communication stay in the daily plan without you.
+- For an unclassified action, write a story only for a feature or a bug. Leave out estimates, investigations, mocks, deploys, access requests, process changes, reports and metrics, and any communication (e-mails, meetings, follow-ups, reviews), with a short reason.
 - When several actions lead to the same outcome, write one story. When one action hides two outcomes that can be delivered separately, write two.
+
+## Bugs
+
+Actions classified as `bug` describe something that should work and does not. Write them as stories too, with:
+
+- Title starting with "Corrigir", naming the symptom: "Corrigir data de vencimento exibida no card".
+- Story sentence: "Como <persona>, quero que <comportamento esperado>, para <benefício>."
+- `details` with **Problema** (what happens today), **Esperado** (what should happen) and **Como reproduzir** (steps, when the meeting gave them; otherwise an open question asking for them).
+- Acceptance criteria describing the corrected behavior, plus one criterion that the reported case no longer happens.
 
 ## Title
 
