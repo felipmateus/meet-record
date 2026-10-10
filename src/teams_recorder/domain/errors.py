@@ -17,6 +17,10 @@ class AnalysisError(TeamsRecorderError):
     """LLM analysis, planning or story drafting failed."""
 
 
+class PublishError(TeamsRecorderError):
+    """A destination (a board) could not take a story."""
+
+
 class RepositoryError(TeamsRecorderError):
     """Read or write failure in the meeting repository."""
 

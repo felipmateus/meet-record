@@ -2,6 +2,7 @@ from .errors import (
     AnalysisError,
     CaptureError,
     MeetingNotFound,
+    PublishError,
     RepositoryError,
     TeamsRecorderError,
     TranscriptionError,
@@ -16,6 +17,7 @@ from .models import (
     Meeting,
     MeetingType,
     Priority,
+    Publication,
     Segment,
     SkippedAction,
     StoryDrafts,
@@ -32,8 +34,8 @@ from .status import MeetingStatus, derive_status, next_step
 __all__ = [
     "Action", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
     "Segment", "Transcript", "meeting_id_for", "merge_open_actions",
-    "SkippedAction", "StoryDrafts", "UserStory", "earliest_due", "strongest_priority",
+    "Publication", "SkippedAction", "StoryDrafts", "UserStory", "earliest_due", "strongest_priority",
     "MeetingStatus", "derive_status", "next_step",
-    "AnalysisError", "CaptureError", "MeetingNotFound", "RepositoryError",
+    "AnalysisError", "CaptureError", "MeetingNotFound", "PublishError", "RepositoryError",
     "TeamsRecorderError", "TranscriptionError",
 ]

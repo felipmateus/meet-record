@@ -159,6 +159,15 @@ class DailyPlan:
     overdue_action_ids: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Publication:
+    """Where a story was published: the destination and the destination's id for the item."""
+
+    destination: str
+    ref: str
+    published_at: datetime
+
+
 @dataclass
 class UserStory:
     """A user story drafted from one or more of the user's actions. A draft until the user publishes it."""
@@ -173,6 +182,10 @@ class UserStory:
     priority: Priority | None = None  # the strongest priority among the source actions
     due: date | None = None           # the earliest due date among the source actions
     id: str = field(default_factory=_new_action_id)
+    publications: list[Publication] = field(default_factory=list)
+
+    def publication(self, destination: str) -> Publication | None:
+        return next((p for p in self.publications if p.destination == destination), None)
 
 
 @dataclass(frozen=True)
@@ -181,6 +194,7 @@ class SkippedAction:
 
     action_id: str
     reason: str
+    duplicate_of: str | None = None  # id of an existing story that already covers the action
 
 
 @dataclass
@@ -190,6 +204,10 @@ class StoryDrafts:
     day: date
     stories: list[UserStory] = field(default_factory=list)
     skipped: list[SkippedAction] = field(default_factory=list)
+
+    @property
+    def has_publications(self) -> bool:
+        return any(story.publications for story in self.stories)
 
 
 _PRIORITY_RANK = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
