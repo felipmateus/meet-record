@@ -4,12 +4,7 @@ A background tool for macOS (and Windows, not yet run on real hardware) that not
 
 It is built for one person who sits in several meetings a day and wants a reliable record of what they committed to, without taking notes. Meetings are expected in Brazilian Portuguese, so the minutes, plans and stories it writes are in Portuguese. The code, CLI and documentation are in English.
 
-```
-Teams call ──► record ──► mix ──► transcribe ──► analyze ──► minutes.md
- (detected)   (2 tracks)  (m4a)   (whisper.cpp,   (Claude)        │
-                                   on your Mac)                   ▼
-                                     6 pm, Mon–Fri:  daily plan ──► story drafts ──► Backlog.md board
-```
+See the [flowchart](#how-it-works) for the whole pipeline.
 
 ## Key features
 
@@ -49,6 +44,38 @@ Teams call ──► record ──► mix ──► transcribe ──► analyze
 
 ## How it works
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 40, "rankSpacing": 36, "curve": "basis", "padding": 12}}}%%
+flowchart LR
+    subgraph perCall["On every call · daemon"]
+        direction TB
+        detect("<b>Detect the call</b><br/><small>Teams holds a pmset assertion</small>")
+        record("<b>Record two tracks</b><br/><small>teams-tap: Teams + microphone</small>")
+        mix("<b>Mix the audio</b><br/><small>ffmpeg → audio.m4a</small>")
+        transcribe("<b>Transcribe locally</b><br/><small>whisper.cpp → transcript</small>")
+        analyze("<b>Analyze with Claude</b><br/><small>analysis.json + minutes.md</small>")
+        detect --> record --> mix --> transcribe --> analyze
+    end
+
+    subgraph evening["6 pm, Mon–Fri · planner"]
+        direction TB
+        plan("<b>Build the daily plan</b><br/><small>plans/YYYY-MM-DD.md</small>")
+        route("<b>Route actions by kind</b><br/><small>stories, task cards, plan</small>")
+        publish("<b>Publish to Backlog.md</b><br/><small>Triagem column</small>")
+        review("<b>You review the board</b><br/><small>To Do approves, archive rejects</small>")
+        plan --> route --> publish --> review
+    end
+
+    perCall --> evening
+
+    classDef daemon fill:#EEEDFE,stroke:#534AB7,stroke-width:1px,color:#3C3489
+    classDef planner fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#085041
+    class detect,record,mix,transcribe,analyze daemon
+    class plan,route,publish,review planner
+    style perCall fill:none,stroke:#7F77DD,stroke-width:1px,stroke-dasharray:6 4
+    style evening fill:none,stroke:#1D9E75,stroke-width:1px,stroke-dasharray:6 4
+```
+
 1. **Detect.** Every second the daemon reads `pmset -g assertions`. While Teams is in a call, it holds a "prevent sleep" assertion, and that is the signal. On Windows, the signal is Teams holding the microphone, as recorded by the privacy indicator in the registry.
 2. **Record.** Recording starts on the first positive reading. `teams-tap` (a small Swift binary) writes Teams audio to `tap.wav` and the microphone to `mic.wav`. A dialog asks whether to keep the recording; recording does not wait for the answer.
 3. **Mix.** After hang-up, ffmpeg cleans each track (80 Hz high-pass, noise reduction), mixes them, normalizes to -18 LUFS and writes `audio.m4a`. The raw tracks are deleted.
@@ -57,7 +84,7 @@ Teams call ──► record ──► mix ──► transcribe ──► analyze
 6. **Plan.** At 6 pm, Monday to Friday, `trec plan` builds `plans/YYYY-MM-DD.md` and updates `open_actions.json`.
 7. **Draft and publish stories.** If enabled, stories are drafted into `plans/YYYY-MM-DD.stories.md` and sent to the **Triagem** column of a Backlog.md board.
 
-Steps 3–5 run in the background, so a call that starts right after another one is still recorded. Every step can also be run by hand with `trec`.
+Steps 3–5 run in the background, so a call that starts right after another one is still recorded. A step that fails writes `error.txt` in the meeting folder and stops only that meeting; re-running resumes from there. Every step can also be run by hand with `trec`.
 
 ## Tech stack
 
@@ -323,7 +350,29 @@ trec stories                    # drafts from today's plan → data/plans/YYYY-M
 trec stories --date 2026-10-09  # redrafts a given day (the plan must exist)
 ```
 
-With `[stories] enabled = true`, `trec plan` (and so the 6 pm planner) drafts stories right after the plan.
+With `[stories] enabled = true`, `trec plan` (and so the 6 pm planner) drafts stories right after the plan. Each action is routed by the kind the analysis gave it:
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 40, "rankSpacing": 36, "curve": "basis", "padding": 12}}}%%
+flowchart TB
+    actions("<b>New actions in the plan</b><br/><small>each one has a kind</small>")
+    story("<b>User story</b><br/><small>feature · bug</small><br/><small>drafted by Claude</small>")
+    task("<b>Task card</b><br/><small>technical · operation</small><br/><small>no model call</small>")
+    planonly("<b>Stays in the plan</b><br/><small>management · communication</small><br/><small>never reaches the board</small>")
+    drafts("<b>Drafts of the day</b><br/><small>plans/YYYY-MM-DD.stories.md</small><br/><small>no repeats of the last 30 days</small>")
+    board("<b>Backlog.md board</b><br/><small>Triagem column</small>")
+    review("<b>You review</b><br/><small>To Do approves, archive rejects</small>")
+
+    actions --> story & task & planonly
+    story & task --> drafts
+    drafts -- "trec publish<br/>or publish = true" --> board
+    board --> review
+
+    classDef board fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#085041
+    classDef neutral fill:#F1EFE8,stroke:#888780,stroke-width:1px,color:#444441
+    class story,task,drafts,board,review board
+    class actions,planonly neutral
+```
 
 - `feature` and `bug` actions, plus actions with no kind (extracted before 2026-10-10), go to the model. It groups related actions and writes the stories by the rules of your guide (`[stories] guide`, default `prompts/user_story_guide.md`). Edit that file to change how stories are written; it is re-read on every call.
 - `technical` and `operation` actions become task cards with no model call.
