@@ -1,8 +1,9 @@
 """StoryRenderer that writes plans/<day>.stories.md, the document the user reviews.
 
-One section per story: title; priority, due date and source meetings; the story sentence;
-acceptance criteria as a checklist; the other sections the guide asked for; open questions;
-and the source actions with the transcript timestamp where each was said. Then the actions
+One section per story: title; priority, due date and source meetings; where it was
+published; the story sentence; acceptance criteria as a checklist; the other sections the
+guide asked for; open questions; and the source actions with the transcript timestamp where
+each was said. Then the actions
 that did not become stories, with the reason and, for duplicates, the title of the existing
 story that covers them. Labels come from messages.StoryDoc.
 """
@@ -60,6 +61,7 @@ class MarkdownStoryRenderer:
             meta.append(StoryDoc.MEETINGS.format(ids=", ".join(story.source_meetings)))
         if meta:
             out.append(StoryDoc.META_SEPARATOR.join(meta))
+        out += [StoryDoc.PUBLISHED.format(destination=p.destination, ref=p.ref) for p in story.publications]
         out += ["", story.narrative]
         if story.acceptance_criteria:
             out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c) for c in story.acceptance_criteria)]
