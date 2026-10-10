@@ -415,7 +415,7 @@ class StoryDoc:
     the user, built from LLM content that is in Portuguese."""
 
     TITLE = "# Rascunhos de user stories — {date}"
-    INTRO = "_Gerados a partir do plano de {date}. Revise antes de publicar: nada foi enviado a nenhum board._"
+    INTRO = "_Gerados a partir do plano de {date}. Cada história publicada mostra abaixo do título o board e o id da tarefa; as demais ainda não saíram daqui._"
     NO_ACTIONS = "Nenhuma ação nova no plano deste dia."
     NO_STORIES = "Nenhuma ação nova virou história."
     STORY_TITLE = "## {n}. {title}"
