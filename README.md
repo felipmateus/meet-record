@@ -165,7 +165,7 @@ trec stories                   # drafts user stories from today's plan into data
 trec stories --date 2026-10-09 # redrafts a given day (the plan must exist)
 ```
 
-With `[stories] enabled = true` in `config.toml`, `trec plan` (and so the 6 pm planner) drafts them right after the plan. The model reads the plan's new actions and the meetings they came from, leaves out what is not a story (emails, meetings, reminders) and groups related actions, always following the guide in `[stories] guide` (default `prompts/user_story_guide.md`): edit that file to change how stories are written. It also sees the stories of the previous `dedup_days` days (default 30), so a topic raised again is left out as a duplicate instead of becoming a second story. A day whose stories were already published is never drafted again.
+With `[stories] enabled = true` in `config.toml`, `trec plan` (and so the 6 pm planner) drafts them right after the plan. The meeting analysis classifies each action (feature, bug, technical, operation, management, communication; rules in `prompts/analyze_system.md`): features and bugs become user stories, technical and operation work become task cards, and management and communication stay only in the daily plan. The model reads the plan's feature and bug actions and the meetings they came from, groups related actions, always following the guide in `[stories] guide` (default `prompts/user_story_guide.md`): edit that file to change how stories are written. It also sees the stories of the previous `dedup_days` days (default 30), so a topic raised again is left out as a duplicate instead of becoming a second story. A day whose stories were already published is never drafted again.
 
 ### Publishing to a Backlog.md board
 

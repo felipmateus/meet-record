@@ -25,14 +25,14 @@ Turns the transcript into a structured record of what matters to the user: summa
 | `summary` | text | 3 to 6 sentences, objective |
 | `topics[]` | title, points[] | main discussion topics in order, 1 to 4 key points each |
 | `decisions[]` | text | only what was actually decided |
-| `my_actions[]` | description, owner (`usuário`), ISO due date or null | the user's commitments; verb in the infinitive |
-| `others_actions[]` | description, owner, due date | third-party tasks that affect the user; `indefinido` (undetermined) when the owner cannot be identified |
+| `my_actions[]` | description, owner (`usuário`), ISO due date or null, kind | the user's commitments; verb in the infinitive |
+| `others_actions[]` | description, owner, due date, kind | third-party tasks that affect the user; `indefinido` (undetermined) when the owner cannot be identified |
 | `deadlines[]` | what, when (ISO or null), who | relative expressions resolved against the meeting date given in the prompt |
 | `open_questions[]` | text | unanswered questions |
 | `next_meetings[]` | text | agreed follow-up meetings |
 | `risks[]` | text | risks, blockers and issues raised |
 
-Decisions are `{text, at}` and actions carry `priority` (`high`/`medium`/`low`, only when urgency was stated) and `at`, the `HH:MM:SS` transcript timestamp where it was said, so the user can verify each item. The message to the model starts with the user's name (`[user] name` in `config.toml`), and the prompt lists Portuguese cue phrases for actions and decisions. Old analyses (plain-string decisions, no new fields) still load with defaults.
+Every action (the user's and others') also carries a **kind**, which decides where it goes after the plan: `feature` or `bug` (product work → user story), `technical` (estimates, investigations, mocks, refactoring) or `operation` (deploys, access, infrastructure) → task card on the board, `management` (process, reports, metrics, tickets) or `communication` (e-mails, meetings, follow-ups, reviews) → stays in the daily plan. The rules are in `prompts/analyze_system.md`; actions extracted before 2026-10-10 have no kind. Decisions are `{text, at}` and actions carry `priority` (`high`/`medium`/`low`, only when urgency was stated) and `at`, the `HH:MM:SS` transcript timestamp where it was said, so the user can verify each item. The message to the model starts with the user's name (`[user] name` in `config.toml`), and the prompt lists Portuguese cue phrases for actions and decisions. Old analyses (plain-string decisions, no new fields) still load with defaults.
 
 ## Minutes (`minutes.md`)
 Written next to `analysis.json` after each analysis by `MarkdownMinutesRenderer` (no LLM call), in the structure of the `meeting-notes` skill: title, date and time, participants, type, purpose, summary, topics, decisions with timestamps, an action table (owner — the user shown by name, `⚠️ sem responsável` when unknown — due date, priority, timestamp), risks, open questions and next steps; empty sections are omitted. `trec minutes [id] [--all]` re-renders from existing analyses.

@@ -20,9 +20,10 @@ Turns the day's new actions into user story drafts for the user's backlog, writt
 | `data/plans/<day>.stories.json` | The same drafts, structured: id, title, narrative, acceptance criteria, details, open questions, source action ids and meetings, priority, due date, publications (destination, task id, time); skipped actions with reasons and, for duplicates, the covering story's id |
 
 ## Drafting rules
-- The model decides which actions are stories (by the guide's definition), groups actions that deliver the same outcome and writes the text in Brazilian Portuguese unless the guide says otherwise.
+- Actions are routed by the kind the meeting analysis gave them (see [Analysis](./03-analysis.md)): `feature` and `bug` go to the model as story candidates; `technical` and `operation` become task cards with no model call (the action's text as the title, no story sentence or criteria); `management` and `communication` are left out with "<tipo>: fica só no plano do dia". Actions without a kind (extracted before classification) go to the model, which applies the guide's definition.
+- The model writes the stories (bugs in the guide's bug format), groups actions that deliver the same outcome and writes the text in Brazilian Portuguese unless the guide says otherwise.
 - The code keeps the traceability: a story may only cite action ids it received (others are dropped; a story left with none is dropped); every action that is in no story is listed as left out, with the model's reason or "o modelo não incluiu esta ação em nenhuma história"; priority is the strongest and the due date the earliest among the story's source actions.
-- No new actions in the plan: an empty set is written and the model is not called.
+- No story candidates in the plan: the model is not called. Every card shows its kind (Feature, Bug, Tarefa técnica, Operação) in the document and as a label on the board.
 
 ## Interactions
 - `trec stories` without a date: today's plan. With `--date`: that day's plan; redrafting replaces that day's drafts, unless they were already published (see below).
