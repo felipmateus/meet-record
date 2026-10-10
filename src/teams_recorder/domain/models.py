@@ -199,7 +199,7 @@ class SkippedAction:
 
 @dataclass
 class StoryDrafts:
-    """The user story drafts written from one day's plan. Nothing in here has been published."""
+    """The user story drafts written from one day's plan; each story records where it was published."""
 
     day: date
     stories: list[UserStory] = field(default_factory=list)
