@@ -77,6 +77,8 @@ class Files:
     PROMPTS_DIR = "prompts"
     ANALYZE_PROMPT = "analyze_system.md"
     PLAN_PROMPT = "plan_system.md"
+    STORIES_PROMPT = "stories_system.md"
+    STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
     PLAN_GLOB = "????-??-??.json"     # every saved plan (see PLAN_JSON below)
@@ -112,6 +114,8 @@ class Files:
     AGENT_ERR_LOG = "{name}.err.log"
     PLAN_MARKDOWN = "{day}.md"                         # day: ISO date
     PLAN_JSON = "{day}.json"
+    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
+    STORIES_JSON = "{day}.stories.json"
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
@@ -279,3 +283,10 @@ class Logging:
 class Planner:
     DEFAULT_HOUR = 18
     RETENTION_DAYS = 30
+
+
+class Stories:
+    ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
+    # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
+    CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
+                      "decisions", "others_actions", "open_questions", "risks")

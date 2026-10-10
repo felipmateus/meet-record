@@ -12,7 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, Transcript
+from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript
 
 
 class CallState(StrEnum):
@@ -99,6 +99,18 @@ class Planner(Protocol):
 
 
 @runtime_checkable
+class StoryWriter(Protocol):
+    def draft(self, day: date, actions: list[Action], analyses: list[Analysis]) -> StoryDrafts:
+        """Drafts user stories from the given actions; `analyses` are the meetings they came from (context)."""
+        ...
+
+
+@runtime_checkable
+class StoryRenderer(Protocol):
+    def render(self, drafts: StoryDrafts, actions: list[Action]) -> str: ...
+
+
+@runtime_checkable
 class MeetingRepository(Protocol):
     # meetings
     def create(self, meeting: Meeting) -> None: ...
@@ -130,6 +142,9 @@ class MeetingRepository(Protocol):
     def latest_plan_before(self, day: date) -> DailyPlan | None: ...
     def load_open_actions(self) -> list[Action]: ...
     def save_open_actions(self, actions: list[Action]) -> None: ...
+    # user story drafts (one set per plan day)
+    def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None: ...
+    def load_story_drafts(self, day: date) -> StoryDrafts | None: ...
 
 
 class ConfirmAnswer(StrEnum):

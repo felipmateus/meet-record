@@ -4,11 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from teams_recorder.application.ports import Clock, MeetingRepository, Notifier, Planner
+from teams_recorder.application.ports import Clock, MeetingRepository, Notifier, Planner, StoryRenderer, StoryWriter
 from teams_recorder.constants import Planner as PlannerDefaults
-from teams_recorder.domain import DailyPlan, MeetingStatus, derive_status, merge_open_actions
-from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
-from teams_recorder.messages import Notify
+from teams_recorder.domain import Action, Analysis, DailyPlan, MeetingStatus, RepositoryError, StoryDrafts, derive_status, merge_open_actions
+from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
+from teams_recorder.messages import Err, Notify
 
 
 @dataclass
@@ -34,6 +34,43 @@ class BuildDailyPlan:
             Notify.PLAN_READY_BODY.format(meetings=len(analyses), new_actions=len(plan.new_actions)),
         )
         return plan
+
+
+@dataclass
+class DraftUserStories:
+    """Drafts user stories from a saved daily plan's new actions.
+
+    The drafts are files for the user to review (`plans/<day>.stories.*`); nothing is
+    published. A day without new actions gets an empty set without calling the writer.
+    """
+
+    repo: MeetingRepository
+    writer: StoryWriter
+    renderer: StoryRenderer
+    notifier: Notifier
+
+    def execute(self, day: date) -> StoryDrafts:
+        plan = self.repo.load_plan(day)
+        if plan is None:
+            raise RepositoryError(Err.PLAN_MISSING.format(day=day.isoformat()))
+        actions = plan.new_actions
+        drafts = self.writer.draft(day, actions, self._source_analyses(actions)) if actions else StoryDrafts(day=day)
+        drafts.day = day
+        self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions))
+        if drafts.stories:
+            self.notifier.notify(
+                Notify.STORIES_READY,
+                Notify.STORIES_READY_BODY.format(stories=len(drafts.stories), skipped=len(drafts.skipped)),
+            )
+        return drafts
+
+    def _source_analyses(self, actions: list[Action]) -> list[Analysis]:
+        meeting_ids = dict.fromkeys(a.source_meeting for a in actions)  # unique, in order
+        return [
+            self.repo.load_analysis(mid)
+            for mid in meeting_ids
+            if self.repo.exists(mid) and ANALYSIS in self.repo.files(mid)
+        ]
 
 
 @dataclass

@@ -22,6 +22,10 @@ class Notify:
     STEP_FAILED_BODY = "Meeting {meeting_id}: {error}"
     PLAN_READY = "Daily plan ready"
     PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
+    STORIES_READY = "User story drafts ready"
+    STORIES_READY_BODY = "{stories} draft(s) to review, {skipped} action(s) left out"
+    STORIES_FAILED = "User story drafts failed"
+    STORIES_FAILED_BODY = "Plan {day}: {error}"
 
 
 class Ask:
@@ -85,6 +89,9 @@ class Err:
     EMPTY_TRANSCRIPT = "Empty transcript: no speech recognized."
     SHORT_TRANSCRIPT = "Transcript too short ({words} words) to analyze: \"{text}\""
     EMPTY_PLAN = "# Plan {day}\n\nNo analyzed meetings and no open actions.\n"
+    STORY_GUIDE_MISSING = "user story guide not found: {path} (set [stories] guide in config.toml)"
+    STORY_GUIDE_EMPTY = "user story guide is empty: {path}"
+    PLAN_MISSING = "no plan for {day}; create it with `trec plan --date {day}`"
     # repository
     FILE_MISSING = "file not found: {path}"
     BAD_JSON = "invalid JSON in {path}: {error}"
@@ -127,6 +134,7 @@ class Cli:
     AGENT_RESTART_CMD_HELP = "Restart the daemon (for example after changing config.toml)."
     AGENT_STATUS_CMD_HELP = "Show whether the daemon is loaded and running."
     PLAN_CMD_HELP = "Consolidate the day's analyses into a Markdown plan and update the open actions."
+    STORIES_CMD_HELP = "Draft user stories from a day's plan, following the story guide (stories.guide in config.toml). Nothing is published."
     PURGE_CMD_HELP = "Delete audio of already transcribed meetings older than N days (config: planner.retention_days)."
     # status
     DATA_DIR = "Data dir: {path}"
@@ -152,6 +160,8 @@ class Cli:
     API_KEY_NOT_REQUIRED = " (not required with provider = claude-code)"
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
     DATA_IN = "[info] data in {path}"
+    STORY_GUIDE_LINE = "[{mark}] user story guide: {path}{hint}"
+    STORY_GUIDE_DISABLED = "  (story drafts are off: [stories] enabled = false)"
     # start / stop / cancel
     START_PID_HELP = "PID of the process to capture. Default: the running Microsoft Teams."
     START_TITLE_HELP = "Meeting title, used in the name and in the status."
@@ -218,6 +228,11 @@ class Cli:
     PLANNED_OK = " ok ({new} new actions, {completed} completed, {overdue} overdue)"
     PRIORITY_LINE = "  • {text}"
     PLAN_PATH = "  Plan: {path}"
+    STORIES_DATE_HELP = "Day whose plan is turned into story drafts (YYYY-MM-DD). Default: today."
+    DRAFTING_STORIES = "Drafting user stories for {day}…"
+    STORIES_OK = " ok ({stories} stories, {skipped} actions left out)"
+    STORY_LINE = "  • {title}"
+    STORIES_PATH = "  Drafts: {path}"
     PURGED_RETENTION = "Audio files removed by retention: {count}"
     PURGED = "Audio files removed: {count}"
     PURGED_LINE = "  {meeting_id}"
@@ -298,6 +313,17 @@ class Prompt:
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
     FIELD_PLAN_PRIORITIES = "3 to 5 priorities, one sentence each"
     FIELD_PLAN_COMPLETED = "ids of open actions that the day's analyses show as completed"
+    STORIES_DATE = "Plan date: {date} ({weekday})"
+    STORIES_ACTIONS = "\n## Candidate actions (JSON; cite these ids in source_action_ids and skipped)\n"
+    STORIES_MEETINGS = "\n## Context: analyses of the meetings these actions came from (JSON)\n"
+    STORY_GUIDE_HEADER = "\n\n# User story guide\n\nThe user's own rules. Follow them for format, style and what counts as a story.\n\n"
+    FIELD_STORY_TITLE = "Short story title, as the guide asks"
+    FIELD_STORY_NARRATIVE = "The story sentence in the guide's format (persona, capability, benefit)"
+    FIELD_STORY_CRITERIA = "Acceptance criteria, one per item, checkable by someone who was not in the meeting"
+    FIELD_STORY_DETAILS = "Other sections the guide asks for, in Markdown without top-level headings; empty if none"
+    FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
+    FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
+    FIELD_SKIPPED_REASON = "Short reason why this action is not a story"
 
 
 class Minutes:
@@ -343,3 +369,30 @@ class Minutes:
         "other": "Reunião",
     }
     PRIORITY_LABELS = {"high": "🔴 Alta", "medium": "🟡 Média", "low": "🟢 Baixa"}
+
+
+class StoryDoc:
+    """Labels of plans/<day>.stories.md. Portuguese on purpose, like `Minutes`: a document for
+    the user, built from LLM content that is in Portuguese."""
+
+    TITLE = "# Rascunhos de user stories — {date}"
+    INTRO = "_Gerados a partir do plano de {date}. Revise antes de publicar: nada foi enviado a nenhum board._"
+    NO_ACTIONS = "Nenhuma ação nova no plano deste dia."
+    NO_STORIES = "Nenhuma ação nova virou história."
+    STORY_TITLE = "## {n}. {title}"
+    PRIORITY = "**Prioridade:** {label}"
+    DUE = "**Prazo:** {date}"
+    MEETINGS = "**Reuniões:** {ids}"
+    META_SEPARATOR = " · "
+    CRITERIA = "**Critérios de aceite**"
+    CRITERION = "- [ ] {text}"
+    QUESTIONS = "**Perguntas em aberto**"
+    SOURCES = "**Ações de origem**"
+    SOURCE_LINE = "- `{id}` {description}{at}"
+    AT = " (dito em {at})"
+    BULLET = "- {text}"
+    SKIPPED = "## Ações que não viraram história"
+    SKIPPED_LINE = "- `{id}` {description} — {reason}"
+    UNKNOWN_ACTION = "(ação fora do plano)"
+    NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
+    FOOTER = "---\n_Rascunho gerado automaticamente seguindo o guia de user stories. Confira cada história antes de publicar._"
