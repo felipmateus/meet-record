@@ -192,6 +192,15 @@ def recent_stories(repo: MeetingRepository, day: date, days: int) -> list[UserSt
     return [story for drafts in repo.recent_story_drafts(day, days) for story in drafts.stories]
 
 
+def stories_waiting(repo: MeetingRepository, today: date, days: int, destinations: list[str]) -> list[UserStory]:
+    """Stories of the last `days` days (today and the `days - 1` before it) still missing from a destination."""
+    tomorrow = today + timedelta(days=1)  # the window is [before - days, before): ending tomorrow includes today
+    return [
+        story for story in recent_stories(repo, tomorrow, days)
+        if any(story.publication(destination) is None for destination in destinations)
+    ]
+
+
 @dataclass
 class PurgeOldAudio:
     repo: MeetingRepository
