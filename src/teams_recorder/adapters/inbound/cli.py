@@ -21,10 +21,10 @@ from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.application.ports import MeetingRepository
 from teams_recorder.config import Settings, find_tool, load_settings
 from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Platform
-from teams_recorder.container import build_container, teams_tap_binary
+from teams_recorder.container import Container, build_container, teams_tap_binary
 from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
-from teams_recorder.messages import Cli, Err, Step
+from teams_recorder.messages import Cli, Err, Notify, Step
 
 app = typer.Typer(
     name=CLI_NAME,
@@ -131,6 +131,13 @@ def doctor() -> None:
     if free is not None:
         low = free < Audio.LOW_DISK_HOURS * settings.raw_bytes_per_hour
         typer.echo(Cli.DISK_LINE.format(mark=Cli.WARNING if low else Cli.OK, free=free / 1e9, hours=free / settings.raw_bytes_per_hour, path=settings.data_dir))
+    guide_ok = settings.story_guide_path.is_file()
+    ok = ok and (guide_ok or not settings.stories_enabled)
+    typer.echo(Cli.STORY_GUIDE_LINE.format(
+        mark=Cli.OK if guide_ok else (Cli.MISSING_MARK if settings.stories_enabled else Cli.INFO),
+        path=settings.story_guide_path,
+        hint="" if settings.stories_enabled else Cli.STORY_GUIDE_DISABLED,
+    ))
     typer.echo(Cli.DATA_IN.format(path=settings.data_dir))
     llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
     raise typer.Exit(code=0 if ok and llm_ok else 1)
@@ -388,10 +395,7 @@ def plan(
 ) -> None:
     settings = _settings()
     _check_llm_prerequisites(settings)
-    try:
-        target = date.fromisoformat(day) if day else date.today()
-    except ValueError:
-        _fail(Cli.INVALID_DATE.format(value=day))
+    target = _day(day)
     c = build_container(settings)
     typer.echo(Cli.PLANNING.format(day=target.isoformat(), provider=settings.llm_provider), nl=False)
     try:
@@ -402,9 +406,46 @@ def plan(
     for pr in result.priorities:
         typer.echo(Cli.PRIORITY_LINE.format(text=pr))
     typer.echo(Cli.PLAN_PATH.format(path=settings.data_dir / Files.PLANS_DIR / Files.PLAN_MARKDOWN.format(day=target.isoformat())))
+    stories_ok = _draft_stories(c, target) if settings.stories_enabled else True
     if purge_after:
         purged = c.purge_old_audio().execute()
         typer.echo(Cli.PURGED_RETENTION.format(count=len(purged)))
+    if not stories_ok:
+        raise typer.Exit(code=1)
+
+
+@app.command(help=Cli.STORIES_CMD_HELP)
+def stories(
+    day: str | None = typer.Option(None, "--date", help=Cli.STORIES_DATE_HELP),
+) -> None:
+    settings = _settings()
+    _check_llm_prerequisites(settings)
+    target = _day(day)
+    if not _draft_stories(build_container(settings, headless=True), target):
+        raise typer.Exit(code=1)
+
+
+def _draft_stories(c: Container, day: date) -> bool:
+    """Drafts the stories of a day's plan and reports them; False (and a notification) on failure."""
+    typer.echo(Cli.DRAFTING_STORIES.format(day=day.isoformat()), nl=False)
+    try:
+        drafts = c.draft_user_stories().execute(day)
+    except TeamsRecorderError as exc:
+        typer.echo(Cli.FAILED.format(error=exc))
+        c.notifier.notify(Notify.STORIES_FAILED, Notify.STORIES_FAILED_BODY.format(day=day.isoformat(), error=exc))
+        return False
+    typer.echo(Cli.STORIES_OK.format(stories=len(drafts.stories), skipped=len(drafts.skipped)))
+    for story in drafts.stories:
+        typer.echo(Cli.STORY_LINE.format(title=story.title))
+    typer.echo(Cli.STORIES_PATH.format(path=c.settings.data_dir / Files.PLANS_DIR / Files.STORIES_MARKDOWN.format(day=day.isoformat())))
+    return True
+
+
+def _day(value: str | None) -> date:
+    try:
+        return date.fromisoformat(value) if value else date.today()
+    except ValueError:
+        _fail(Cli.INVALID_DATE.format(value=value))
 
 
 @app.command(help=Cli.PURGE_CMD_HELP)

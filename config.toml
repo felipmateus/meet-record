@@ -74,3 +74,12 @@ timeout_seconds = 30
 [planner]
 hour = 18
 retention_days = 30
+
+[stories]
+# After each daily plan, draft user stories from the day's new actions into
+# data/plans/<day>.stories.md for you to review. Nothing is published anywhere.
+# Run it by hand with `trec stories [--date YYYY-MM-DD]`.
+enabled = true
+# Instructions the model always receives when it writes a story (a relative path is resolved
+# against the project folder). Drafting fails if this file is missing or empty.
+guide = "prompts/user_story_guide.md"

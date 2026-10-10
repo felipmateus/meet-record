@@ -22,6 +22,8 @@ from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNo
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
+from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.ports import (
@@ -37,12 +39,15 @@ from teams_recorder.application.ports import (
     Planner,
     ProcessAudioCapture,
     RecordingConfirmation,
+    StoryRenderer,
+    StoryWriter,
     Transcriber,
 )
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
     BuildDailyPlan,
     CancelRecording,
+    DraftUserStories,
     PurgeOldAudio,
     RenderMinutes,
     StartRecording,
@@ -80,6 +85,8 @@ class Container:
     planner: Planner
     detector: CallDetector
     minutes: MinutesRenderer
+    story_writer: StoryWriter
+    story_renderer: StoryRenderer
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
     disk: DiskSpace | None = None
 
@@ -107,6 +114,9 @@ class Container:
 
     def build_daily_plan(self) -> BuildDailyPlan:
         return BuildDailyPlan(self.repo, self.planner, self.notifier)
+
+    def draft_user_stories(self) -> DraftUserStories:
+        return DraftUserStories(self.repo, self.story_writer, self.story_renderer, self.notifier)
 
     def purge_old_audio(self) -> PurgeOldAudio:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
@@ -161,6 +171,10 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
+        story_writer=ClaudeStoryWriter(
+            transport, settings.story_guide_path, prompt_path=settings.prompts_dir / Files.STORIES_PROMPT, user_name=settings.user_name,
+        ),
+        story_renderer=MarkdownStoryRenderer(),
         confirmation=platform.confirmation,
         disk=DataDirDiskSpace(settings.data_dir),
     )

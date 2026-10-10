@@ -24,6 +24,7 @@ from teams_recorder.constants import (
     MicBackend,
     Planner,
     Platform,
+    Stories,
     Windows,
     ggml_model_file,
     raw_bytes_per_hour,
@@ -86,6 +87,8 @@ class Settings:
     retention_days: int
     anthropic_api_key: str | None
     platform: Platform = Platform.MACOS
+    stories_enabled: bool = Stories.ENABLED
+    story_guide: Path | None = None   # None: <project>/prompts/user_story_guide.md
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -106,6 +109,10 @@ class Settings:
     @property
     def prompts_dir(self) -> Path:
         return self.project_dir / Files.PROMPTS_DIR
+
+    @property
+    def story_guide_path(self) -> Path:
+        return self.story_guide or self.prompts_dir / Files.STORY_GUIDE
 
     @property
     def log_dir(self) -> Path:
@@ -205,6 +212,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     planner = raw.get("planner", {})
     user = raw.get("user", {})
     confirmation = raw.get("confirmation", {})
+    stories = raw.get("stories", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
     teams_default = (
@@ -242,4 +250,14 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
         anthropic_api_key=os.environ.get(Env.API_KEY) or None,
         platform=platform,
+        stories_enabled=bool(stories.get("enabled", Stories.ENABLED)),
+        story_guide=_project_path(project_dir, stories.get("guide")),
     )
+
+
+def _project_path(project_dir: Path, configured: str | None) -> Path | None:
+    """A configured file path; a relative one is resolved against the project dir. Empty = None."""
+    if not configured:
+        return None
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else project_dir / path
