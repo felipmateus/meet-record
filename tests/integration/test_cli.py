@@ -22,7 +22,7 @@ def _project(tmp_path: Path, monkeypatch) -> Path:
 def test_help_lists_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("status", "doctor", "purge", "start", "stop", "transcribe", "analyze", "plan"):
+    for cmd in ("status", "doctor", "purge", "start", "stop", "transcribe", "analyze", "plan", "stories"):
         assert cmd in result.output
 
 
@@ -208,3 +208,22 @@ def test_minutes_command(tmp_path: Path, monkeypatch):
     assert minutes.read_text().startswith("# Ata: Revisão da sprint de integração")
     assert runner.invoke(app, ["minutes"]).output.strip() == "No analyzed meeting without minutes."
     assert "minutes.md" in runner.invoke(app, ["minutes", "--all"]).output
+
+
+def test_plan_with_stories_enabled_writes_empty_drafts_without_calling_model(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    (project / "config.toml").write_text('[stories]\nenabled = true\nguide = "guide.md"\n')
+    (project / "guide.md").write_text("# Guia\n")
+    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
+    assert result.exit_code == 0, result.output
+    assert "Drafting user stories for 2026-10-06… ok (0 stories, 0 actions left out)" in result.output
+    drafts = (project / "data" / "plans" / "2026-10-06.stories.md").read_text()
+    assert "Nenhuma ação nova no plano deste dia." in drafts
+
+
+def test_stories_without_a_plan_fails(tmp_path: Path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    result = runner.invoke(app, ["stories", "--date", "2026-10-06"])
+    assert result.exit_code == 1 and "no plan for 2026-10-06" in result.output

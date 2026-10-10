@@ -5,10 +5,13 @@ from teams_recorder.domain import (
     ActionStatus,
     DailyPlan,
     Meeting,
+    Priority,
     Segment,
     Transcript,
+    earliest_due,
     meeting_id_for,
     merge_open_actions,
+    strongest_priority,
 )
 
 
@@ -67,3 +70,13 @@ def test_merge_open_actions():
     assert ids == ["keep", "late", "new"]
     assert late.status == ActionStatus.OVERDUE
     assert keep.status == ActionStatus.OPEN
+
+
+def test_story_priority_and_due_come_from_the_actions():
+    low = Action("a", "me", "m", priority=Priority.LOW, due=date(2026, 10, 20))
+    high = Action("b", "me", "m", priority=Priority.HIGH)
+    unstated = Action("c", "me", "m", due=date(2026, 10, 12))
+    assert strongest_priority([low, high, unstated]) == Priority.HIGH
+    assert strongest_priority([unstated]) is None
+    assert earliest_due([low, high, unstated]) == date(2026, 10, 12)
+    assert earliest_due([high]) is None

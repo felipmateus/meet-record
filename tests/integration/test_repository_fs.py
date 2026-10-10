@@ -6,7 +6,19 @@ import pytest
 
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
-from teams_recorder.domain import Action, DailyPlan, Meeting, MeetingNotFound, MeetingStatus, RepositoryError, derive_status
+from teams_recorder.domain import (
+    Action,
+    DailyPlan,
+    Meeting,
+    MeetingNotFound,
+    MeetingStatus,
+    Priority,
+    RepositoryError,
+    SkippedAction,
+    StoryDrafts,
+    UserStory,
+    derive_status,
+)
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -148,3 +160,19 @@ def test_save_minutes(fs: FsMeetingRepository):
     fs.save_minutes(m.id, "# Ata\n")
     assert fs.path(m.id, MINUTES).read_text() == "# Ata\n"
     assert derive_status(fs.files(m.id)) == MeetingStatus.RECORDING  # minutes do not change status
+
+
+def test_story_drafts_round_trip_next_to_the_plan(fs: FsMeetingRepository):
+    day = date(2026, 10, 6)
+    story = UserStory("Exportar horas", "Como gestor, quero exportar", acceptance_criteria=["Dado x"], details="**Contexto:** y",
+                      open_questions=["Qual formato?"], source_action_ids=["a1"], source_meetings=["m1"],
+                      priority=Priority.HIGH, due=date(2026, 10, 9), id="s1")
+    drafts = StoryDrafts(day, [story], [SkippedAction("a2", "e-mail")])
+    fs.save_plan(DailyPlan(day, "# day\n"))
+
+    fs.save_story_drafts(drafts, "# Rascunhos\n")
+
+    assert fs.load_story_drafts(day) == drafts
+    assert fs.load_story_drafts(date(2026, 10, 7)) is None
+    assert (fs.plans / "2026-10-06.stories.md").read_text() == "# Rascunhos\n"
+    assert fs.latest_plan_before(date(2026, 10, 7)).day == day   # the drafts file is not taken for a plan

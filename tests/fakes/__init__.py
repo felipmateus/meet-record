@@ -11,13 +11,17 @@ from teams_recorder.application.ports import ActiveRecording, CallState, Capture
 from teams_recorder.domain import (
     Action,
     Analysis,
+    AnalysisError,
     DailyPlan,
     Decision,
     Meeting,
     MeetingNotFound,
     RepositoryError,
     Segment,
+    SkippedAction,
+    StoryDrafts,
     Transcript,
+    UserStory,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
@@ -159,6 +163,7 @@ class InMemoryMeetingRepository:
         self.open_actions: list[Action] = []
         self.active: ActiveRecording | None = None
         self.minutes: dict[str, str] = {}
+        self.story_drafts: dict[date, tuple[StoryDrafts, str]] = {}
 
     def _get(self, meeting_id: str) -> _Rec:
         try:
@@ -275,6 +280,13 @@ class InMemoryMeetingRepository:
     def save_open_actions(self, actions: list[Action]) -> None:
         self.open_actions = list(actions)
 
+    def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
+        self.story_drafts[drafts.day] = (drafts, markdown)
+
+    def load_story_drafts(self, day: date) -> StoryDrafts | None:
+        saved = self.story_drafts.get(day)
+        return saved[0] if saved else None
+
 
 class FakeMinutesRenderer:
     def __init__(self) -> None:
@@ -283,3 +295,25 @@ class FakeMinutesRenderer:
     def render(self, meeting: Meeting, analysis: Analysis) -> str:
         self.calls.append((meeting, analysis))
         return f"# Minutes {meeting.id}\n{analysis.summary}\n"
+
+
+class FakeStoryWriter:
+    """One story per action, except actions whose description starts with "Email", which are skipped."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[tuple[date, list[Action], list[Analysis]]] = []
+
+    def draft(self, day: date, actions: list[Action], analyses: list[Analysis]) -> StoryDrafts:
+        self.calls.append((day, actions, analyses))
+        if self.fail:
+            raise AnalysisError("model is down")
+        stories = [UserStory(f"Story for {a.description}", "As someone, I want it", source_action_ids=[a.id])
+                   for a in actions if not a.description.startswith("Email")]
+        skipped = [SkippedAction(a.id, "not product work") for a in actions if a.description.startswith("Email")]
+        return StoryDrafts(day=day, stories=stories, skipped=skipped)
+
+
+class FakeStoryRenderer:
+    def render(self, drafts: StoryDrafts, actions: list[Action]) -> str:
+        return f"# Stories {drafts.day}\n{len(drafts.stories)} stories\n"

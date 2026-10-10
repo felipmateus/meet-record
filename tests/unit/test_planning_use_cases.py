@@ -1,9 +1,11 @@
 from datetime import date, datetime, timedelta
 
-from teams_recorder.application.use_cases import BuildDailyPlan, PurgeOldAudio
-from teams_recorder.domain import Action, ActionStatus, Meeting
+import pytest
+
+from teams_recorder.application.use_cases import BuildDailyPlan, DraftUserStories, PurgeOldAudio
+from teams_recorder.domain import Action, ActionStatus, AnalysisError, DailyPlan, Meeting, RepositoryError
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
-from tests.fakes import FakeAnalyzer, FakePlanner, FakeTranscriber
+from tests.fakes import FakeAnalyzer, FakePlanner, FakeStoryRenderer, FakeStoryWriter, FakeTranscriber
 
 
 def _analyzed(repo, clock, title):
@@ -66,3 +68,48 @@ def test_purge_old_audio_respects_retention_and_transcript(repo, clock):
     assert AUDIO not in repo.files(old_done.id)
     assert AUDIO in repo.files(old_untranscribed.id)
     assert AUDIO in repo.files(recent.id)
+
+
+def test_draft_user_stories_from_the_plan(repo, notifier, clock):
+    day = clock.now().date()
+    m, analysis = _analyzed(repo, clock, "A")
+    feature = Action("Export hours", "me", m.id, id="f1")
+    email = Action("Email the client", "me", m.id, id="e1")
+    orphan = Action("From a deleted meeting", "me", "gone", id="o1")
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[feature, email, orphan]))
+    writer = FakeStoryWriter()
+
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert [s.source_action_ids for s in drafts.stories] == [["f1"], ["o1"]]
+    assert [k.action_id for k in drafts.skipped] == ["e1"]
+    _, actions, analyses = writer.calls[0]
+    assert actions == [feature, email, orphan]
+    assert analyses == [analysis]                             # context of existing meetings only
+    saved, markdown = repo.story_drafts[day]
+    assert saved is drafts and markdown.startswith(f"# Stories {day}")
+    assert notifier.messages[-1] == ("User story drafts ready", "2 draft(s) to review, 1 action(s) left out")
+
+
+def test_draft_user_stories_without_new_actions_skips_the_writer(repo, notifier, clock):
+    day = clock.now().date()
+    repo.save_plan(DailyPlan(day, "# plan"))
+    writer = FakeStoryWriter()
+
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert drafts.stories == [] and not writer.calls
+    assert day in repo.story_drafts and not notifier.messages
+
+
+def test_draft_user_stories_needs_a_plan(repo, notifier, clock):
+    with pytest.raises(RepositoryError, match="no plan for 2026-10-06"):
+        DraftUserStories(repo, FakeStoryWriter(), FakeStoryRenderer(), notifier).execute(clock.now().date())
+
+
+def test_draft_user_stories_failure_saves_nothing(repo, notifier, clock):
+    day = clock.now().date()
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Export hours", "me", "m0")]))
+    with pytest.raises(AnalysisError):
+        DraftUserStories(repo, FakeStoryWriter(fail=True), FakeStoryRenderer(), notifier).execute(day)
+    assert not repo.story_drafts

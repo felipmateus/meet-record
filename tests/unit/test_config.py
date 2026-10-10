@@ -182,3 +182,16 @@ def test_raw_bytes_per_hour():
 
     assert raw_bytes_per_hour(16) == 1_036_800_000      # 48 kHz x 3 channels x 2 bytes x 3600 s
     assert raw_bytes_per_hour(32) == 2_073_600_000
+
+
+def test_stories_settings(tmp_path: Path):
+    defaults = load_settings(tmp_path)
+    assert not defaults.stories_enabled
+    assert defaults.story_guide_path == tmp_path.resolve() / "prompts" / "user_story_guide.md"
+
+    (tmp_path / "config.toml").write_text('[stories]\nenabled = true\nguide = "docs/guia.md"\n')
+    s = load_settings(tmp_path)
+    assert s.stories_enabled and s.story_guide_path == tmp_path.resolve() / "docs" / "guia.md"
+
+    (tmp_path / "config.toml").write_text('[stories]\nguide = "~/guia.md"\n')
+    assert load_settings(tmp_path).story_guide_path == Path("~/guia.md").expanduser()
