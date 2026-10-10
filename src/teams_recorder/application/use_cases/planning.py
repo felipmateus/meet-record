@@ -17,20 +17,23 @@ from teams_recorder.constants import Planner as PlannerDefaults
 from teams_recorder.constants import Stories as StoryDefaults
 from teams_recorder.domain import (
     Action,
+    ActionRoute,
     Analysis,
     DailyPlan,
     MeetingStatus,
     Publication,
     PublishError,
     RepositoryError,
+    SkippedAction,
     StoryDrafts,
     TeamsRecorderError,
     UserStory,
     derive_status,
     merge_open_actions,
+    task_card,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
-from teams_recorder.messages import Err, Notify
+from teams_recorder.messages import Err, Notify, StoryDoc
 
 
 @dataclass
@@ -62,11 +65,14 @@ class BuildDailyPlan:
 class DraftUserStories:
     """Drafts user stories from a saved daily plan's new actions.
 
-    The drafts are files for the user to review (`plans/<day>.stories.*`). A day without new
-    actions gets an empty set without calling the writer. The stories of the previous
-    `dedup_days` days go to the writer so a topic raised again does not become a second story,
-    and a day whose stories were already published is never drafted again (that would put
-    the same work on the board twice).
+    The drafts are files for the user to review (`plans/<day>.stories.*`). Actions are routed by
+    the kind the analysis gave them (`ActionRoute`): features, bugs and unclassified actions go to
+    the writer; technical and operation actions become task cards as they are; management and
+    communication actions stay in the plan. The writer sees the stories (not the task cards) of
+    the previous `dedup_days` days, so a topic raised again does not become a second story; a
+    task card whose text and kind match a recent card is left out as its duplicate. A day whose
+    stories were already published is never drafted again (that would put the same work on the
+    board twice).
     """
 
     repo: MeetingRepository
@@ -83,16 +89,38 @@ class DraftUserStories:
         if already_drafted is not None and already_drafted.has_publications:
             raise RepositoryError(Err.STORIES_ALREADY_PUBLISHED.format(day=day.isoformat()))
         actions = plan.new_actions
+        by_route = {route: [a for a in actions if a.route is route] for route in ActionRoute}
         existing = recent_stories(self.repo, day, self.dedup_days)
-        drafts = self.writer.draft(day, actions, self._source_analyses(actions), existing) if actions else StoryDrafts(day=day)
+        candidates = by_route[ActionRoute.STORY]
+        stories_only = [s for s in existing if not s.is_task_card]
+        drafts = self.writer.draft(day, candidates, self._source_analyses(candidates), stories_only) if candidates else StoryDrafts(day=day)
         drafts.day = day
+        self._add_task_cards(drafts, by_route[ActionRoute.TASK], [s for s in existing if s.is_task_card])
+        drafts.skipped += [
+            SkippedAction(a.id, StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS[a.kind.value]))
+            for a in by_route[ActionRoute.PLAN] if a.kind is not None
+        ]
         self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions, existing))
         if drafts.stories:
+            tasks = sum(1 for s in drafts.stories if s.is_task_card)
             self.notifier.notify(
                 Notify.STORIES_READY,
-                Notify.STORIES_READY_BODY.format(stories=len(drafts.stories), skipped=len(drafts.skipped)),
+                Notify.STORIES_READY_BODY.format(stories=len(drafts.stories) - tasks, tasks=tasks, skipped=len(drafts.skipped)),
             )
         return drafts
+
+    @staticmethod
+    def _add_task_cards(drafts: StoryDrafts, actions: list[Action], recent_cards: list[UserStory]) -> None:
+        """Task cards as the actions are; one repeating a recent card (same kind and text) is left out as its duplicate."""
+        seen = {(c.kind, " ".join(c.title.lower().split())): c for c in [*recent_cards, *drafts.stories]}
+        for action in actions:
+            card = task_card(action)
+            twin = seen.get((card.kind, " ".join(card.title.lower().split())))
+            if twin is not None:
+                drafts.skipped.append(SkippedAction(action.id, StoryDoc.SAME_TASK, duplicate_of=twin.id))
+                continue
+            drafts.stories.append(card)
+            seen[(card.kind, " ".join(card.title.lower().split()))] = card
 
     def _source_analyses(self, actions: list[Action]) -> list[Analysis]:
         meeting_ids = dict.fromkeys(a.source_meeting for a in actions)  # unique, in order

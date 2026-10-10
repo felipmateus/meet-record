@@ -23,7 +23,7 @@ class Notify:
     PLAN_READY = "Daily plan ready"
     PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
     STORIES_READY = "User story drafts ready"
-    STORIES_READY_BODY = "{stories} draft(s) to review, {skipped} action(s) left out"
+    STORIES_READY_BODY = "{stories} stor(ies) and {tasks} task card(s) to review, {skipped} action(s) left out"
     STORIES_FAILED = "User story drafts failed"
     STORIES_FAILED_BODY = "Plan {day}: {error}"
     STORIES_PUBLISHED = "User stories published"
@@ -254,7 +254,7 @@ class Cli:
     PLAN_PATH = "  Plan: {path}"
     STORIES_DATE_HELP = "Day whose plan is turned into story drafts (YYYY-MM-DD). Default: today."
     DRAFTING_STORIES = "Drafting user stories for {day}…"
-    STORIES_OK = " ok ({stories} stories, {skipped} actions left out)"
+    STORIES_OK = " ok ({stories} stories, {tasks} task cards, {skipped} actions left out)"
     STORY_LINE = "  • {title}"
     STORIES_PATH = "  Drafts: {path}"
     PUBLISH_DATE_HELP = "Day whose story drafts are published (YYYY-MM-DD). Default: today."
@@ -340,6 +340,7 @@ class Prompt:
     FIELD_DUE = "Due date in ISO format (YYYY-MM-DD) or null"
     FIELD_ISO_DATE = "ISO date or null"
     FIELD_AT = "Transcript timestamp (HH:MM:SS) of the line where it was said, or null"
+    FIELD_ACTION_KIND = "feature, bug, technical, operation, management or communication (see the rules)"
     FIELD_PRIORITY = "high/medium/low only when urgency was stated or clearly implied; otherwise null"
     FIELD_TITLE = "Short meeting title (max 8 words), inferred from the content"
     FIELD_PURPOSE = "One sentence: why the meeting happened"
@@ -439,4 +440,11 @@ class StoryDoc:
     BOARD_DRAFTS = "**Rascunho:** `{path}`"
     ACTION_REF = "`{id}`"
     NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
+    PLAN_ONLY = "{kind}: fica só no plano do dia"                           # stored as the skip reason
+    SAME_TASK = "mesma tarefa de um card recente"                            # stored as the skip reason
+    KIND = "**Tipo:** {label}"
+    KIND_LABELS = {
+        "feature": "Feature", "bug": "Bug", "technical": "Tarefa técnica",
+        "operation": "Operação", "management": "Gestão", "communication": "Comunicação",
+    }
     FOOTER = "---\n_Rascunho gerado automaticamente seguindo o guia de user stories. Confira cada história antes de publicar._"
