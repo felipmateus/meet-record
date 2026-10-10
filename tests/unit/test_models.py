@@ -6,8 +6,11 @@ from teams_recorder.domain import (
     DailyPlan,
     Meeting,
     Priority,
+    Publication,
     Segment,
+    StoryDrafts,
     Transcript,
+    UserStory,
     earliest_due,
     meeting_id_for,
     merge_open_actions,
@@ -80,3 +83,15 @@ def test_story_priority_and_due_come_from_the_actions():
     assert strongest_priority([unstated]) is None
     assert earliest_due([low, high, unstated]) == date(2026, 10, 12)
     assert earliest_due([high]) is None
+
+
+def test_story_publication_lookup_and_drafts_state():
+    published = Publication("backlog-md", "TASK-7", datetime(2026, 10, 10, 18, 5))
+    story = UserStory("Exportar horas", "Como gestor, quero exportar", publications=[published])
+    draft = UserStory("Outra", "Como analista, quero algo")
+
+    assert story.publication("backlog-md") is published
+    assert story.publication("github") is None
+    assert not StoryDrafts(date(2026, 10, 9)).has_publications
+    assert not StoryDrafts(date(2026, 10, 9), [draft]).has_publications
+    assert StoryDrafts(date(2026, 10, 9), [draft, story]).has_publications

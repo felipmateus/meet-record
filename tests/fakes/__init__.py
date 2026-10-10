@@ -287,6 +287,10 @@ class InMemoryMeetingRepository:
         saved = self.story_drafts.get(day)
         return saved[0] if saved else None
 
+    def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
+        start = before - timedelta(days=days)
+        return [self.story_drafts[d][0] for d in sorted(self.story_drafts) if start <= d < before]
+
 
 class FakeMinutesRenderer:
     def __init__(self) -> None:
