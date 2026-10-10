@@ -17,6 +17,8 @@ mypy                                   # type check (config in pyproject.toml); 
 TREC_REAL_WHISPER=1 pytest -m slow tests/integration/test_transcriber_whispercpp.py   # real whisper (loads the model)
 TREC_REAL_CLAUDE=1 pytest -m slow tests/integration/test_llm_claude_real.py           # real API call (spends credit)
 TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real.py   # real Claude Code headless call
+TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_publisher_backlogmd_real.py # real Backlog.md CLI, throwaway board
+TREC_REAL_CLAUDE_CLI=1 TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_story_publishing_e2e_real.py  # stories end to end
 
 scripts/install.sh [--dry-run]         # idempotent installer (deps, .venv, teams-tap, model, config, LaunchAgents); install.command wraps it for Finder
 scripts/uninstall.sh [--all]           # removes this copy's LaunchAgents (+ .venv/build with --all); never data
@@ -26,6 +28,8 @@ scripts/build-native-windows.sh        # dotnet publish → native/teams-tap-win
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)
 
 trec doctor | status | start | stop | cancel | transcribe [id] | analyze [id] | minutes [id] [--all] | plan [--date] | purge
+trec stories [--date] | publish [--date] [--only 1,3]  # draft stories from a plan; send drafts to the boards
+backlog board                          # the user's real board (./backlog, git-ignored); never `backlog init` here again
 trec daemon --once                     # one detector reading
 trec status                            # also prints the data dir (paths.data_dir in config.toml; currently ./data)
 trec agent install|restart|status|uninstall   # LaunchAgent local.teams-recorder.daemon
@@ -69,9 +73,10 @@ Ports and their adapters (`application/ports.py`):
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 | `StoryWriter` | `stories_claude.ClaudeStoryWriter` over the same `StructuredTransport`: drafts user stories from a plan's new actions; the user's guide (`[stories] guide`, default `prompts/user_story_guide.md`) is appended to `prompts/stories_system.md` and re-read on every call, and a missing or empty guide is an error. Invented action ids are dropped in code; uncovered actions become `skipped` |
 | `StoryRenderer` | `stories_markdown.MarkdownStoryRenderer` (`plans/<day>.stories.md`, the review document; labels in `messages.StoryDoc`) |
+| `StoryPublisher` | `publisher_backlogmd.BacklogMdPublisher` (`backlog task create` in the Triagem column; options before `--` and the title; `problems()` checks the binary, board, column, no auto-commit/remotes and that Git ignores the board — fails closed — and runs before every publish). Chosen by `[stories] destinations` through the `_PUBLISHERS` table in `container.py`; `PublishUserStories` fans out to every destination and skips what each already has |
 | (scheduler, not a port) | `launchd.LaunchAgent` on macOS, `scheduler_windows.ScheduledTask` (schtasks XML, `pythonw -m teams_recorder.adapters.inbound.cli`) on Windows; chosen in `cli._agent()` |
 
-Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`) that wait for a readiness file instead of assuming startup time.
+Every port has a fake in `tests/fakes/__init__.py`; use-case tests run entirely on fakes. Subprocess adapters are tested with scripted stand-ins in `tests/fixtures/` (`fake_recorder.py`, `fake_whisper_cli.py`, `fake_claude_cli.py`, `fake_backlog_cli.py`); the long-running ones wait for a readiness file instead of assuming startup time.
 
 Strings and identifiers live in two modules, never inline:
 - `src/teams_recorder/messages.py` — every user-facing text: CLI output and help (`Cli`), notifications (`Notify`), exception messages (`Err`), log templates (`Log`, printf-style). Tests assert on these constants, so changing a wording is a one-line change.
@@ -99,7 +104,7 @@ Key invariants:
 - **English only.** Everything written into this repository is in English: code, identifiers, comments, docstrings, log messages, CLI output, notifications, tests, documentation, PRD, run logs and commit messages. The only Portuguese allowed is data and user-facing documents built from LLM content (the labels of `minutes.md` in `messages.Minutes`, the labels of the story drafts in `messages.StoryDoc`, and the daily-plan section names in the prompt): sample transcripts and analyses used as test fixtures, and the content the LLM produces for the user (meetings are held in Brazilian Portuguese, so prompts must keep asking for Portuguese output while being written in English). Commits before 2026-10-05 are in Portuguese and were not rewritten.
 - **Ask before committing or pushing.** Edit, test and show the diff; commit only with explicit approval.
 - Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative English messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
-- Never commit `.env`, `data/`, `native/teams-tap/.build/`, `native/teams-tap-win/bin|obj/` or `.venv/` (already ignored). `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
+- Never commit `.env`, `data/`, `backlog/`, `backlog.config.yml`, `native/teams-tap/.build/`, `native/teams-tap-win/bin|obj/` or `.venv/` (already ignored). `backlog/` is the user's real board of stories built from meetings: never publish test stories there; tests use throwaway boards. `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
 - Ask before: installing/uninstalling/restarting the LaunchAgent on the user's Mac, deleting anything under `data/recordings`, changing macOS permissions, or running tests that spend API credit. The daemon is installed and running on the development machine and records the user's real meetings.
 - Keep `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase status + notes) and `prd/` in sync when a phase or a behavior changes.
 - When a skill is run, the organization requires a `RUN_LOG-<user>-<date>.md` in `docs/run-logs/` listing questions asked and answers given.

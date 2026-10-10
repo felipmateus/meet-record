@@ -15,6 +15,7 @@ Requirements and architecture documentation: `docs/REQUIREMENTS-AND-ARCHITECTURE
 - Phase 5 done: call detector, daemon and LaunchAgent (`trec agent install`). Recording, transcription and analysis run on their own.
 - Phase 6 done: daily planner (`trec plan`), scheduled Monday to Friday at 6 pm by the same `trec agent install`, with purging of old audio.
 - Phase 7 done: installer (`scripts/install.sh`, or double-click `install.command`) and uninstaller (`scripts/uninstall.sh`).
+- User stories: drafted from the daily plan by the rules of `prompts/user_story_guide.md` (`trec stories`) and published to a local Backlog.md board for review (`trec publish`); see [User story drafts](#user-story-drafts).
 - Windows port: the whole flow has Windows adapters (see [Windows](#windows)). It is built and unit-tested on macOS but **has not run on a Windows PC yet**.
 
 ## Installation (phase 7)
@@ -155,6 +156,8 @@ trec plan --purge              # same + deletes audio from old meetings (retenti
 
 New actions come from the day's analyses (deterministic); overdue ones are open actions whose deadline has passed; the model writes the Markdown and the priorities and points out which open actions were completed according to the analyses, and may only cite existing ids. The accumulated list lives in `data/plans/open_actions.json`. The `local.teams-recorder.planner` LaunchAgent runs `trec plan --purge` at 6 pm (config `planner.hour`), Monday to Friday.
 
+On first run, macOS asks for two permissions: **Microphone** (for ffmpeg) and **Screen & System Audio Recording** (for teams-tap), under System Settings > Privacy & Security. Without the second one, the Teams track comes out silent.
+
 ### User story drafts
 
 ```bash
@@ -162,9 +165,26 @@ trec stories                   # drafts user stories from today's plan into data
 trec stories --date 2026-10-09 # redrafts a given day (the plan must exist)
 ```
 
-With `[stories] enabled = true` in `config.toml`, `trec plan` (and so the 6 pm planner) drafts them right after the plan. The model reads the plan's new actions and the meetings they came from, leaves out what is not a story (emails, meetings, reminders) and groups related actions, always following the guide in `[stories] guide` (default `prompts/user_story_guide.md`): edit that file to change how stories are written. Drafts are for review; nothing is published to any board.
+With `[stories] enabled = true` in `config.toml`, `trec plan` (and so the 6 pm planner) drafts them right after the plan. The model reads the plan's new actions and the meetings they came from, leaves out what is not a story (emails, meetings, reminders) and groups related actions, always following the guide in `[stories] guide` (default `prompts/user_story_guide.md`): edit that file to change how stories are written. It also sees the stories of the previous `dedup_days` days (default 30), so a topic raised again is left out as a duplicate instead of becoming a second story. A day whose stories were already published is never drafted again.
 
-On first run, macOS asks for two permissions: **Microphone** (for ffmpeg) and **Screen & System Audio Recording** (for teams-tap), under System Settings > Privacy & Security. Without the second one, the Teams track comes out silent.
+### Publishing to a Backlog.md board
+
+```bash
+trec publish                            # sends today's drafts to the boards in [stories] destinations
+trec publish --date 2026-10-09 --only 1,3   # a given day, only stories 1 and 3 of the drafts document
+backlog board                           # the board in the terminal (or `backlog browser` for the web UI)
+```
+
+The first destination is a local [Backlog.md](https://github.com/MrLesk/Backlog.md) board (a Markdown kanban). Each story becomes a task in the **Triagem** column with its criteria, priority, labels and where it came from; move it to To Do to approve it, archive it to reject it. teams-recorder never edits a task after creating it, and publishing again never duplicates one (`trec status` shows how many stories are still waiting). With `[stories] publish = true`, stories are published right after drafting, so the 6 pm planner does it too.
+
+The board lives in this folder, in `./backlog`, which is **git-ignored**: stories carry meeting content and this repository is public. Publishing refuses a board that Git would version (or one git cannot confirm is ignored), and a Backlog.md configuration that commits or reaches remotes. One-time setup:
+
+```bash
+brew install backlog-md                 # or: npm i -g backlog.md
+backlog init "teams-recorder" --no-git --defaults --integration-mode none --auto-open-browser false
+```
+
+Then add `"Triagem"` to `statuses` in `backlog/config.yml` (e.g. `statuses: ["Triagem", "To Do", "In Progress", "Done"]`) and check with `trec doctor` (`story destination backlog-md: ready`). `--integration-mode none` keeps Backlog.md from editing `AGENTS.md` / `CLAUDE.md`; `--no-git` keeps it from committing.
 
 ## Development
 

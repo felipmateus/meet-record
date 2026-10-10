@@ -22,11 +22,11 @@ Prove the whole flow on real inputs (a real plan, the real model, a real Backlog
 
 ## Subtasks
 
-- [ ] 7.1 Add the fixture plans and the opt-in end-to-end test.
-- [ ] 7.2 Run the manual validation with the user and record the outcome (and any guide changes) in §10 of the requirements document.
-- [ ] 7.3 Switch publishing on in `config.toml` after the user's OK.
-- [ ] 7.4 Update the documents listed above.
-- [ ] 7.5 Run `pytest`, the opt-in tests and `mypy`; check `git status` for `backlog/`.
+- [x] 7.1 Add the opt-in end-to-end test (its two plans are built in the test; the duplicate check runs on the actions alone, without meeting analyses).
+- [x] 7.2 Run the manual validation with the user and record the outcome (and any guide changes) in §10 of the requirements document. (Drafted and published on 2026-10-10: TASK-1..4 in Triagem; the user's verdict on quality is pending.)
+- [ ] 7.3 Switch publishing on in `config.toml` after the user's OK. (`destinations = ["backlog-md"]` is set so `trec publish` works by hand; `publish = true` waits for the user.)
+- [x] 7.4 Update the documents listed above.
+- [x] 7.5 Run `pytest`, the opt-in tests and `mypy`; check `git status` for `backlog/`.
 
 ## Implementation details
 
@@ -41,9 +41,9 @@ See PRD §7 (success criteria), techspec §12 (test matrix) and §13 (order). Th
 
 ## Task tests
 
-- [ ] Unit tests — none new; the full suite must stay green.
-- [ ] Integration tests — the full integration suite, plus the 5.0 opt-in real Backlog.md test.
-- [ ] E2E tests — `tests/integration/test_story_publishing_e2e_real.py` (opt-in, real model and real Backlog.md), and the manual run on the plan of 2026-10-09.
+- [x] Unit tests — none new; the full suite must stay green.
+- [x] Integration tests — the full integration suite, plus the 5.0 opt-in real Backlog.md test.
+- [x] E2E tests — `tests/integration/test_story_publishing_e2e_real.py` (opt-in, real model and real Backlog.md), and the manual run on the plan of 2026-10-09.
 
 ## Relevant files
 

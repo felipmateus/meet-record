@@ -12,6 +12,8 @@
 | `pgrep -x` | CLI | Teams PID (fallback) | `None` |
 | launchd (`launchctl`) | CLI | `bootstrap gui/<uid> plist`, `bootout`, `kickstart -k`, `print` | `RuntimeError` with stderr |
 | `osascript` | CLI | `display notification` | ignored (never brings down the pipeline) |
+| Backlog.md 1.53 (`backlog`) | CLI | `task create --desc D -s Triagem -l L… [--priority P] [--ac C…] --plain -- <title>` run in the board's project folder; id read from `Task <ID> - ` in the plain output. One-time `init --no-git --defaults --integration-mode none` | `PublishError` (missing binary, exit ≠ 0, timeout, no id); `problems()` for an unready board |
+| `git check-ignore -q` | CLI | Confirms the board folder is git-ignored when it sits inside a work tree | anything but "ignored" refuses publishing (fails closed) |
 
 ## Required macOS permissions
 | Permission | Granted to | Without it |

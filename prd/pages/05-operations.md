@@ -4,7 +4,7 @@
 > **Module:** Operations · **Generated:** 2026-10-05
 
 ## `trec status`
-Lists the data folder, whether the API key is configured, the meetings with their derived state and next pending step, the recording in progress (if any) and the number of open actions.
+Lists the data folder, whether the API key is configured, the meetings with their derived state and next pending step, the recording in progress (if any), the number of open actions and, when story destinations are configured, the stories of the last `[stories] dedup_days` days still waiting to be published.
 
 | Column | Format |
 |---|---|
@@ -16,7 +16,7 @@ Lists the data folder, whether the API key is configured, the meetings with thei
 `[TBC]` Summing the month's estimated spend from `llm_usage.jsonl` is planned for phase 7.
 
 ## `trec doctor`
-Checks, reporting `ok`/`MISSING` (missing)/`info`: ffmpeg, whisper-cli, swift, osascript, the built teams-tap, Claude Code CLI (and the current provider), whisper model, VAD model, API key (required only with the `api` provider), `.env` permission (warning if not 600) and the data folder. Exit code 0 only if everything the current provider requires is present.
+Checks, reporting `ok`/`MISSING` (missing)/`info`: ffmpeg, whisper-cli, swift, osascript, the built teams-tap, Claude Code CLI (and the current provider), whisper model, VAD model, API key (required only with the `api` provider), `.env` permission (warning if not 600), free disk, the user story guide (required when drafting is on), each story destination (`ready`, or `not ready` with its problems; required only when `[stories] publish = true`) and the data folder. Exit code 0 only if everything the current configuration requires is present.
 
 ## `trec purge`
 Deletes `audio.m4a` from meetings older than `planner.retention_days` (30) days that already have `transcript.json`. Lists the affected ids. Transcript and analysis remain.
