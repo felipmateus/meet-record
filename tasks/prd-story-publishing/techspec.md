@@ -51,17 +51,22 @@ class StoryPublisher(Protocol):
 
 class StoryWriter(Protocol):
     def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts: ...
+
+class StoryRenderer(Protocol):
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str: ...   # names the covering story of a duplicate
 ```
+
+`existing` is always `recent_stories(repo, day, dedup_days)` (application helper over `recent_story_drafts`), for the writer and for every render of the day's document.
 
 `MeetingRepository` gains `recent_story_drafts(before: date, days: int) -> list[StoryDrafts]` (drafts of the days in `[before - days, before)`, oldest first).
 
-### 4.2 `PublishUserStories(repo, publishers, renderer, notifier, clock)`
+### 4.2 `PublishUserStories(repo, publishers, renderer, notifier, clock, dedup_days)`
 
 `execute(day, only: list[int] | None = None) -> PublishReport`
 
 1. Load the day's drafts; none → `RepositoryError(Err.STORIES_MISSING)`.
 2. Select the stories: all, or the 1-based numbers in `only` (the numbers of the drafts document); an out-of-range number → error before publishing anything.
-3. For each selected story, for each publisher: skip when `story.publication(destination)` exists; otherwise call `publish`, append a `Publication(destination, ref, clock.now())` and **save the drafts (JSON and re-rendered Markdown) immediately**, so an interrupted run never loses a ref (FR3, reliability).
+3. For each selected story, for each publisher: skip when `story.publication(destination)` exists; otherwise call `publish`, append a `Publication(destination, ref, clock.now())` and **save the drafts (JSON and re-rendered Markdown) immediately**, so an interrupted run never loses a ref (FR3, reliability). The re-render gets the plan's new actions and `recent_stories(repo, day, dedup_days)`, like the first render, so duplicate lines keep the covering story's title.
 4. A `PublishError` (or any `TeamsRecorderError`) is collected in the report and the loop goes on (FR4).
 5. Notify once: published count, or the failure count.
 
@@ -92,7 +97,7 @@ Constructor: `binary` (from `find_tool(Bin.BACKLOG, …)`), `project_dir: Path`,
 
 ### 5.2 `stories_claude.ClaudeStoryWriter` (duplicates)
 
-- User message gains a section "Existing stories (do not duplicate)": id, title and story sentence of each existing story (`Prompt.STORIES_EXISTING`).
+- User message gains a section "Existing stories from recent days" (`Prompt.STORIES_EXISTING`): id, title and story sentence of each existing story (`Stories.EXISTING_FIELDS` over the codec's story dict).
 - `SkippedOut` gains `duplicate_of: str | None`; kept only when it is the id of an existing story (invented ids dropped, like action ids).
 - `prompts/stories_system.md` gains one rule: an action already covered by an existing story goes to `skipped` with `duplicate_of`, never into a new story.
 

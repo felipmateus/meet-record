@@ -24,13 +24,13 @@ When drafting, give the model the stories of the last `dedup_days` days so it le
 
 ## Subtasks
 
-- [ ] 2.1 Change the `StoryWriter` port and `FakeStoryWriter`; add the existing-stories section to `stories_claude.build_user_message`.
-- [ ] 2.2 Add `duplicate_of` to `SkippedOut` and validate it in `to_drafts`.
-- [ ] 2.3 Add the duplicate rule to `prompts/stories_system.md`.
-- [ ] 2.4 Render the duplicate reference in `stories_markdown` (title of the covering story when known, id otherwise).
-- [ ] 2.5 Update `DraftUserStories`: existing stories from the repository window and the redraft lock; wire `dedup_days` in the container.
-- [ ] 2.6 Add the strings (`Prompt.STORIES_EXISTING`, `StoryDoc.DUPLICATE_OF`, `Err.STORIES_ALREADY_PUBLISHED`).
-- [ ] 2.7 Write the unit and integration tests below.
+- [x] 2.1 Change the `StoryWriter` port and `FakeStoryWriter`; add the existing-stories section to `stories_claude.build_user_message`.
+- [x] 2.2 Add `duplicate_of` to `SkippedOut` and validate it in `to_drafts`.
+- [x] 2.3 Add the duplicate rule to `prompts/stories_system.md`.
+- [x] 2.4 Render the duplicate reference in `stories_markdown` (title of the covering story when known, id otherwise).
+- [x] 2.5 Update `DraftUserStories`: existing stories from the repository window and the redraft lock; `dedup_days` defaults to `Stories.DEDUP_DAYS` (the container passes the configured value in task 4.0, when the setting exists).
+- [x] 2.6 Add the strings (`Prompt.STORIES_EXISTING`, `StoryDoc.DUPLICATE_OF`, `Err.STORIES_ALREADY_PUBLISHED`).
+- [x] 2.7 Write the unit and integration tests below.
 
 ## Implementation details
 
@@ -45,8 +45,8 @@ See techspec §4.1 (writer port), §4.3 (use case changes), §5.2 (writer) and �
 
 ## Task tests
 
-- [ ] Unit tests — `tests/unit/test_stories_claude.py`: existing section present with ids and titles (absent when there are none); `duplicate_of` kept/dropped; `tests/unit/test_stories_markdown.py`: duplicate line with title and with an unknown id; `tests/unit/test_planning_use_cases.py`: existing stories come from the window only, lock raises before the writer, unpublished drafts can be redrafted.
-- [ ] Integration tests — `tests/integration/test_cli.py`: `trec plan --date` on a day with published drafts saves the plan, prints the refusal and exits 1 (fake drafts written with `FsMeetingRepository`).
+- [x] Unit tests — `tests/unit/test_stories_claude.py`: existing section present with ids and titles (absent when there are none); `duplicate_of` kept/dropped; `tests/unit/test_stories_markdown.py`: duplicate line with title and with an unknown id; `tests/unit/test_planning_use_cases.py`: existing stories come from the window only, lock raises before the writer, unpublished drafts can be redrafted.
+- [x] Integration tests — `tests/integration/test_cli.py`: `trec plan --date` on a day with published drafts saves the plan, prints the refusal and exits 1 (fake drafts written with `FsMeetingRepository`).
 - [ ] E2E tests — covered in 7.0 (real model on a repeated topic).
 
 ## Relevant files

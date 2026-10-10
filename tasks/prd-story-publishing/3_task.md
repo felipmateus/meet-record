@@ -14,7 +14,7 @@ Introduce the `StoryPublisher` port and the `PublishUserStories` use case: send 
 
 <requirements>
 - `StoryPublisher` with `destination`, `publish(story, day) -> ref` and `problems()` — techspec §4.1.
-- `PublishUserStories(repo, publishers, renderer, notifier, clock).execute(day, only)` follows the algorithm in techspec §4.2: drafts required, 1-based `only` validated before publishing, skip per destination, save JSON and re-rendered Markdown after each success, collect `TeamsRecorderError`s, one notification.
+- `PublishUserStories(repo, publishers, renderer, notifier, clock, dedup_days).execute(day, only)` follows the algorithm in techspec §4.2: drafts required, 1-based `only` validated before publishing, skip per destination, save JSON and re-rendered Markdown after each success (re-rendered with the plan's new actions and `recent_stories(...)`, as in drafting), collect `TeamsRecorderError`s, one notification.
 - `PublishReport` with published, already-published count and failures.
 - New strings: `Err.STORIES_MISSING`, `Err.INVALID_STORY_NUMBER`, `Notify.STORIES_PUBLISHED`, `Notify.PUBLISH_FAILED` (and bodies).
 - No CLI or configuration changes in this task.
