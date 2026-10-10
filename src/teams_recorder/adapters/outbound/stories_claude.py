@@ -8,7 +8,8 @@ Division of responsibilities (to keep the traceability honest):
 - model: which actions become stories, how they are grouped, and the story text;
 - deterministic (here): a story may only cite action ids it received (invented ids are
   dropped, and a story left with no source action is dropped too); every action that ends
-  up in no story is listed as skipped; priority and due date come from the source actions.
+  up in no story is listed as skipped, and a skipped action may only point to an existing
+  story it was given; priority and due date come from the source actions.
 """
 from __future__ import annotations
 
@@ -50,6 +51,7 @@ class StoryOut(BaseModel):
 class SkippedOut(BaseModel):
     action_id: str
     reason: str = Field(description=Prompt.FIELD_SKIPPED_REASON)
+    duplicate_of: str | None = Field(default=None, description=Prompt.FIELD_SKIPPED_DUPLICATE)
 
 
 class StoriesOut(BaseModel):
@@ -82,17 +84,17 @@ class ClaudeStoryWriter:
             self.system_prompt = load_prompt(self.prompt_path)
         return self.system_prompt + Prompt.STORY_GUIDE_HEADER + load_guide(self.guide_path)
 
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis]) -> StoryDrafts:
+    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
         if not actions:
             return StoryDrafts(day=day)
         out = self.transport.complete(
-            self._system(), build_user_message(day, actions, analyses, self.user_name), StoriesOut,
+            self._system(), build_user_message(day, actions, analyses, existing, self.user_name), StoriesOut,
             tag=f"stories:{day.isoformat()}", extra={"day": day.isoformat()},
         )
-        return to_drafts(out, day, actions)
+        return to_drafts(out, day, actions, existing)
 
 
-def to_drafts(out: StoriesOut, day: date, actions: list[Action]) -> StoryDrafts:
+def to_drafts(out: StoriesOut, day: date, actions: list[Action], existing: list[UserStory]) -> StoryDrafts:
     by_id = {a.id: a for a in actions}
     stories: list[UserStory] = []
     for s in out.stories:
@@ -112,16 +114,28 @@ def to_drafts(out: StoriesOut, day: date, actions: list[Action]) -> StoryDrafts:
         ))
     used = {i for story in stories for i in story.source_action_ids}
     reasons = {k.action_id: k.reason.strip() for k in out.skipped}
-    skipped = [SkippedAction(a.id, reasons.get(a.id) or StoryDoc.NOT_ADDRESSED) for a in actions if a.id not in used]
+    existing_ids = {s.id for s in existing}
+    duplicates = {k.action_id: k.duplicate_of for k in out.skipped if k.duplicate_of in existing_ids}  # no invented stories
+    skipped = [
+        SkippedAction(a.id, reasons.get(a.id) or StoryDoc.NOT_ADDRESSED, duplicates.get(a.id))
+        for a in actions if a.id not in used
+    ]
     return StoryDrafts(day=day, stories=stories, skipped=skipped)
 
 
-def build_user_message(day: date, actions: list[Action], analyses: list[Analysis], user_name: str = "") -> str:
+def build_user_message(day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory], user_name: str = "") -> str:
     parts = [Prompt.USER_NAME.format(name=user_name)] if user_name else []
     parts.append(Prompt.STORIES_DATE.format(date=day.isoformat(), weekday=Prompt.WEEKDAYS[day.weekday()]))
     parts.append(Prompt.STORIES_ACTIONS + json.dumps([codec.action_to_dict(a) for a in actions], ensure_ascii=False, indent=1))
     parts.append(Prompt.STORIES_MEETINGS + json.dumps([_meeting_context(a) for a in analyses], ensure_ascii=False, indent=1))
+    if existing:
+        parts.append(Prompt.STORIES_EXISTING + json.dumps([_story_summary(s) for s in existing], ensure_ascii=False, indent=1))
     return "\n".join(parts)
+
+
+def _story_summary(story: UserStory) -> dict[str, Any]:
+    full = codec.story_to_dict(story)
+    return {key: full[key] for key in Stories.EXISTING_FIELDS}
 
 
 def _meeting_context(analysis: Analysis) -> dict[str, Any]:

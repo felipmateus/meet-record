@@ -3,7 +3,8 @@
 One section per story: title; priority, due date and source meetings; the story sentence;
 acceptance criteria as a checklist; the other sections the guide asked for; open questions;
 and the source actions with the transcript timestamp where each was said. Then the actions
-that did not become stories, with the reason. Labels come from messages.StoryDoc.
+that did not become stories, with the reason and, for duplicates, the title of the existing
+story that covers them. Labels come from messages.StoryDoc.
 """
 from __future__ import annotations
 
@@ -20,8 +21,9 @@ def _br(day: date) -> str:
 
 @dataclass
 class MarkdownStoryRenderer:
-    def render(self, drafts: StoryDrafts, actions: list[Action]) -> str:
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
         by_id = {a.id: a for a in actions}
+        titles = {s.id: s.title for s in existing}
         day = _br(drafts.day)
         out: list[str] = [StoryDoc.TITLE.format(date=day), "", StoryDoc.INTRO.format(date=day)]
         if not actions:
@@ -34,10 +36,15 @@ class MarkdownStoryRenderer:
             out += ["", StoryDoc.SKIPPED]
             for skipped in drafts.skipped:
                 action = by_id.get(skipped.action_id)
+                covered_by = (
+                    StoryDoc.DUPLICATE_OF.format(title=titles.get(skipped.duplicate_of, skipped.duplicate_of))
+                    if skipped.duplicate_of else ""
+                )
                 out.append(StoryDoc.SKIPPED_LINE.format(
                     id=skipped.action_id,
                     description=action.description if action else StoryDoc.UNKNOWN_ACTION,
                     reason=skipped.reason,
+                    covered_by=covered_by,
                 ))
         out += ["", StoryDoc.FOOTER]
         return "\n".join(out) + "\n"
