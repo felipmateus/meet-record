@@ -81,3 +81,16 @@ def test_story_publishers_keep_the_configured_order(tmp_path: Path, monkeypatch)
                                                                  "second": lambda s: FakeStoryPublisher("second")})
     settings = replace(load_settings(tmp_path), story_destinations=("second", "first"))
     assert [p.destination for p in build_story_publishers(settings)] == ["second", "first"]
+
+
+def test_every_destination_has_a_publisher_and_backlog_md_gets_its_settings(tmp_path: Path):
+    from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
+    from teams_recorder.container import _PUBLISHERS
+
+    assert set(_PUBLISHERS) == set(StoryDestination)
+    (tmp_path / "config.toml").write_text('[stories]\ndestinations = ["backlog-md"]\n[stories.backlog_md]\nproject_dir = "."\nstatus = "Inbox"\n')
+    settings = load_settings(tmp_path)
+    [publisher] = build_story_publishers(settings)
+    assert isinstance(publisher, BacklogMdPublisher)
+    assert publisher.project_dir == tmp_path.resolve() and publisher.status == "Inbox"
+    assert publisher.drafts_dir == settings.data_dir / "plans" and publisher.destination == StoryDestination.BACKLOG_MD
