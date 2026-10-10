@@ -145,6 +145,9 @@ class MeetingRepository(Protocol):
     # user story drafts (one set per plan day)
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None: ...
     def load_story_drafts(self, day: date) -> StoryDrafts | None: ...
+    def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
+        """Drafts of the days in [before - days, before), oldest first."""
+        ...
 
 
 class ConfirmAnswer(StrEnum):
