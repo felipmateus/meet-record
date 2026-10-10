@@ -86,7 +86,7 @@ guide = "prompts/user_story_guide.md"
 # Where drafted stories go (boards), by name. Available: "backlog-md". Empty = drafts only.
 destinations = []
 # Publish to the destinations right after drafting, so the scheduled planner does it too.
-# false = drafts are published only when you ask.
+# false = drafts are published only with `trec publish [--date YYYY-MM-DD] [--only 1,3]`.
 publish = false
 # Stories of this many previous days are shown to the model so a topic raised again is not
 # drafted as a second story.

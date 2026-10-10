@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import os
+import re
 import shutil
 import signal
 import sys
@@ -19,9 +20,10 @@ from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.application.ports import MeetingRepository
+from teams_recorder.application.use_cases import stories_waiting
 from teams_recorder.config import Settings, find_tool, load_settings
-from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Platform
-from teams_recorder.container import Container, build_container, teams_tap_binary
+from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
+from teams_recorder.container import Container, build_container, build_story_publishers, teams_tap_binary
 from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
 from teams_recorder.messages import Cli, Err, Notify, Step
@@ -86,6 +88,8 @@ def status() -> None:
         typer.echo(Cli.RECORDING_IN_PROGRESS.format(meeting_id=active.meeting.id, tap_pid=active.process_handle.pid, mic_pid=active.mic_handle.pid))
     open_actions = c.repo.load_open_actions()
     typer.echo(Cli.OPEN_ACTIONS.format(count=len(open_actions)))
+    if c.story_publishers:
+        typer.echo(Cli.STORIES_WAITING.format(count=len(c.stories_waiting())))
 
 
 @app.command(help=Cli.DOCTOR_CMD_HELP)
@@ -120,8 +124,7 @@ def doctor() -> None:
             hint="" if vad_ok else Cli.VAD_MODEL_HINT.format(script=Files.DOWNLOAD_MODEL_SCRIPT, model=Audio.DEFAULT_VAD_MODEL),
         ))
     key_needed = settings.llm_provider == LlmProvider.API
-    key_mark = Cli.OK if settings.has_api_key else (Cli.MISSING_MARK if key_needed else Cli.INFO)
-    typer.echo(Cli.API_KEY_LINE.format(mark=key_mark, hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
+    typer.echo(Cli.API_KEY_LINE.format(mark=_mark(settings.has_api_key, key_needed), hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
     env_file = settings.project_dir / Files.DOTENV
     if env_file.exists():
         mode = env_file.stat().st_mode & 0o777
@@ -134,13 +137,32 @@ def doctor() -> None:
     guide_ok = settings.story_guide_path.is_file()
     ok = ok and (guide_ok or not settings.stories_enabled)
     typer.echo(Cli.STORY_GUIDE_LINE.format(
-        mark=Cli.OK if guide_ok else (Cli.MISSING_MARK if settings.stories_enabled else Cli.INFO),
+        mark=_mark(guide_ok, settings.stories_enabled),
         path=settings.story_guide_path,
         hint="" if settings.stories_enabled else Cli.STORY_GUIDE_DISABLED,
     ))
+    ok = _check_destinations(settings) and ok
     typer.echo(Cli.DATA_IN.format(path=settings.data_dir))
     llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
     raise typer.Exit(code=0 if ok and llm_ok else 1)
+
+
+def _mark(found: bool, required: bool) -> str:
+    """Doctor mark for something optional unless `required`: ok, MISSING when required, info otherwise."""
+    return Cli.OK if found else (Cli.MISSING_MARK if required else Cli.INFO)
+
+
+def _check_destinations(settings: Settings) -> bool:
+    """One doctor line per story destination; problems only fail the doctor when stories are published automatically."""
+    ready = True
+    for publisher in build_story_publishers(settings):
+        problems = publisher.problems()
+        ready = ready and (not problems or not settings.story_auto_publish)
+        state = Cli.DESTINATION_NOT_READY if problems else Cli.DESTINATION_READY
+        typer.echo(Cli.DESTINATION_LINE.format(mark=_mark(not problems, settings.story_auto_publish), destination=publisher.destination, state=state))
+        for problem in problems:
+            typer.echo(Cli.DESTINATION_PROBLEM.format(problem=problem))
+    return ready
 
 
 @app.command(help=Cli.START_CMD_HELP)
@@ -406,7 +428,7 @@ def plan(
     for pr in result.priorities:
         typer.echo(Cli.PRIORITY_LINE.format(text=pr))
     typer.echo(Cli.PLAN_PATH.format(path=settings.data_dir / Files.PLANS_DIR / Files.PLAN_MARKDOWN.format(day=target.isoformat())))
-    stories_ok = _draft_stories(c, target) if settings.stories_enabled else True
+    stories_ok = _draft_then_publish(c, target) if settings.stories_enabled else True
     if purge_after:
         purged = c.purge_old_audio().execute()
         typer.echo(Cli.PURGED_RETENTION.format(count=len(purged)))
@@ -421,7 +443,7 @@ def stories(
     settings = _settings()
     _check_llm_prerequisites(settings)
     target = _day(day)
-    if not _draft_stories(build_container(settings, headless=True), target):
+    if not _draft_then_publish(build_container(settings, headless=True), target):
         raise typer.Exit(code=1)
 
 
@@ -439,6 +461,61 @@ def _draft_stories(c: Container, day: date) -> bool:
         typer.echo(Cli.STORY_LINE.format(title=story.title))
     typer.echo(Cli.STORIES_PATH.format(path=c.settings.data_dir / Files.PLANS_DIR / Files.STORIES_MARKDOWN.format(day=day.isoformat())))
     return True
+
+
+def _draft_then_publish(c: Container, day: date) -> bool:
+    """Drafts the day's stories and, with [stories] publish on, sends them to the destinations."""
+    if not _draft_stories(c, day):
+        return False
+    if c.settings.story_auto_publish and c.story_publishers:
+        return _publish_stories(c, day)
+    return True
+
+
+@app.command(help=Cli.PUBLISH_CMD_HELP)
+def publish(
+    day: str | None = typer.Option(None, "--date", help=Cli.PUBLISH_DATE_HELP),
+    only: str | None = typer.Option(None, "--only", help=Cli.PUBLISH_ONLY_HELP),
+) -> None:
+    settings = _settings()
+    target = _day(day)
+    numbers = _story_numbers(only)
+    c = build_container(settings, headless=True)
+    if not c.story_publishers:
+        _fail(Cli.NO_DESTINATIONS)
+    if not _publish_stories(c, target, numbers):
+        raise typer.Exit(code=1)
+
+
+def _publish_stories(c: Container, day: date, only: list[int] | None = None) -> bool:
+    """Publishes a day's drafts and reports each story; False when anything failed."""
+    typer.echo(Cli.PUBLISHING.format(day=day.isoformat()))
+    try:
+        report = c.publish_user_stories().execute(day, only)
+    except TeamsRecorderError as exc:  # before or between stories (no drafts, a failed save): the use case did not notify
+        typer.echo(Cli.ERROR_PREFIX.format(message=exc), err=True)
+        c.notifier.notify(Notify.PUBLISH_FAILED, Notify.PUBLISH_ERROR_BODY.format(day=day.isoformat(), error=exc))
+        return False
+    for published in report.published:
+        typer.echo(Cli.PUBLISHED_LINE.format(title=published.story.title, destination=published.publication.destination,
+                                             ref=published.publication.ref))
+    if report.already_published:
+        typer.echo(Cli.ALREADY_PUBLISHED.format(count=report.already_published))
+    for failure in report.failures:
+        typer.echo(Cli.PUBLISH_FAILURE_LINE.format(title=failure.story.title, destination=failure.destination, error=failure.error))
+    if not (report.published or report.already_published or report.failures):
+        typer.echo(Cli.NOTHING_TO_PUBLISH)
+    return not report.failures
+
+
+def _story_numbers(value: str | None) -> list[int] | None:
+    """`--only 1,3` as story numbers; None means every story."""
+    if value is None:
+        return None
+    parts = value.split(",")
+    if not all(re.fullmatch(Parse.STORY_NUMBER, part) for part in parts) or any(int(p) < 1 for p in parts):
+        _fail(Cli.INVALID_ONLY.format(value=value))
+    return [int(part) for part in parts]
 
 
 def _day(value: str | None) -> date:

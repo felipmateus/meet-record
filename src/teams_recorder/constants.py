@@ -201,6 +201,7 @@ class Parse:
         'display dialog "{body}" with title "{title}" buttons {{"{discard}", "{keep}"}} '
         'default button "{keep}" giving up after {timeout} with icon note'
     )
+    STORY_NUMBER = r"\s*[0-9]+\s*"              # one `--only` item (ASCII digits only)
     BACKLOG_TASK_ID = r"^Task (\S+) - "            # `backlog task create --plain`: "Task TASK-7 - <title>"
     BACKLOG_STATUS = r"^statuses:.*[\[,]\s*[\"']?{status}[\"']?\s*[,\]]"   # status: re.escape'd column name
     BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
@@ -317,7 +318,7 @@ class BacklogMd:
 class Stories:
     ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
     DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
-    PUBLISH = False   # without [stories] publish = true, drafts are published only when asked to
+    PUBLISH = False   # without [stories] publish = true, drafts are published only with `trec publish`
     BACKLOG_STATUS = "Triagem"            # Backlog.md column where new stories wait for review
     BACKLOG_LABELS = ("teams-recorder",)
     # Analysis fields sent as context with the candidate actions (the user's own actions go separately).

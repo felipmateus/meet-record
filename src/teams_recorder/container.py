@@ -53,6 +53,7 @@ from teams_recorder.application.use_cases import (
     DraftUserStories,
     PublishUserStories,
     PurgeOldAudio,
+    stories_waiting,
     RenderMinutes,
     StartRecording,
     StopRecording,
@@ -60,6 +61,7 @@ from teams_recorder.application.use_cases import (
 )
 from teams_recorder.config import Settings, find_tool
 from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform, StoryDestination
+from teams_recorder.domain import UserStory
 
 
 def teams_tap_binary(project_dir: Path, platform: Platform = Platform.MACOS) -> Path:
@@ -122,6 +124,10 @@ class Container:
 
     def draft_user_stories(self) -> DraftUserStories:
         return DraftUserStories(self.repo, self.story_writer, self.story_renderer, self.notifier, self.settings.story_dedup_days)
+
+    def stories_waiting(self) -> list[UserStory]:
+        destinations = [p.destination for p in self.story_publishers]
+        return stories_waiting(self.repo, self.clock.now().date(), self.settings.story_dedup_days, destinations)
 
     def publish_user_stories(self) -> PublishUserStories:
         return PublishUserStories(self.repo, self.story_publishers, self.story_renderer, self.notifier, self.clock,
