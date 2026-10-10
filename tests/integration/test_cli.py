@@ -222,7 +222,7 @@ def test_plan_with_stories_enabled_writes_empty_drafts_without_calling_model(tmp
     (project / "guide.md").write_text("# Guia\n")
     result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
     assert result.exit_code == 0, result.output
-    assert "Drafting user stories for 2026-10-06… ok (0 stories, 0 actions left out)" in result.output
+    assert "Drafting user stories for 2026-10-06…" + Cli.STORIES_OK.format(stories=0, tasks=0, skipped=0) in result.output
     drafts = (project / "data" / "plans" / "2026-10-06.stories.md").read_text()
     assert "Nenhuma ação nova no plano deste dia." in drafts
 

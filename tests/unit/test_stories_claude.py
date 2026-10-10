@@ -10,7 +10,7 @@ from teams_recorder.adapters.outbound.stories_claude import (
     StoryOut,
     build_user_message,
 )
-from teams_recorder.domain import Action, Analysis, AnalysisError, Decision, Priority, UserStory
+from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Decision, Priority, UserStory
 from teams_recorder.messages import Prompt, StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -142,3 +142,14 @@ def test_an_action_used_in_a_story_is_never_listed_as_skipped(guide: Path):
     )
     drafts = ClaudeStoryWriter(FakeTransport(out), guide, system_prompt="SYS").draft(DAY, _actions()[:1], [], [])
     assert [s.source_action_ids for s in drafts.stories] == [["a1"]] and drafts.skipped == []
+
+
+def test_story_kind_comes_from_the_sources_and_candidates_carry_their_kind(guide: Path):
+    actions = [Action("Corrigir data", "usuário", "m1", id="b1", kind=ActionKind.BUG),
+               Action("Nova coluna", "usuário", "m1", id="f1", kind=ActionKind.FEATURE)]
+    out = StoriesOut(stories=[StoryOut(title="Corrigir data no card", narrative="n", source_action_ids=["b1", "f1"]),
+                              StoryOut(title="Nova coluna", narrative="n", source_action_ids=["f1"])])
+    transport = FakeTransport(out)
+    drafts = ClaudeStoryWriter(transport, guide, system_prompt="SYS").draft(DAY, actions, [], [])
+    assert [s.kind for s in drafts.stories] == [ActionKind.BUG, ActionKind.FEATURE]
+    assert '"kind": "bug"' in transport.calls[0][1]

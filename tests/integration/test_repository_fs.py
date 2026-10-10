@@ -8,6 +8,7 @@ from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.domain import (
     Action,
+    ActionKind,
     DailyPlan,
     Meeting,
     MeetingNotFound,
@@ -228,3 +229,11 @@ def test_story_drafts_with_the_wrong_shape_raise_repository_error(fs: FsMeetingR
         fs.recent_story_drafts(date(2026, 10, 10), 30)
     with pytest.raises(RepositoryError):
         fs.load_story_drafts(date(2026, 10, 6))
+
+
+def test_action_kind_round_trip_and_actions_from_before_classification(fs: FsMeetingRepository):
+    classified = Action("Estimar horas", "usuário", "m1", id="k1", kind=ActionKind.TECHNICAL)
+    fs.save_open_actions([classified])
+    assert fs.load_open_actions() == [classified]
+    (fs.plans / "open_actions.json").write_text(json.dumps([{"id": "o1", "description": "x", "owner": "usuário", "source_meeting": "m"}]))
+    assert fs.load_open_actions()[0].kind is None

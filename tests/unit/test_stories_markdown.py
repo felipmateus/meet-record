@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
-from teams_recorder.domain import Action, Priority, Publication, SkippedAction, StoryDrafts, UserStory
+from teams_recorder.domain import Action, ActionKind, Priority, Publication, SkippedAction, StoryDrafts, UserStory
 from teams_recorder.messages import StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -51,3 +51,8 @@ def test_publications_are_listed_under_the_story():
     story = UserStory("Exportar horas", "n", publications=[Publication("backlog-md", "TASK-7", datetime(2026, 10, 9, 18, 5))])
     md = MarkdownStoryRenderer().render(StoryDrafts(DAY, [story]), [Action("a", "usuário", "m", id="a1")], [])
     assert "## 1. Exportar horas\n" + StoryDoc.PUBLISHED.format(destination="backlog-md", ref="TASK-7") in md
+
+
+def test_the_kind_is_shown_with_the_story():
+    md = MarkdownStoryRenderer().render(StoryDrafts(DAY, [UserStory("Deploy em PROD", "", kind=ActionKind.OPERATION)]), [], [])
+    assert StoryDoc.KIND.format(label=StoryDoc.KIND_LABELS["operation"]) in md

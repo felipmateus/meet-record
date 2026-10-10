@@ -7,6 +7,7 @@ import pytest
 from teams_recorder.application.use_cases import BuildDailyPlan, DraftUserStories, PublishUserStories, PurgeOldAudio
 from teams_recorder.domain import (
     Action,
+    ActionKind,
     ActionStatus,
     AnalysisError,
     DailyPlan,
@@ -18,7 +19,7 @@ from teams_recorder.domain import (
     UserStory,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
-from teams_recorder.messages import Err, Notify
+from teams_recorder.messages import Err, Notify, StoryDoc
 from tests.fakes import FakeAnalyzer, FakePlanner, FakeStoryPublisher, FakeStoryRenderer, FakeStoryWriter, FakeTranscriber
 
 
@@ -102,7 +103,7 @@ def test_draft_user_stories_from_the_plan(repo, notifier, clock):
     assert analyses == [analysis]                             # context of existing meetings only
     saved, markdown = repo.story_drafts[day]
     assert saved is drafts and markdown.startswith(f"# Stories {day}")
-    assert notifier.messages[-1] == ("User story drafts ready", "2 draft(s) to review, 1 action(s) left out")
+    assert notifier.messages[-1] == (Notify.STORIES_READY, Notify.STORIES_READY_BODY.format(stories=2, tasks=0, skipped=1))
 
 
 def test_draft_user_stories_without_new_actions_skips_the_writer(repo, notifier, clock):
@@ -262,3 +263,52 @@ def test_publish_needs_the_plan_to_rerender_the_document(repo, notifier, clock):
     with pytest.raises(RepositoryError, match=re.escape(Err.PLAN_MISSING.format(day=day.isoformat()))):
         PublishUserStories(repo, [board], FakeStoryRenderer(), notifier, clock).execute(day)
     assert not board.calls and repo.story_drafts[day][1] == "# drafts"
+
+
+def test_drafting_routes_actions_by_kind(repo, notifier, clock):
+    day = clock.now().date()
+    kinds = {"f1": ActionKind.FEATURE, "b1": ActionKind.BUG, "t1": ActionKind.TECHNICAL, "o1": ActionKind.OPERATION,
+             "g1": ActionKind.MANAGEMENT, "c1": ActionKind.COMMUNICATION, "u1": None}
+    actions = [Action(f"Action {i}", "me", "m0", id=i, kind=k) for i, k in kinds.items()]
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=actions))
+    writer = FakeStoryWriter()
+
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert [a.id for a in writer.calls[0][1]] == ["f1", "b1", "u1"]                  # product work and unclassified
+    cards = [s for s in drafts.stories if s.is_task_card]
+    assert [(c.source_action_ids, c.kind, c.narrative) for c in cards] == [(["t1"], ActionKind.TECHNICAL, ""), (["o1"], ActionKind.OPERATION, "")]
+    plan_only = {k.action_id: k.reason for k in drafts.skipped}
+    assert plan_only == {"g1": StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["management"]),
+                         "c1": StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["communication"])}
+
+
+def test_a_day_without_product_work_does_not_call_the_writer(repo, notifier, clock):
+    day = clock.now().date()
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Deploy", "me", "m0", kind=ActionKind.OPERATION),
+                                                          Action("E-mail", "me", "m0", kind=ActionKind.COMMUNICATION)]))
+    writer = FakeStoryWriter()
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+    assert not writer.calls and [s.title for s in drafts.stories] == ["Deploy"] and len(drafts.skipped) == 1
+
+
+
+def test_the_writer_sees_only_stories_and_task_cards_are_not_repeated(repo, notifier, clock):
+    day = clock.now().date()
+    earlier_story = UserStory("Implementar exportação", "n", id="s0", kind=ActionKind.FEATURE)
+    earlier_card = UserStory("Estimar horas da nova tela", "", id="t0", kind=ActionKind.TECHNICAL)
+    repo.save_story_drafts(StoryDrafts(day - timedelta(days=1), [earlier_story, earlier_card]), "#")
+    actions = [Action("Implementar exportação de novo", "me", "m0", id="f1", kind=ActionKind.FEATURE),
+               Action("  estimar horas  da NOVA TELA", "me", "m0", id="t1", kind=ActionKind.TECHNICAL),
+               Action("Publicar em PROD", "me", "m0", id="o1", kind=ActionKind.OPERATION),
+               Action("Publicar em prod", "me", "m1", id="o2", kind=ActionKind.OPERATION)]
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=actions))
+    writer = FakeStoryWriter()
+
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert writer.calls[0][3] == [earlier_story]                                  # task cards never count as stories
+    assert [s.title for s in drafts.stories if s.is_task_card] == ["Publicar em PROD"]
+    duplicates = {k.action_id: k.duplicate_of for k in drafts.skipped}
+    assert duplicates["t1"] == "t0" and duplicates["o2"] == drafts.stories[-1].id
+    assert notifier.messages[-1] == (Notify.STORIES_READY, Notify.STORIES_READY_BODY.format(stories=1, tasks=1, skipped=2))

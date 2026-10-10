@@ -8,7 +8,7 @@ import pytest
 
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher, GitIgnore, git_ignore_state
 from teams_recorder.constants import StoryDestination
-from teams_recorder.domain import Priority, PublishError, UserStory
+from teams_recorder.domain import ActionKind, Priority, PublishError, UserStory
 from teams_recorder.messages import Err, StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -168,3 +168,8 @@ def test_git_ignore_state_without_git(tmp_path: Path):
 
     assert git_ignore_state(tmp_path / "backlog", runner=missing) is GitIgnore.UNKNOWN
     assert git_ignore_state(tmp_path / "backlog", runner=dubious_ownership) is GitIgnore.UNKNOWN
+
+
+def test_the_kind_becomes_a_label():
+    cmd = BacklogMdPublisher(Path("/p")).command(_story(kind=ActionKind.BUG), DAY)
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-l"] == ["teams-recorder", "bug", "2026-10-09"]

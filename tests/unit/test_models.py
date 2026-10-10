@@ -2,6 +2,8 @@ from datetime import date, datetime, timedelta
 
 from teams_recorder.domain import (
     Action,
+    ActionKind,
+    ActionRoute,
     ActionStatus,
     DailyPlan,
     Meeting,
@@ -14,7 +16,10 @@ from teams_recorder.domain import (
     earliest_due,
     meeting_id_for,
     merge_open_actions,
+    route_of,
+    story_kind,
     strongest_priority,
+    task_card,
 )
 
 
@@ -95,3 +100,21 @@ def test_story_publication_lookup_and_drafts_state():
     assert not StoryDrafts(date(2026, 10, 9)).has_publications
     assert not StoryDrafts(date(2026, 10, 9), [draft]).has_publications
     assert StoryDrafts(date(2026, 10, 9), [draft, story]).has_publications
+
+
+def test_action_kinds_route_and_shape_story_cards():
+    assert {k: k.route for k in ActionKind} == {
+        ActionKind.FEATURE: ActionRoute.STORY, ActionKind.BUG: ActionRoute.STORY,
+        ActionKind.TECHNICAL: ActionRoute.TASK, ActionKind.OPERATION: ActionRoute.TASK,
+        ActionKind.MANAGEMENT: ActionRoute.PLAN, ActionKind.COMMUNICATION: ActionRoute.PLAN,
+    }
+    assert route_of(None) is ActionRoute.STORY and Action("x", "me", "m").route is ActionRoute.STORY   # unclassified: as before
+    feature = Action("a", "me", "m", kind=ActionKind.FEATURE)
+    bug = Action("b", "me", "m", kind=ActionKind.BUG)
+    assert story_kind([feature, bug]) == ActionKind.BUG and story_kind([feature]) == ActionKind.FEATURE
+    assert story_kind([Action("c", "me", "m")]) is None
+    estimate = Action("Estimar horas da nova tela", "me", "m1", id="t1", priority=Priority.HIGH, due=date(2026, 10, 9), kind=ActionKind.TECHNICAL)
+    card = task_card(estimate)
+    assert (card.title, card.narrative, card.kind) == ("Estimar horas da nova tela", "", ActionKind.TECHNICAL)
+    assert card.is_task_card and not UserStory("s", "n", kind=ActionKind.FEATURE).is_task_card
+    assert card.source_action_ids == ["t1"] and card.source_meetings == ["m1"] and card.priority == Priority.HIGH and card.due == date(2026, 10, 9)
