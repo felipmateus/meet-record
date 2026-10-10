@@ -10,8 +10,8 @@ from teams_recorder.adapters.outbound.stories_claude import (
     StoryOut,
     build_user_message,
 )
-from teams_recorder.domain import Action, Analysis, AnalysisError, Decision, Priority
-from teams_recorder.messages import StoryDoc
+from teams_recorder.domain import Action, Analysis, AnalysisError, Decision, Priority, UserStory
+from teams_recorder.messages import Prompt, StoryDoc
 
 DAY = date(2026, 10, 9)
 
@@ -58,7 +58,7 @@ def test_draft_keeps_traceability_honest(guide: Path):
     transport = FakeTransport(out)
     writer = ClaudeStoryWriter(transport, guide, system_prompt="SYS")
 
-    drafts = writer.draft(DAY, _actions(), [])
+    drafts = writer.draft(DAY, _actions(), [], [])
 
     assert drafts.day == DAY and len(drafts.stories) == 1
     story = drafts.stories[0]
@@ -78,9 +78,9 @@ def test_guide_is_always_in_the_system_prompt(guide: Path, tmp_path: Path):
     transport = FakeTransport(StoriesOut())
     writer = ClaudeStoryWriter(transport, guide, prompt_path=prompt)
 
-    writer.draft(DAY, _actions(), [])
+    writer.draft(DAY, _actions(), [], [])
     guide.write_text("# Guia novo\n")                       # edits apply on the next call
-    writer.draft(DAY, _actions(), [])
+    writer.draft(DAY, _actions(), [], [])
 
     first, second = transport.calls[0][0], transport.calls[1][0]
     assert first.startswith("RULES") and "# User story guide" in first and "Como <persona>" in first
@@ -91,25 +91,54 @@ def test_guide_is_always_in_the_system_prompt(guide: Path, tmp_path: Path):
 def test_missing_or_empty_guide_is_an_error(tmp_path: Path):
     transport = FakeTransport(StoriesOut())
     with pytest.raises(AnalysisError, match="guide not found"):
-        ClaudeStoryWriter(transport, tmp_path / "nope.md", system_prompt="SYS").draft(DAY, _actions(), [])
+        ClaudeStoryWriter(transport, tmp_path / "nope.md", system_prompt="SYS").draft(DAY, _actions(), [], [])
     empty = tmp_path / "empty.md"
     empty.write_text("  \n")
     with pytest.raises(AnalysisError, match="guide is empty"):
-        ClaudeStoryWriter(transport, empty, system_prompt="SYS").draft(DAY, _actions(), [])
+        ClaudeStoryWriter(transport, empty, system_prompt="SYS").draft(DAY, _actions(), [], [])
     assert not transport.calls
 
 
 def test_no_actions_skips_the_model(tmp_path: Path):
     transport = FakeTransport(StoriesOut())
-    drafts = ClaudeStoryWriter(transport, tmp_path / "unused.md", system_prompt="SYS").draft(DAY, [], [])
+    drafts = ClaudeStoryWriter(transport, tmp_path / "unused.md", system_prompt="SYS").draft(DAY, [], [], [])
     assert drafts.stories == [] and drafts.skipped == [] and not transport.calls
 
 
 def test_user_message_has_actions_and_meeting_context():
     analysis = Analysis(meeting_id="m1", summary="Fechamento mensal", title="Status do contrato",
                         decisions=[Decision("Exportar em CSV")], my_actions=[Action("não repetir", "usuário", "m1", id="dup")])
-    msg = build_user_message(DAY, _actions()[:1], [analysis], user_name="Felipe")
+    msg = build_user_message(DAY, _actions()[:1], [analysis], [], user_name="Felipe")
 
     assert msg.startswith("User (recording owner): Felipe\nPlan date: 2026-10-09 (Friday)")
     assert '"a1"' in msg and "Exportar em CSV" in msg and "Status do contrato" in msg
     assert '"dup"' not in msg                              # the user's own actions are sent once, as candidates
+
+
+def test_existing_stories_are_shown_and_duplicates_point_to_them(guide: Path):
+    existing = [UserStory("Exportar horas por projeto", "Como gestor, quero exportar horas", id="s-old")]
+    out = StoriesOut(skipped=[
+        SkippedOut(action_id="a1", reason="já coberta", duplicate_of="s-old"),
+        SkippedOut(action_id="a2", reason="já coberta", duplicate_of="inventada"),
+    ])
+    transport = FakeTransport(out)
+
+    drafts = ClaudeStoryWriter(transport, guide, system_prompt="SYS").draft(DAY, _actions()[:2], [], existing)
+
+    user = transport.calls[0][1]
+    assert Prompt.STORIES_EXISTING in user and '"s-old"' in user and "Exportar horas por projeto" in user
+    assert "acceptance_criteria" not in user.split(Prompt.STORIES_EXISTING)[1]   # only the summary fields
+    assert [(k.action_id, k.duplicate_of) for k in drafts.skipped] == [("a1", "s-old"), ("a2", None)]  # invented id dropped
+
+
+def test_no_existing_section_without_existing_stories():
+    assert Prompt.STORIES_EXISTING not in build_user_message(DAY, _actions()[:1], [], [])
+
+
+def test_an_action_used_in_a_story_is_never_listed_as_skipped(guide: Path):
+    out = StoriesOut(
+        stories=[StoryOut(title="Exportar horas", narrative="n", source_action_ids=["a1"])],
+        skipped=[SkippedOut(action_id="a1", reason="contradição do modelo")],
+    )
+    drafts = ClaudeStoryWriter(FakeTransport(out), guide, system_prompt="SYS").draft(DAY, _actions()[:1], [], [])
+    assert [s.source_action_ids for s in drafts.stories] == [["a1"]] and drafts.skipped == []

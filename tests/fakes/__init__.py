@@ -306,10 +306,10 @@ class FakeStoryWriter:
 
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
-        self.calls: list[tuple[date, list[Action], list[Analysis]]] = []
+        self.calls: list[tuple[date, list[Action], list[Analysis], list[UserStory]]] = []
 
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis]) -> StoryDrafts:
-        self.calls.append((day, actions, analyses))
+    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
+        self.calls.append((day, actions, analyses, existing))
         if self.fail:
             raise AnalysisError("model is down")
         stories = [UserStory(f"Story for {a.description}", "As someone, I want it", source_action_ids=[a.id])
@@ -319,5 +319,9 @@ class FakeStoryWriter:
 
 
 class FakeStoryRenderer:
-    def render(self, drafts: StoryDrafts, actions: list[Action]) -> str:
+    def __init__(self) -> None:
+        self.calls: list[tuple[StoryDrafts, list[Action], list[UserStory]]] = []
+
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
+        self.calls.append((drafts, actions, existing))
         return f"# Stories {drafts.day}\n{len(drafts.stories)} stories\n"

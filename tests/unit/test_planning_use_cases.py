@@ -1,10 +1,23 @@
 from datetime import date, datetime, timedelta
 
+import re
+
 import pytest
 
 from teams_recorder.application.use_cases import BuildDailyPlan, DraftUserStories, PurgeOldAudio
-from teams_recorder.domain import Action, ActionStatus, AnalysisError, DailyPlan, Meeting, RepositoryError
+from teams_recorder.domain import (
+    Action,
+    ActionStatus,
+    AnalysisError,
+    DailyPlan,
+    Meeting,
+    Publication,
+    RepositoryError,
+    StoryDrafts,
+    UserStory,
+)
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
+from teams_recorder.messages import Err
 from tests.fakes import FakeAnalyzer, FakePlanner, FakeStoryRenderer, FakeStoryWriter, FakeTranscriber
 
 
@@ -83,8 +96,8 @@ def test_draft_user_stories_from_the_plan(repo, notifier, clock):
 
     assert [s.source_action_ids for s in drafts.stories] == [["f1"], ["o1"]]
     assert [k.action_id for k in drafts.skipped] == ["e1"]
-    _, actions, analyses = writer.calls[0]
-    assert actions == [feature, email, orphan]
+    _, actions, analyses, existing = writer.calls[0]
+    assert actions == [feature, email, orphan] and existing == []
     assert analyses == [analysis]                             # context of existing meetings only
     saved, markdown = repo.story_drafts[day]
     assert saved is drafts and markdown.startswith(f"# Stories {day}")
@@ -113,3 +126,44 @@ def test_draft_user_stories_failure_saves_nothing(repo, notifier, clock):
     with pytest.raises(AnalysisError):
         DraftUserStories(repo, FakeStoryWriter(fail=True), FakeStoryRenderer(), notifier).execute(day)
     assert not repo.story_drafts
+
+
+def test_draft_user_stories_shows_recent_stories_to_the_writer(repo, notifier, clock):
+    day = clock.now().date()
+    old = UserStory("Too old", "n", id="old")
+    recent = UserStory("Export hours", "n", id="s1")
+    repo.save_story_drafts(StoryDrafts(day - timedelta(days=31), [old]), "#")
+    repo.save_story_drafts(StoryDrafts(day - timedelta(days=2), [recent]), "#")
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Export hours again", "me", "m0", id="f1")]))
+    writer, renderer = FakeStoryWriter(), FakeStoryRenderer()
+
+    DraftUserStories(repo, writer, renderer, notifier, dedup_days=30).execute(day)
+
+    assert writer.calls[0][3] == [recent]
+    assert renderer.calls[0][2] == [recent]          # the document can name the covering story
+
+
+def test_published_day_is_never_drafted_again(repo, notifier, clock):
+    day = clock.now().date()
+    published = UserStory("Export hours", "n", publications=[Publication("backlog-md", "TASK-1", clock.now())])
+    repo.save_story_drafts(StoryDrafts(day, [published]), "# published")
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Export hours", "me", "m0")]))
+    writer = FakeStoryWriter()
+
+    with pytest.raises(RepositoryError, match=re.escape(Err.STORIES_ALREADY_PUBLISHED.format(day=day.isoformat()))):
+        DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert not writer.calls and repo.story_drafts[day][1] == "# published"
+
+
+def test_unpublished_drafts_can_be_drafted_again(repo, notifier, clock):
+    day = clock.now().date()
+    repo.save_story_drafts(StoryDrafts(day, [UserStory("Old draft", "n")]), "# old")
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Export hours", "me", "m0", id="f1")]))
+
+    writer = FakeStoryWriter()
+
+    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
+
+    assert [s.title for s in drafts.stories] == ["Story for Export hours"]
+    assert writer.calls[0][3] == []      # the day's own earlier drafts are not "existing" stories

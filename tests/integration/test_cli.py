@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -7,8 +7,9 @@ from teams_recorder.adapters.inbound.cli import app
 from teams_recorder.adapters.outbound.launchd import AgentStatus
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.config import ENV_PROJECT_DIR
-from teams_recorder.domain import Meeting
+from teams_recorder.domain import Meeting, Publication, StoryDrafts, UserStory
 from teams_recorder.domain.status import AUDIO
+from teams_recorder.messages import Err, Notify
 
 runner = CliRunner()
 
@@ -227,3 +228,22 @@ def test_stories_without_a_plan_fails(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     result = runner.invoke(app, ["stories", "--date", "2026-10-06"])
     assert result.exit_code == 1 and "no plan for 2026-10-06" in result.output
+
+
+def test_plan_refuses_to_redraft_a_published_day_but_keeps_the_plan(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    notified: list[tuple[str, str]] = []
+    monkeypatch.setattr("teams_recorder.adapters.outbound.notifier_macos.MacOSNotifier.notify", lambda self, t, b: notified.append((t, b)))
+    (project / "config.toml").write_text('[stories]\nenabled = true\nguide = "guide.md"\n')
+    (project / "guide.md").write_text("# Guia\n")
+    published = UserStory("Exportar horas", "n", publications=[Publication("backlog-md", "TASK-1", datetime(2026, 10, 6, 18, 0))])
+    FsMeetingRepository(project / "data").save_story_drafts(StoryDrafts(date(2026, 10, 6), [published]), "# published\n")
+
+    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
+
+    assert result.exit_code == 1
+    assert Err.STORIES_ALREADY_PUBLISHED.format(day="2026-10-06") in result.output
+    assert (project / "data" / "plans" / "2026-10-06.md").exists()
+    assert (project / "data" / "plans" / "2026-10-06.stories.md").read_text() == "# published\n"
+    assert notified[-1][0] == Notify.STORIES_FAILED
