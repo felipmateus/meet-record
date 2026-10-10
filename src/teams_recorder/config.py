@@ -25,6 +25,7 @@ from teams_recorder.constants import (
     Planner,
     Platform,
     Stories,
+    StoryDestination,
     Windows,
     ggml_model_file,
     raw_bytes_per_hour,
@@ -89,6 +90,12 @@ class Settings:
     platform: Platform = Platform.MACOS
     stories_enabled: bool = Stories.ENABLED
     story_guide: Path | None = None   # None: <project>/prompts/user_story_guide.md
+    story_auto_publish: bool = Stories.PUBLISH   # publish right after drafting ([stories] publish)
+    story_destinations: tuple[StoryDestination, ...] = ()
+    story_dedup_days: int = Stories.DEDUP_DAYS
+    backlog_project_dir: Path | None = None   # Backlog.md project root ("." = this project)
+    backlog_status: str = Stories.BACKLOG_STATUS
+    backlog_labels: tuple[str, ...] = Stories.BACKLOG_LABELS
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -213,6 +220,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     user = raw.get("user", {})
     confirmation = raw.get("confirmation", {})
     stories = raw.get("stories", {})
+    backlog_md = stories.get("backlog_md", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
     teams_default = (
@@ -252,7 +260,18 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         platform=platform,
         stories_enabled=bool(stories.get("enabled", Stories.ENABLED)),
         story_guide=_project_path(project_dir, stories.get("guide")),
+        story_auto_publish=bool(stories.get("publish", Stories.PUBLISH)),
+        story_destinations=tuple(_parse_enum(StoryDestination, d, Err.INVALID_DESTINATION) for d in _as_list(stories.get("destinations", []))),
+        story_dedup_days=int(stories.get("dedup_days", Stories.DEDUP_DAYS)),
+        backlog_project_dir=_project_path(project_dir, backlog_md.get("project_dir")),
+        backlog_status=str(backlog_md.get("status", Stories.BACKLOG_STATUS)),
+        backlog_labels=tuple(str(label) for label in _as_list(backlog_md.get("labels", list(Stories.BACKLOG_LABELS)))),
     )
+
+
+def _as_list(value: object) -> list[object]:
+    """A TOML list key, also accepting a single value written without brackets."""
+    return list(value) if isinstance(value, list) else [value]
 
 
 def _project_path(project_dir: Path, configured: str | None) -> Path | None:

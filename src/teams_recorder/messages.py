@@ -112,6 +112,7 @@ class Err:
     INVALID_BIT_DEPTH = "invalid audio.bit_depth: {value!r} (use one of {options})"
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
+    INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
     NO_DETECTOR = "daemon without a configured detector"
     # pipeline: content of error.txt (step: "transcription" / "analysis")
 

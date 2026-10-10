@@ -29,6 +29,10 @@ class MicBackend(StrEnum):
     FFMPEG = "ffmpeg"        # avfoundation; stalled when Teams opened the microphone
 
 
+class StoryDestination(StrEnum):
+    BACKLOG_MD = "backlog-md"  # a local Backlog.md project (Markdown kanban); see [stories.backlog_md]
+
+
 class Effort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
@@ -67,6 +71,7 @@ class Bin:
     POWERSHELL = "powershell"     # Windows PowerShell 5.1, present on every Windows 10/11
     SCHTASKS = "schtasks"
     DOTNET = "dotnet"
+    BACKLOG = "backlog"           # Backlog.md CLI (npm i -g backlog.md / brew install backlog-md)
 
 
 # --- files and folders -------------------------------------------------------
@@ -289,6 +294,9 @@ class Planner:
 class Stories:
     ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
     DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
+    PUBLISH = False   # without [stories] publish = true, drafts are published only when asked to
+    BACKLOG_STATUS = "Triagem"            # Backlog.md column where new stories wait for review
+    BACKLOG_LABELS = ("teams-recorder",)
     # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
     CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
                       "decisions", "others_actions", "open_questions", "risks")

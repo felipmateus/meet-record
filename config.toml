@@ -77,9 +77,25 @@ retention_days = 30
 
 [stories]
 # After each daily plan, draft user stories from the day's new actions into
-# data/plans/<day>.stories.md for you to review. Nothing is published anywhere.
-# Run it by hand with `trec stories [--date YYYY-MM-DD]`.
+# data/plans/<day>.stories.md for you to review; `destinations` and `publish` below decide
+# whether they also go to a board. Run it by hand with `trec stories [--date YYYY-MM-DD]`.
 enabled = true
 # Instructions the model always receives when it writes a story (a relative path is resolved
 # against the project folder). Drafting fails if this file is missing or empty.
 guide = "prompts/user_story_guide.md"
+# Where drafted stories go (boards), by name. Empty = drafts only.
+destinations = []
+# Publish to the destinations right after drafting, so the scheduled planner does it too.
+# false = drafts are published only when you ask.
+publish = false
+# Stories of this many previous days are shown to the model so a topic raised again is not
+# drafted as a second story.
+dedup_days = 30
+
+[stories.backlog_md]
+# A Backlog.md project (Markdown kanban: https://github.com/MrLesk/Backlog.md). "." = this
+# project folder, with the tasks in ./backlog.
+project_dir = "."
+# Column where new stories wait for your review; it must exist in the project's statuses.
+status = "Triagem"
+labels = ["teams-recorder"]
