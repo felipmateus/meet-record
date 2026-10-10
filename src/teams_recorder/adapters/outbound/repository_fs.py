@@ -3,6 +3,7 @@
 Layout:
   <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, .lock}
   <data_dir>/plans/{YYYY-MM-DD.md, YYYY-MM-DD.json, open_actions.json}
+  <data_dir>/plans/{YYYY-MM-DD.stories.md, YYYY-MM-DD.stories.json}  (user story drafts)
 Writes are atomic (temporary file + os.replace).
 """
 from __future__ import annotations
@@ -26,6 +27,7 @@ from teams_recorder.domain import (
     Meeting,
     MeetingNotFound,
     RepositoryError,
+    StoryDrafts,
     Transcript,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
@@ -223,3 +225,15 @@ class FsMeetingRepository:
 
     def save_open_actions(self, actions: list[Action]) -> None:
         _write_json(self.plans / Files.OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])
+
+    # --- user story drafts --------------------------------------------------
+    def _stories_json(self, day: date) -> Path:
+        return self.plans / Files.STORIES_JSON.format(day=day.isoformat())
+
+    def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
+        _write_json(self._stories_json(drafts.day), codec.story_drafts_to_dict(drafts))
+        _write_atomic(self.plans / Files.STORIES_MARKDOWN.format(day=drafts.day.isoformat()), markdown)
+
+    def load_story_drafts(self, day: date) -> StoryDrafts | None:
+        p = self._stories_json(day)
+        return codec.story_drafts_from_dict(_read_json(p)) if p.exists() else None
