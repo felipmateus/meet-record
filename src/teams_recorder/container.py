@@ -22,6 +22,7 @@ from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
+from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
@@ -192,7 +193,16 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
 # Story destinations: a table from each [stories] destinations value to the builder of its
 # publisher (configuration picks the adapter, as llm.provider does in build_transport).
 # A new destination is a new adapter plus one entry here.
-_PUBLISHERS: dict[StoryDestination, Callable[[Settings], StoryPublisher]] = {}
+def _backlog_md(settings: Settings) -> StoryPublisher:
+    return BacklogMdPublisher(
+        settings.backlog_project_dir, settings.backlog_status, settings.backlog_labels,
+        drafts_dir=settings.data_dir / Files.PLANS_DIR, binary=find_tool(Bin.BACKLOG, settings.project_dir),
+    )
+
+
+_PUBLISHERS: dict[StoryDestination, Callable[[Settings], StoryPublisher]] = {
+    StoryDestination.BACKLOG_MD: _backlog_md,
+}
 
 
 def build_story_publishers(settings: Settings) -> list[StoryPublisher]:

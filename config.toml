@@ -83,7 +83,7 @@ enabled = true
 # Instructions the model always receives when it writes a story (a relative path is resolved
 # against the project folder). Drafting fails if this file is missing or empty.
 guide = "prompts/user_story_guide.md"
-# Where drafted stories go (boards), by name. Empty = drafts only.
+# Where drafted stories go (boards), by name. Available: "backlog-md". Empty = drafts only.
 destinations = []
 # Publish to the destinations right after drafting, so the scheduled planner does it too.
 # false = drafts are published only when you ask.
@@ -94,7 +94,8 @@ dedup_days = 30
 
 [stories.backlog_md]
 # A Backlog.md project (Markdown kanban: https://github.com/MrLesk/Backlog.md). "." = this
-# project folder, with the tasks in ./backlog.
+# project folder, with the tasks in ./backlog, which is git-ignored (this repository is public):
+# publishing refuses a board that Git would version. One-time setup in the README.
 project_dir = "."
 # Column where new stories wait for your review; it must exist in the project's statuses.
 status = "Triagem"
