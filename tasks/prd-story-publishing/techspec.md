@@ -82,16 +82,16 @@ class StoryRenderer(Protocol):
 
 ### 5.1 `publisher_backlogmd.BacklogMdPublisher`
 
-Constructor: `binary` (from `find_tool(Bin.BACKLOG, …)`), `project_dir: Path`, `status: str`, `labels: tuple[str, …]`, injected runner (default: `process_control`, so tests can fake it and Windows gets `NO_WINDOW`).
+Constructor: `project_dir`, `status`, `labels`, `drafts_dir` (the plans folder, for the link back), `binary` (from `find_tool(Bin.BACKLOG, …)`), an injected `runner` with the `subprocess.run` shape (default `subprocess.run` with `NO_WINDOW`, like the other short-lived CLI adapters — `process_control` only spawns long-running recorders) and an injected `ignore_state` (default `git_ignore_state`).
 
 - **`command(story, day) -> list[str]`** (kept in one method so tests can inspect it, as AGENTS.md asks):
-  `backlog task create <title> --desc <body> -s <status> -l <labels,day> [--priority high|medium|low] [--ac <criterion> …] --plain`, run with `cwd=project_dir`, arguments as a list (no shell, so multi-line `--desc` is safe).
+  `backlog task create --desc <body> -s <status> -l <label> … -l <day> [--priority high|medium|low] [--ac <criterion> …] --plain -- <title>`, run with `cwd=project_dir`, arguments as a list (no shell, so multi-line `--desc` is safe). Options come first and the title after `--`, so a title starting with `-` is never read as a flag (spike: `-s weird` as a title otherwise becomes the status).
 - **Body (`--desc`):** story sentence; the guide's other sections (`details`); open questions; a traceability block (plan day, source meetings, source action ids, path of the drafts file). Labels for the block come from `messages.StoryDoc` (Portuguese, a user document).
-- **Acceptance criteria:** one `--ac` per criterion (the CLI documents repeated `--ac` on `task edit` and a comma-separated form on `create`). Criteria contain commas ("Dado …, quando …, então …"), so the behavior of `--ac` with commas on `create` must be confirmed in the spike (§9); fallback: create without `--ac` and add each criterion with `backlog task edit <id> --ac …`.
+- **Acceptance criteria:** one `--ac` per criterion; the spike confirmed that each one stays whole, commas included.
 - **Priority:** `Priority.HIGH/MEDIUM/LOW` → `high/medium/low` (Backlog.md default priorities are High, Medium, Low); none → flag omitted.
 - **Ref:** parsed from the `--plain` output with a regex in `constants.Parse.BACKLOG_TASK_ID`. The output format is not documented (examples show `task-1`, `BACK-7`, `7`); the spike fixes the regex. No id found → `PublishError` that includes the output tail.
-- **Errors:** missing binary, non-zero exit, timeout (`Proc.BACKLOG_TIMEOUT`) → `PublishError` with a message that says what to do (install command, `backlog init`, add the status).
-- **`problems()`:** binary not found (with `npm i -g backlog.md` / `brew install backlog-md`); `project_dir` not set or missing; not a Backlog.md project (no `backlog/config.yml`, `.backlog/config.yml` or `backlog.config.yml`); `status` not in the config's `statuses` line (Backlog.md cannot change `statuses` with `backlog config set`: the message tells the user to edit the file); `autoCommit` or `remoteOperations` enabled in the config; and, when the backlog folder is inside a Git work tree, the folder is **not** ignored (`git check-ignore -q <backlog folder>` fails) — the message says to add it to `.gitignore`. The config checks are plain text searches: no YAML dependency.
+- **Errors:** missing binary, any other spawn `OSError`, non-zero exit, timeout (`BacklogMd.TIMEOUT`), no id in the output → `PublishError` with a message that says what to do (install command, `backlog init`, add the status).
+- **`problems()`:** binary not found (with `npm i -g backlog.md` / `brew install backlog-md`); the binary is a Windows `.cmd`/`.bat` shim (cmd.exe cuts multi-line arguments, which would drop `-s Triagem` and land the task as approved — refused until it runs on real Windows); a label containing a comma (the CLI splits it); `project_dir` not set or missing; not a Backlog.md project (no `backlog/config.yml`, `.backlog/config.yml` or `backlog.config.yml`); `status` not in the config's `statuses` line, matched case-insensitively like the CLI (Backlog.md cannot change `statuses` with `backlog config set`: the message tells the user to edit the file); `auto_commit` or `remote_operations` true in the config; and the Git state of the board (`GitIgnore`): outside any Git work tree (no `.git` above it) is fine; inside one, the board must be ignored (`git check-ignore -q`); **not ignored, or git unable to answer (missing, dubious ownership, any other error), is a problem — the check fails closed**. The config checks are plain text searches: no YAML dependency.
 - **Guard in `publish`:** the Git-ignore check also runs before every `publish` call (cheap), so a story is never written where it could be committed.
 - **Never** edits, moves, archives or deletes tasks (FR8).
 
@@ -155,6 +155,17 @@ Run once against a throwaway project (`backlog init --no-git` in a temporary fol
 5. The `statuses` line format in `config.yml`, for the doctor check.
 6. That `backlog init --no-git` at the root of this Git repository writes only inside `backlog/` (or `backlog.config.yml`), leaves `AGENTS.md` and `CLAUDE.md` untouched with the right agent-instructions flag, and saves `autoCommit: false` and `remoteOperations: false`; `git status` shows nothing new once the `.gitignore` entries exist.
 7. That the CLI run from the project root finds the project without extra flags.
+
+**Answers (spike of 2026-10-10, Backlog.md 1.53.0 from Homebrew, in a throwaway Git repository with `AGENTS.md`, `CLAUDE.md` and the `.gitignore` entries):**
+
+1. `task create … --plain` prints `File: <path>`, a blank line, then `Task TASK-1 - <title>` and the task fields. Ids are `TASK-<n>` (the prefix upper-cased from `task_prefix`). Regex: `^Task (\S+) - ` (multiline).
+2. Repeated `--ac` keeps each criterion whole, commas included (`- [ ] #1 Dado …, quando …, então …`). No fallback needed.
+3. `-s Triagem` works once `Triagem` is in `statuses`; otherwise exit 1 with `Invalid status: X. Valid statuses are: …`.
+4. `--priority` accepts `high`, `medium`, `low` (case-insensitive; stored lower-case); anything else exits 1 with `Invalid priority: …`.
+5. `backlog/config.yml` keys are snake_case; the columns are one line, `statuses: ["To Do", "In Progress", "Done"]`; `auto_commit: false`, `remote_operations: false`, `filesystem_only: true` after a no-git init.
+6. `backlog init "<name>" --no-git --defaults --integration-mode none --auto-open-browser false` writes only `backlog/config.yml`; `AGENTS.md` and `CLAUDE.md` stay untouched (`--integration-mode none` cannot be combined with `--agent-instructions`); `git status` shows nothing but the ignored `backlog/`.
+7. Run with `cwd` at the project root, the CLI finds the project; elsewhere it exits 1 with `No Backlog.md project found. Run \`backlog init\` to initialize.`
+8. Extra: `backlog task list --json` returns `{schemaVersion, kind, tasks}`; each task has `id`, `status`, `labels`, `priority`, `acceptanceCriteriaCount`. Task files are `backlog/tasks/task-<n> - <Title-With-Dashes>.md` with YAML front matter and marked description and criteria sections.
 
 ## 10. Error handling and notifications
 
