@@ -114,6 +114,24 @@ class StoryRenderer(Protocol):
 
 
 @runtime_checkable
+class StoryPublisher(Protocol):
+    """A destination for user stories (a board). Selected by configuration; several can be active."""
+
+    @property
+    def destination(self) -> str:
+        """The configured destination name, recorded in each Publication."""
+        ...
+
+    def publish(self, story: UserStory, day: date) -> str:
+        """Creates the story at the destination and returns the destination's id for it. Raises PublishError."""
+        ...
+
+    def problems(self) -> list[str]:
+        """What keeps the destination from taking stories (shown by `trec doctor`); empty when it is ready."""
+        ...
+
+
+@runtime_checkable
 class MeetingRepository(Protocol):
     # meetings
     def create(self, meeting: Meeting) -> None: ...

@@ -1,10 +1,18 @@
 """Planning and maintenance use cases."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from teams_recorder.application.ports import Clock, MeetingRepository, Notifier, Planner, StoryRenderer, StoryWriter
+from teams_recorder.application.ports import (
+    Clock,
+    MeetingRepository,
+    Notifier,
+    Planner,
+    StoryPublisher,
+    StoryRenderer,
+    StoryWriter,
+)
 from teams_recorder.constants import Planner as PlannerDefaults
 from teams_recorder.constants import Stories as StoryDefaults
 from teams_recorder.domain import (
@@ -12,8 +20,11 @@ from teams_recorder.domain import (
     Analysis,
     DailyPlan,
     MeetingStatus,
+    Publication,
+    PublishError,
     RepositoryError,
     StoryDrafts,
+    TeamsRecorderError,
     UserStory,
     derive_status,
     merge_open_actions,
@@ -90,6 +101,90 @@ class DraftUserStories:
             for mid in meeting_ids
             if self.repo.exists(mid) and ANALYSIS in self.repo.files(mid)
         ]
+
+
+@dataclass(frozen=True)
+class PublishedStory:
+    story: UserStory
+    publication: Publication
+
+
+@dataclass(frozen=True)
+class PublishFailure:
+    story: UserStory
+    destination: str
+    error: str
+
+
+@dataclass
+class PublishReport:
+    published: list[PublishedStory] = field(default_factory=list)
+    already_published: int = 0  # (story, destination) pairs skipped because they were published before
+    failures: list[PublishFailure] = field(default_factory=list)
+
+
+@dataclass
+class PublishUserStories:
+    """Sends a day's story drafts to every configured destination (a board).
+
+    Idempotent per destination: a story already published there is skipped. Each
+    publication is saved (JSON and re-rendered document) as soon as it succeeds, so an
+    interrupted run resumes without duplicates; a failure on one story or destination is
+    reported and the others go on.
+    """
+
+    repo: MeetingRepository
+    publishers: list[StoryPublisher]
+    renderer: StoryRenderer
+    notifier: Notifier
+    clock: Clock
+    dedup_days: int = StoryDefaults.DEDUP_DAYS
+
+    def execute(self, day: date, only: list[int] | None = None) -> PublishReport:
+        drafts = self.repo.load_story_drafts(day)
+        if drafts is None:
+            raise RepositoryError(Err.STORIES_MISSING.format(day=day.isoformat()))
+        plan = self.repo.load_plan(day)  # its actions are needed to re-render the document faithfully
+        if plan is None:
+            raise RepositoryError(Err.PLAN_MISSING.format(day=day.isoformat()))
+        selected = self._select(drafts, only)
+        existing = recent_stories(self.repo, day, self.dedup_days)
+        report = PublishReport()
+        for story in selected:
+            for publisher in self.publishers:
+                if story.publication(publisher.destination) is not None:
+                    report.already_published += 1
+                    continue
+                try:
+                    ref = publisher.publish(story, day)
+                except TeamsRecorderError as exc:
+                    report.failures.append(PublishFailure(story, publisher.destination, str(exc)))
+                    continue
+                publication = Publication(publisher.destination, ref, self.clock.now())
+                story.publications.append(publication)
+                self.repo.save_story_drafts(drafts, self.renderer.render(drafts, plan.new_actions, existing))
+                report.published.append(PublishedStory(story, publication))
+        self._notify(report)
+        return report
+
+    @staticmethod
+    def _select(drafts: StoryDrafts, only: list[int] | None) -> list[UserStory]:
+        """All stories (None), or the 1-based numbers of the drafts document; any bad number fails before publishing."""
+        if only is None:
+            return drafts.stories
+        for number in only:
+            if not 1 <= number <= len(drafts.stories):
+                raise PublishError(Err.INVALID_STORY_NUMBER.format(number=number, day=drafts.day.isoformat(), count=len(drafts.stories)))
+        return [drafts.stories[number - 1] for number in dict.fromkeys(only)]
+
+    def _notify(self, report: PublishReport) -> None:
+        if report.failures:
+            self.notifier.notify(
+                Notify.PUBLISH_FAILED,
+                Notify.PUBLISH_FAILED_BODY.format(failed=len(report.failures), published=len(report.published)),
+            )
+        elif report.published:
+            self.notifier.notify(Notify.STORIES_PUBLISHED, Notify.STORIES_PUBLISHED_BODY.format(count=len(report.published)))
 
 
 def recent_stories(repo: MeetingRepository, day: date, days: int) -> list[UserStory]:

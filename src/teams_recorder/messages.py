@@ -26,6 +26,10 @@ class Notify:
     STORIES_READY_BODY = "{stories} draft(s) to review, {skipped} action(s) left out"
     STORIES_FAILED = "User story drafts failed"
     STORIES_FAILED_BODY = "Plan {day}: {error}"
+    STORIES_PUBLISHED = "User stories published"
+    STORIES_PUBLISHED_BODY = "{count} story(ies) sent to the board for review"
+    PUBLISH_FAILED = "Publishing user stories failed"
+    PUBLISH_FAILED_BODY = "{failed} failure(s), {published} published; run `trec publish` again after fixing it"
 
 
 class Ask:
@@ -92,6 +96,8 @@ class Err:
     STORY_GUIDE_MISSING = "user story guide not found: {path} (set [stories] guide in config.toml)"
     STORY_GUIDE_EMPTY = "user story guide is empty: {path}"
     PLAN_MISSING = "no plan for {day}; create it with `trec plan --date {day}`"
+    STORIES_MISSING = "no story drafts for {day}; draft them with `trec stories --date {day}`"
+    INVALID_STORY_NUMBER = "there is no story {number} in the drafts of {day} (they have {count})"
     STORIES_ALREADY_PUBLISHED = "the stories of {day} were already published; drafting them again would put the same work on the board twice. Edit them on the board instead"
     # repository
     FILE_MISSING = "file not found: {path}"
@@ -384,6 +390,7 @@ class StoryDoc:
     NO_STORIES = "Nenhuma ação nova virou história."
     STORY_TITLE = "## {n}. {title}"
     PRIORITY = "**Prioridade:** {label}"
+    PUBLISHED = "**Publicada em:** {destination} `{ref}`"
     DUE = "**Prazo:** {date}"
     MEETINGS = "**Reuniões:** {ids}"
     META_SEPARATOR = " · "
