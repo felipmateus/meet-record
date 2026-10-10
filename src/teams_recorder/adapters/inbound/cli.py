@@ -456,7 +456,8 @@ def _draft_stories(c: Container, day: date) -> bool:
         typer.echo(Cli.FAILED.format(error=exc))
         c.notifier.notify(Notify.STORIES_FAILED, Notify.STORIES_FAILED_BODY.format(day=day.isoformat(), error=exc))
         return False
-    typer.echo(Cli.STORIES_OK.format(stories=len(drafts.stories), skipped=len(drafts.skipped)))
+    tasks = sum(1 for s in drafts.stories if s.is_task_card)
+    typer.echo(Cli.STORIES_OK.format(stories=len(drafts.stories) - tasks, tasks=tasks, skipped=len(drafts.skipped)))
     for story in drafts.stories:
         typer.echo(Cli.STORY_LINE.format(title=story.title))
     typer.echo(Cli.STORIES_PATH.format(path=c.settings.data_dir / Files.PLANS_DIR / Files.STORIES_MARKDOWN.format(day=day.isoformat())))
