@@ -74,3 +74,29 @@ timeout_seconds = 30
 [planner]
 hour = 18
 retention_days = 30
+
+[stories]
+# After each daily plan, draft user stories from the day's new actions into
+# data/plans/<day>.stories.md for you to review; `destinations` and `publish` below decide
+# whether they also go to a board. Run it by hand with `trec stories [--date YYYY-MM-DD]`.
+enabled = true
+# Instructions the model always receives when it writes a story (a relative path is resolved
+# against the project folder). Drafting fails if this file is missing or empty.
+guide = "prompts/user_story_guide.md"
+# Where drafted stories go (boards), by name. Available: "backlog-md". Empty = drafts only.
+destinations = ["backlog-md"]
+# Publish to the destinations right after drafting, so the scheduled planner does it too.
+# false = drafts are published only with `trec publish [--date YYYY-MM-DD] [--only 1,3]`.
+publish = false
+# Stories of this many previous days are shown to the model so a topic raised again is not
+# drafted as a second story.
+dedup_days = 30
+
+[stories.backlog_md]
+# A Backlog.md project (Markdown kanban: https://github.com/MrLesk/Backlog.md). "." = this
+# project folder, with the tasks in ./backlog, which is git-ignored (this repository is public):
+# publishing refuses a board that Git would version. One-time setup in the README.
+project_dir = "."
+# Column where new stories wait for your review; it must exist in the project's statuses.
+status = "Triagem"
+labels = ["teams-recorder"]

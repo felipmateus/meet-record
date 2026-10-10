@@ -85,6 +85,41 @@ class Priority(StrEnum):
     LOW = "low"
 
 
+class ActionRoute(StrEnum):
+    """Where an action goes after the plan."""
+
+    STORY = "story"   # the story writer (a user story)
+    TASK = "task"     # a task card on the board, as the action is
+    PLAN = "plan"     # nowhere else: it stays in the daily plan
+
+
+class ActionKind(StrEnum):
+    """What kind of work an action is; its route decides where the action goes after the plan."""
+
+    FEATURE = "feature"              # a change in how the product behaves → user story
+    BUG = "bug"                      # something that should work and does not → user story (bug)
+    TECHNICAL = "technical"          # engineering work without direct user value: estimate, spike, mock → task card
+    OPERATION = "operation"          # deploy, access, infrastructure, environment → task card
+    MANAGEMENT = "management"        # process, reports, metrics, prioritisation → stays in the plan
+    COMMUNICATION = "communication"  # e-mail, meeting, follow-up, review → stays in the plan
+
+    @property
+    def route(self) -> ActionRoute:
+        return _ROUTES[self]
+
+
+_ROUTES = {
+    ActionKind.FEATURE: ActionRoute.STORY, ActionKind.BUG: ActionRoute.STORY,
+    ActionKind.TECHNICAL: ActionRoute.TASK, ActionKind.OPERATION: ActionRoute.TASK,
+    ActionKind.MANAGEMENT: ActionRoute.PLAN, ActionKind.COMMUNICATION: ActionRoute.PLAN,
+}
+
+
+def route_of(kind: ActionKind | None) -> ActionRoute:
+    """Unclassified actions (from analyses made before kinds existed) go to the story writer, as before."""
+    return kind.route if kind is not None else ActionRoute.STORY
+
+
 class MeetingType(StrEnum):
     STANDUP = "standup"
     CLIENT = "client"
@@ -103,6 +138,11 @@ class Action:
     id: str = field(default_factory=_new_action_id)
     priority: Priority | None = None
     at: str | None = None  # transcript timestamp (HH:MM:SS) where it was said, for verification
+    kind: ActionKind | None = None  # None: extracted before actions were classified
+
+    @property
+    def route(self) -> ActionRoute:
+        return route_of(self.kind)
 
     def is_overdue_on(self, day: date) -> bool:
         return self.status == ActionStatus.OPEN and self.due is not None and self.due < day
@@ -157,6 +197,91 @@ class DailyPlan:
     new_actions: list[Action] = field(default_factory=list)
     completed_action_ids: list[str] = field(default_factory=list)
     overdue_action_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Publication:
+    """Where a story was published: the destination and the destination's id for the item."""
+
+    destination: str
+    ref: str
+    published_at: datetime
+
+
+@dataclass
+class UserStory:
+    """A user story drafted from one or more of the user's actions. A draft until the user publishes it."""
+
+    title: str
+    narrative: str  # "As a <persona>, I want <capability>, so that <benefit>", in the user's language
+    acceptance_criteria: list[str] = field(default_factory=list)
+    details: str = ""  # other sections the user's story guide asks for, in Markdown
+    open_questions: list[str] = field(default_factory=list)
+    source_action_ids: list[str] = field(default_factory=list)
+    source_meetings: list[str] = field(default_factory=list)
+    priority: Priority | None = None  # the strongest priority among the source actions
+    due: date | None = None           # the earliest due date among the source actions
+    id: str = field(default_factory=_new_action_id)
+    publications: list[Publication] = field(default_factory=list)
+    kind: ActionKind | None = None   # feature/bug for stories, technical/operation for task cards; None if unclassified
+
+    def publication(self, destination: str) -> Publication | None:
+        return next((p for p in self.publications if p.destination == destination), None)
+
+    @property
+    def is_task_card(self) -> bool:
+        return route_of(self.kind) is ActionRoute.TASK
+
+
+@dataclass(frozen=True)
+class SkippedAction:
+    """An action that did not become a story, and why."""
+
+    action_id: str
+    reason: str
+    duplicate_of: str | None = None  # id of an existing story that already covers the action
+
+
+@dataclass
+class StoryDrafts:
+    """The user story drafts written from one day's plan; each story records where it was published."""
+
+    day: date
+    stories: list[UserStory] = field(default_factory=list)
+    skipped: list[SkippedAction] = field(default_factory=list)
+
+    @property
+    def has_publications(self) -> bool:
+        return any(story.publications for story in self.stories)
+
+
+_PRIORITY_RANK = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
+
+
+def strongest_priority(actions: list[Action]) -> Priority | None:
+    stated = [a.priority for a in actions if a.priority is not None]
+    return min(stated, key=_PRIORITY_RANK.__getitem__) if stated else None
+
+
+def story_kind(actions: list[Action]) -> ActionKind | None:
+    """Kind of a story written from story actions: bug if any is a bug, feature if any is classified, else None."""
+    kinds = {a.kind for a in actions if a.kind is not None}
+    if ActionKind.BUG in kinds:
+        return ActionKind.BUG
+    return ActionKind.FEATURE if kinds else None
+
+
+def task_card(action: Action) -> UserStory:
+    """A technical or operation action as a board card: the action itself, no story sentence or criteria."""
+    return UserStory(
+        title=action.description, narrative="", source_action_ids=[action.id], source_meetings=[action.source_meeting],
+        priority=action.priority, due=action.due, kind=action.kind,
+    )
+
+
+def earliest_due(actions: list[Action]) -> date | None:
+    dues = [a.due for a in actions if a.due is not None]
+    return min(dues) if dues else None
 
 
 def merge_open_actions(current: list[Action], plan: DailyPlan) -> list[Action]:

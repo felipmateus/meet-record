@@ -3,6 +3,7 @@
 Layout:
   <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, .lock}
   <data_dir>/plans/{YYYY-MM-DD.md, YYYY-MM-DD.json, open_actions.json}
+  <data_dir>/plans/{YYYY-MM-DD.stories.md, YYYY-MM-DD.stories.json}  (user story drafts)
 Writes are atomic (temporary file + os.replace).
 """
 from __future__ import annotations
@@ -11,7 +12,7 @@ import json
 import os
 import shutil
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Iterator, cast
 
@@ -26,6 +27,7 @@ from teams_recorder.domain import (
     Meeting,
     MeetingNotFound,
     RepositoryError,
+    StoryDrafts,
     Transcript,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
@@ -208,12 +210,19 @@ class FsMeetingRepository:
         p = self._plan_json(day)
         return codec.plan_from_dict(_read_json(p)) if p.exists() else None
 
+    def _dated(self, pattern: str) -> list[tuple[date, Path]]:
+        """Files in plans/ matching the pattern, with the ISO day their name starts with, oldest first."""
+        found: list[tuple[date, Path]] = []
+        for p in retry_io(lambda: list(self.plans.glob(pattern)), str(self.plans)):
+            try:
+                found.append((date.fromisoformat(p.name.split(".")[0]), p))
+            except ValueError:  # a name that only looks like a day (e.g. 2026-13-45)
+                continue
+        return sorted(found)
+
     def latest_plan_before(self, day: date) -> DailyPlan | None:
-        candidates = sorted(
-            (p for p in self.plans.glob(Files.PLAN_GLOB) if date.fromisoformat(p.stem) < day),
-            reverse=True,
-        )
-        return codec.plan_from_dict(_read_json(candidates[0])) if candidates else None
+        earlier = [p for d, p in self._dated(Files.PLAN_GLOB) if d < day]
+        return codec.plan_from_dict(_read_json(earlier[-1])) if earlier else None
 
     def load_open_actions(self) -> list[Action]:
         p = self.plans / Files.OPEN_ACTIONS
@@ -223,3 +232,26 @@ class FsMeetingRepository:
 
     def save_open_actions(self, actions: list[Action]) -> None:
         _write_json(self.plans / Files.OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])
+
+    # --- user story drafts --------------------------------------------------
+    def _stories_json(self, day: date) -> Path:
+        return self.plans / Files.STORIES_JSON.format(day=day.isoformat())
+
+    def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
+        _write_json(self._stories_json(drafts.day), codec.story_drafts_to_dict(drafts))
+        _write_atomic(self.plans / Files.STORIES_MARKDOWN.format(day=drafts.day.isoformat()), markdown)
+
+    @staticmethod
+    def _load_drafts(path: Path) -> StoryDrafts:
+        try:
+            return codec.story_drafts_from_dict(_read_json(path))
+        except (KeyError, TypeError, ValueError) as exc:  # valid JSON, wrong shape
+            raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+
+    def load_story_drafts(self, day: date) -> StoryDrafts | None:
+        p = self._stories_json(day)
+        return self._load_drafts(p) if p.exists() else None
+
+    def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
+        start = before - timedelta(days=days)
+        return [self._load_drafts(p) for d, p in self._dated(Files.STORIES_GLOB) if start <= d < before]

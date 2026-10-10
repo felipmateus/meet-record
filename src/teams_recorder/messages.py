@@ -22,6 +22,15 @@ class Notify:
     STEP_FAILED_BODY = "Meeting {meeting_id}: {error}"
     PLAN_READY = "Daily plan ready"
     PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
+    STORIES_READY = "User story drafts ready"
+    STORIES_READY_BODY = "{stories} stor(ies) and {tasks} task card(s) to review, {skipped} action(s) left out"
+    STORIES_FAILED = "User story drafts failed"
+    STORIES_FAILED_BODY = "Plan {day}: {error}"
+    STORIES_PUBLISHED = "User stories published"
+    STORIES_PUBLISHED_BODY = "{count} story(ies) sent to the board for review"
+    PUBLISH_FAILED = "Publishing user stories failed"
+    PUBLISH_ERROR_BODY = "Stories of {day}: {error}"
+    PUBLISH_FAILED_BODY = "{failed} failure(s), {published} published; run `trec publish` again after fixing it"
 
 
 class Ask:
@@ -85,6 +94,26 @@ class Err:
     EMPTY_TRANSCRIPT = "Empty transcript: no speech recognized."
     SHORT_TRANSCRIPT = "Transcript too short ({words} words) to analyze: \"{text}\""
     EMPTY_PLAN = "# Plan {day}\n\nNo analyzed meetings and no open actions.\n"
+    STORY_GUIDE_MISSING = "user story guide not found: {path} (set [stories] guide in config.toml)"
+    STORY_GUIDE_EMPTY = "user story guide is empty: {path}"
+    BACKLOG_BINARY_MISSING = "Backlog.md CLI ({binary}) not found; install it with `brew install backlog-md` or `npm i -g backlog.md`"
+    BACKLOG_PROJECT_UNSET = "no Backlog.md project set; fill [stories.backlog_md] project_dir in config.toml"
+    BACKLOG_PROJECT_MISSING = "Backlog.md project folder not found: {path}; fix [stories.backlog_md] project_dir in config.toml"
+    BACKLOG_NOT_INITIALIZED = "{path} is not a Backlog.md project; run there: backlog init \"teams-recorder\" --no-git --defaults --integration-mode none"
+    BACKLOG_STATUS_MISSING = "{status!r} is not a column of the board; add it to `statuses` in {config}"
+    BACKLOG_GIT_ON = "{config} lets Backlog.md commit or reach remotes; set auto_commit and remote_operations to false"
+    BACKLOG_NOT_IGNORED = "{path} would be versioned by Git; add it to .gitignore (stories carry meeting content)"
+    BACKLOG_IGNORE_UNKNOWN = "could not confirm with git that {path} is git-ignored; publishing stays off until `git check-ignore {path}` works"
+    BACKLOG_SHIM = "{binary} is a Windows command shim, which can cut multi-line text and drop options; point to the backlog executable itself"
+    BACKLOG_LABEL_SEPARATOR = "label {label!r} contains a comma, which Backlog.md would split; fix [stories.backlog_md] labels"
+    BACKLOG_FAILED = "Backlog.md failed (code {code}): {tail}"
+    BACKLOG_TIMEOUT = "Backlog.md did not answer within {seconds:.0f}s"
+    BACKLOG_EXEC = "could not run Backlog.md ({binary}): {error}"
+    BACKLOG_NO_ID = "Backlog.md did not report the new task id: {tail}"
+    PLAN_MISSING = "no plan for {day}; create it with `trec plan --date {day}`"
+    STORIES_MISSING = "no story drafts for {day}; draft them with `trec stories --date {day}`"
+    INVALID_STORY_NUMBER = "there is no story {number} in the drafts of {day} (they have {count})"
+    STORIES_ALREADY_PUBLISHED = "the stories of {day} were already published; drafting them again would put the same work on the board twice. Edit them on the board instead"
     # repository
     FILE_MISSING = "file not found: {path}"
     BAD_JSON = "invalid JSON in {path}: {error}"
@@ -98,6 +127,7 @@ class Err:
     INVALID_BIT_DEPTH = "invalid audio.bit_depth: {value!r} (use one of {options})"
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
+    INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
     NO_DETECTOR = "daemon without a configured detector"
     # pipeline: content of error.txt (step: "transcription" / "analysis")
 
@@ -127,6 +157,8 @@ class Cli:
     AGENT_RESTART_CMD_HELP = "Restart the daemon (for example after changing config.toml)."
     AGENT_STATUS_CMD_HELP = "Show whether the daemon is loaded and running."
     PLAN_CMD_HELP = "Consolidate the day's analyses into a Markdown plan and update the open actions."
+    STORIES_CMD_HELP = "Draft user stories from a day's plan, following the story guide (stories.guide in config.toml); publish them when stories.publish is on."
+    PUBLISH_CMD_HELP = "Send a day's story drafts to the configured boards (stories.destinations). Stories already there are skipped."
     PURGE_CMD_HELP = "Delete audio of already transcribed meetings older than N days (config: planner.retention_days)."
     # status
     DATA_DIR = "Data dir: {path}"
@@ -152,6 +184,8 @@ class Cli:
     API_KEY_NOT_REQUIRED = " (not required with provider = claude-code)"
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
     DATA_IN = "[info] data in {path}"
+    STORY_GUIDE_LINE = "[{mark}] user story guide: {path}{hint}"
+    STORY_GUIDE_DISABLED = "  (story drafts are off: [stories] enabled = false)"
     # start / stop / cancel
     START_PID_HELP = "PID of the process to capture. Default: the running Microsoft Teams."
     START_TITLE_HELP = "Meeting title, used in the name and in the status."
@@ -218,6 +252,24 @@ class Cli:
     PLANNED_OK = " ok ({new} new actions, {completed} completed, {overdue} overdue)"
     PRIORITY_LINE = "  • {text}"
     PLAN_PATH = "  Plan: {path}"
+    STORIES_DATE_HELP = "Day whose plan is turned into story drafts (YYYY-MM-DD). Default: today."
+    DRAFTING_STORIES = "Drafting user stories for {day}…"
+    STORIES_OK = " ok ({stories} stories, {tasks} task cards, {skipped} actions left out)"
+    STORY_LINE = "  • {title}"
+    STORIES_PATH = "  Drafts: {path}"
+    PUBLISH_DATE_HELP = "Day whose story drafts are published (YYYY-MM-DD). Default: today."
+    PUBLISH_ONLY_HELP = "Only these story numbers of the drafts document, comma-separated (e.g. 1,3)."
+    INVALID_ONLY = "invalid --only value: {value!r} (use story numbers such as 1,3)"
+    NO_DESTINATIONS = "no story destinations configured; set stories.destinations in config.toml"
+    PUBLISHING = "Publishing the stories of {day}…"
+    PUBLISHED_LINE = "  • {title} → {destination} {ref}"
+    ALREADY_PUBLISHED = "  {count} already published (skipped)"
+    PUBLISH_FAILURE_LINE = "  ✗ {title} → {destination}: {error}"
+    NOTHING_TO_PUBLISH = "  nothing new to publish"
+    STORIES_WAITING = "Stories waiting to be published: {count}"
+    DESTINATION_LINE = "[{mark}] story destination {destination}: {state}"
+    DESTINATION_READY, DESTINATION_NOT_READY = "ready", "not ready"
+    DESTINATION_PROBLEM = "      {problem}"
     PURGED_RETENTION = "Audio files removed by retention: {count}"
     PURGED = "Audio files removed: {count}"
     PURGED_LINE = "  {meeting_id}"
@@ -288,6 +340,7 @@ class Prompt:
     FIELD_DUE = "Due date in ISO format (YYYY-MM-DD) or null"
     FIELD_ISO_DATE = "ISO date or null"
     FIELD_AT = "Transcript timestamp (HH:MM:SS) of the line where it was said, or null"
+    FIELD_ACTION_KIND = "feature, bug, technical, operation, management or communication (see the rules)"
     FIELD_PRIORITY = "high/medium/low only when urgency was stated or clearly implied; otherwise null"
     FIELD_TITLE = "Short meeting title (max 8 words), inferred from the content"
     FIELD_PURPOSE = "One sentence: why the meeting happened"
@@ -298,6 +351,19 @@ class Prompt:
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
     FIELD_PLAN_PRIORITIES = "3 to 5 priorities, one sentence each"
     FIELD_PLAN_COMPLETED = "ids of open actions that the day's analyses show as completed"
+    STORIES_DATE = "Plan date: {date} ({weekday})"
+    STORIES_ACTIONS = "\n## Candidate actions (JSON; cite these ids in source_action_ids and skipped)\n"
+    STORIES_MEETINGS = "\n## Context: analyses of the meetings these actions came from (JSON)\n"
+    STORIES_EXISTING = "\n## Existing stories from recent days (JSON; never duplicate them: cite their id in duplicate_of)\n"
+    STORY_GUIDE_HEADER = "\n\n# User story guide\n\nThe user's own rules. Follow them for format, style and what counts as a story.\n\n"
+    FIELD_STORY_TITLE = "Short story title, as the guide asks"
+    FIELD_STORY_NARRATIVE = "The story sentence in the guide's format (persona, capability, benefit)"
+    FIELD_STORY_CRITERIA = "Acceptance criteria, one per item, checkable by someone who was not in the meeting"
+    FIELD_STORY_DETAILS = "Other sections the guide asks for, in Markdown without top-level headings; empty if none"
+    FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
+    FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
+    FIELD_SKIPPED_REASON = "Short reason why this action is not a story"
+    FIELD_SKIPPED_DUPLICATE = "id of the existing story that already covers this action, or null"
 
 
 class Minutes:
@@ -343,3 +409,42 @@ class Minutes:
         "other": "Reunião",
     }
     PRIORITY_LABELS = {"high": "🔴 Alta", "medium": "🟡 Média", "low": "🟢 Baixa"}
+
+
+class StoryDoc:
+    """Labels of plans/<day>.stories.md. Portuguese on purpose, like `Minutes`: a document for
+    the user, built from LLM content that is in Portuguese."""
+
+    TITLE = "# Rascunhos de user stories — {date}"
+    INTRO = "_Gerados a partir do plano de {date}. Cada história publicada mostra abaixo do título o board e o id da tarefa; as demais ainda não saíram daqui._"
+    NO_ACTIONS = "Nenhuma ação nova no plano deste dia."
+    NO_STORIES = "Nenhuma ação nova virou história."
+    STORY_TITLE = "## {n}. {title}"
+    PRIORITY = "**Prioridade:** {label}"
+    PUBLISHED = "**Publicada em:** {destination} `{ref}`"
+    DUE = "**Prazo:** {date}"
+    MEETINGS = "**Reuniões:** {ids}"
+    META_SEPARATOR = " · "
+    CRITERIA = "**Critérios de aceite**"
+    CRITERION = "- [ ] {text}"
+    QUESTIONS = "**Perguntas em aberto**"
+    SOURCES = "**Ações de origem**"
+    SOURCE_LINE = "- `{id}` {description}{at}"
+    AT = " (dito em {at})"
+    BULLET = "- {text}"
+    SKIPPED = "## Ações que não viraram história"
+    SKIPPED_LINE = "- `{id}` {description} — {reason}{covered_by}"
+    DUPLICATE_OF = " (já coberta por: {title})"
+    UNKNOWN_ACTION = "(ação fora do plano)"
+    BOARD_ORIGIN = "**Origem:** plano de {day} · reuniões {meetings} · ações {actions}"
+    BOARD_DRAFTS = "**Rascunho:** `{path}`"
+    ACTION_REF = "`{id}`"
+    NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
+    PLAN_ONLY = "{kind}: fica só no plano do dia"                           # stored as the skip reason
+    SAME_TASK = "mesma tarefa de um card recente"                            # stored as the skip reason
+    KIND = "**Tipo:** {label}"
+    KIND_LABELS = {
+        "feature": "Feature", "bug": "Bug", "technical": "Tarefa técnica",
+        "operation": "Operação", "management": "Gestão", "communication": "Comunicação",
+    }
+    FOOTER = "---\n_Rascunho gerado automaticamente seguindo o guia de user stories. Confira cada história antes de publicar._"

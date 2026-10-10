@@ -1,4 +1,5 @@
 """The container wires the right adapters for each platform without touching OS APIs."""
+from dataclasses import replace
 from pathlib import Path
 
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
@@ -10,8 +11,9 @@ from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetect
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.config import load_settings
-from teams_recorder.constants import Platform
-from teams_recorder.container import build_container, teams_tap_binary
+from teams_recorder.constants import Platform, Stories, StoryDestination
+from teams_recorder.container import build_container, build_story_publishers, teams_tap_binary
+from tests.fakes import FakeStoryPublisher
 
 
 def test_windows_container(tmp_path: Path):
@@ -58,3 +60,37 @@ def test_ffmpeg_microphone_codec_follows_bit_depth():
 
     assert "pcm_s16le" in FfmpegMicCapture().command("0", Path("m.wav"))
     assert "pcm_f32le" in FfmpegMicCapture(bit_depth=32).command("0", Path("m.wav"))
+
+
+def test_story_publishers_follow_the_configured_destinations(tmp_path: Path, monkeypatch):
+    registry = {StoryDestination.BACKLOG_MD: lambda s: FakeStoryPublisher(f"board:{s.backlog_status}")}
+    monkeypatch.setattr("teams_recorder.container._PUBLISHERS", registry)
+    assert build_story_publishers(load_settings(tmp_path)) == []                      # none configured
+    (tmp_path / "config.toml").write_text('[stories]\ndestinations = ["backlog-md"]\ndedup_days = 9\n')
+
+    c = build_container(load_settings(tmp_path), headless=True)
+
+    assert [p.destination for p in c.story_publishers] == [f"board:{Stories.BACKLOG_STATUS}"]
+    publish = c.publish_user_stories()
+    assert publish.publishers is c.story_publishers and publish.dedup_days == 9
+    assert c.draft_user_stories().dedup_days == 9
+
+
+def test_story_publishers_keep_the_configured_order(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("teams_recorder.container._PUBLISHERS", {"first": lambda s: FakeStoryPublisher("first"),
+                                                                 "second": lambda s: FakeStoryPublisher("second")})
+    settings = replace(load_settings(tmp_path), story_destinations=("second", "first"))
+    assert [p.destination for p in build_story_publishers(settings)] == ["second", "first"]
+
+
+def test_every_destination_has_a_publisher_and_backlog_md_gets_its_settings(tmp_path: Path):
+    from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
+    from teams_recorder.container import _PUBLISHERS
+
+    assert set(_PUBLISHERS) == set(StoryDestination)
+    (tmp_path / "config.toml").write_text('[stories]\ndestinations = ["backlog-md"]\n[stories.backlog_md]\nproject_dir = "."\nstatus = "Inbox"\n')
+    settings = load_settings(tmp_path)
+    [publisher] = build_story_publishers(settings)
+    assert isinstance(publisher, BacklogMdPublisher)
+    assert publisher.project_dir == tmp_path.resolve() and publisher.status == "Inbox"
+    assert publisher.drafts_dir == settings.data_dir / "plans" and publisher.destination == StoryDestination.BACKLOG_MD

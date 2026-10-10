@@ -37,3 +37,6 @@ that date and the earlier history was not rewritten.
 | 7b | — | Keep-or-discard question when a call starts: port, osascript dialog, daemon logic, config, tests, docs |
 | 7c | — | Long meetings and back-to-back calls: split stop/mix, scaled mix timeout, atomic audio, retry unmixed recordings, disk warnings, 16/32-bit raw tracks (`--bits`), tests, docs |
 | W2 | — | Windows Python side: platform selection, WASAPI capture adapters with stop files, registry call detector, toast, message box, Task Scheduler, install.ps1, tests, docs |
+| 8 | — | User story drafts from the daily plan: guide-driven Claude story writer, Markdown review document, `trec stories`, config, tests, docs |
+| 8b | — | Story publishing to a Backlog.md board: publication state, duplicates across days and the redraft lock, publisher port and use case, destinations switch, Backlog.md publisher, `trec publish`, doctor/status lines, tests, docs (one layered set of commits per task of `tasks/prd-story-publishing/`) |
+| 8c | — | Action kinds: the analysis classifies every action (feature, bug, technical, operation, management, communication); stories only for features and bugs, task cards for technical and operation work, the rest stays in the plan; kind labels, bug format, tests, docs |

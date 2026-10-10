@@ -11,6 +11,7 @@ from typing import Any
 from teams_recorder.constants import Audio
 from teams_recorder.domain import (
     Action,
+    ActionKind,
     ActionStatus,
     Analysis,
     DailyPlan,
@@ -19,9 +20,13 @@ from teams_recorder.domain import (
     Meeting,
     MeetingType,
     Priority,
+    Publication,
     Segment,
+    SkippedAction,
+    StoryDrafts,
     Topic,
     Transcript,
+    UserStory,
 )
 
 
@@ -79,6 +84,7 @@ def action_to_dict(a: Action) -> dict[str, Any]:
         "status": a.status.value,
         "priority": a.priority.value if a.priority else None,
         "at": a.at,
+        "kind": a.kind.value if a.kind else None,
     }
 
 
@@ -92,6 +98,7 @@ def action_from_dict(d: dict[str, Any]) -> Action:
         status=ActionStatus(d.get("status", ActionStatus.OPEN)),
         priority=Priority(d["priority"]) if d.get("priority") else None,
         at=d.get("at"),
+        kind=ActionKind(d["kind"]) if d.get("kind") else None,
     )
 
 
@@ -161,4 +168,59 @@ def plan_from_dict(d: dict[str, Any]) -> DailyPlan:
         new_actions=[action_from_dict(x) for x in d.get("new_actions", [])],
         completed_action_ids=list(d.get("completed_action_ids", [])),
         overdue_action_ids=list(d.get("overdue_action_ids", [])),
+    )
+
+
+# User story drafts
+def story_to_dict(s: UserStory) -> dict[str, Any]:
+    return {
+        "id": s.id,
+        "title": s.title,
+        "narrative": s.narrative,
+        "acceptance_criteria": list(s.acceptance_criteria),
+        "details": s.details,
+        "open_questions": list(s.open_questions),
+        "source_action_ids": list(s.source_action_ids),
+        "source_meetings": list(s.source_meetings),
+        "priority": s.priority.value if s.priority else None,
+        "due": _d(s.due),
+        "publications": [
+            {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
+        ],
+        "kind": s.kind.value if s.kind else None,
+    }
+
+
+def story_from_dict(d: dict[str, Any]) -> UserStory:
+    return UserStory(
+        id=d["id"],
+        title=d["title"],
+        narrative=d.get("narrative", ""),
+        acceptance_criteria=list(d.get("acceptance_criteria", [])),
+        details=d.get("details", ""),
+        open_questions=list(d.get("open_questions", [])),
+        source_action_ids=list(d.get("source_action_ids", [])),
+        source_meetings=list(d.get("source_meetings", [])),
+        priority=Priority(d["priority"]) if d.get("priority") else None,
+        due=_parse_d(d.get("due")),
+        publications=[
+            Publication(x["destination"], x["ref"], datetime.fromisoformat(x["published_at"])) for x in d.get("publications", [])
+        ],
+        kind=ActionKind(d["kind"]) if d.get("kind") else None,
+    )
+
+
+def story_drafts_to_dict(drafts: StoryDrafts) -> dict[str, Any]:
+    return {
+        "day": drafts.day.isoformat(),
+        "stories": [story_to_dict(s) for s in drafts.stories],
+        "skipped": [{"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of} for k in drafts.skipped],
+    }
+
+
+def story_drafts_from_dict(d: dict[str, Any]) -> StoryDrafts:
+    return StoryDrafts(
+        day=date.fromisoformat(d["day"]),
+        stories=[story_from_dict(x) for x in d.get("stories", [])],
+        skipped=[SkippedAction(x["action_id"], x.get("reason", ""), x.get("duplicate_of")) for x in d.get("skipped", [])],
     )

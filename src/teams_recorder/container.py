@@ -1,6 +1,7 @@
 """Composition root: the only place that instantiates concrete adapters."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,7 +22,10 @@ from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
+from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
+from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.ports import (
@@ -37,20 +41,27 @@ from teams_recorder.application.ports import (
     Planner,
     ProcessAudioCapture,
     RecordingConfirmation,
+    StoryPublisher,
+    StoryRenderer,
+    StoryWriter,
     Transcriber,
 )
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
     BuildDailyPlan,
     CancelRecording,
+    DraftUserStories,
+    PublishUserStories,
     PurgeOldAudio,
+    stories_waiting,
     RenderMinutes,
     StartRecording,
     StopRecording,
     TranscribeMeeting,
 )
 from teams_recorder.config import Settings, find_tool
-from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform
+from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform, StoryDestination
+from teams_recorder.domain import UserStory
 
 
 def teams_tap_binary(project_dir: Path, platform: Platform = Platform.MACOS) -> Path:
@@ -80,6 +91,9 @@ class Container:
     planner: Planner
     detector: CallDetector
     minutes: MinutesRenderer
+    story_writer: StoryWriter
+    story_renderer: StoryRenderer
+    story_publishers: list[StoryPublisher]
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
     disk: DiskSpace | None = None
 
@@ -107,6 +121,17 @@ class Container:
 
     def build_daily_plan(self) -> BuildDailyPlan:
         return BuildDailyPlan(self.repo, self.planner, self.notifier)
+
+    def draft_user_stories(self) -> DraftUserStories:
+        return DraftUserStories(self.repo, self.story_writer, self.story_renderer, self.notifier, self.settings.story_dedup_days)
+
+    def stories_waiting(self) -> list[UserStory]:
+        destinations = [p.destination for p in self.story_publishers]
+        return stories_waiting(self.repo, self.clock.now().date(), self.settings.story_dedup_days, destinations)
+
+    def publish_user_stories(self) -> PublishUserStories:
+        return PublishUserStories(self.repo, self.story_publishers, self.story_renderer, self.notifier, self.clock,
+                                  self.settings.story_dedup_days)
 
     def purge_old_audio(self) -> PurgeOldAudio:
         return PurgeOldAudio(self.repo, self.clock, self.settings.retention_days)
@@ -161,9 +186,33 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
+        story_writer=ClaudeStoryWriter(
+            transport, settings.story_guide_path, prompt_path=settings.prompts_dir / Files.STORIES_PROMPT, user_name=settings.user_name,
+        ),
+        story_renderer=MarkdownStoryRenderer(),
+        story_publishers=build_story_publishers(settings),
         confirmation=platform.confirmation,
         disk=DataDirDiskSpace(settings.data_dir),
     )
+
+
+# Story destinations: a table from each [stories] destinations value to the builder of its
+# publisher (configuration picks the adapter, as llm.provider does in build_transport).
+# A new destination is a new adapter plus one entry here.
+def _backlog_md(settings: Settings) -> StoryPublisher:
+    return BacklogMdPublisher(
+        settings.backlog_project_dir, settings.backlog_status, settings.backlog_labels,
+        drafts_dir=settings.data_dir / Files.PLANS_DIR, binary=find_tool(Bin.BACKLOG, settings.project_dir),
+    )
+
+
+_PUBLISHERS: dict[StoryDestination, Callable[[Settings], StoryPublisher]] = {
+    StoryDestination.BACKLOG_MD: _backlog_md,
+}
+
+
+def build_story_publishers(settings: Settings) -> list[StoryPublisher]:
+    return [_PUBLISHERS[destination](settings) for destination in settings.story_destinations]
 
 
 def build_transport(settings: Settings) -> StructuredTransport:

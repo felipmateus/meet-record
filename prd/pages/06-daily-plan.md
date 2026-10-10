@@ -37,4 +37,4 @@ Once a day, consolidates the analyses of the day's meetings, the previous day's 
 Same provider as the analysis (API or Claude Code), with schema-constrained structured output.
 
 ## Relationships
-- **From:** [Analysis](./03-analysis.md). **To:** the user reads the Markdown; integrations (To Do, Obsidian) are left for after phase 7.
+- **From:** [Analysis](./03-analysis.md). **To:** the user reads the Markdown; with `[stories] enabled = true`, [User story drafts](./08-user-stories.md) run right after the plan. Other integrations (To Do, Obsidian) are left for later.

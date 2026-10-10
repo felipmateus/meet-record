@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.constants import Llm
-from teams_recorder.domain import Action, Analysis, AnalysisError, Deadline, Decision, Meeting, MeetingType, Priority, Topic, Transcript
+from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Deadline, Decision, Meeting, MeetingType, Priority, Topic, Transcript
 from teams_recorder.messages import Err, Prompt
 
 MIN_WORDS = Llm.MIN_WORDS  # module alias kept for callers and tests
@@ -40,6 +40,7 @@ class ActionOut(BaseModel):
     due: str | None = Field(default=None, description=Prompt.FIELD_DUE)
     priority: Priority | None = Field(default=None, description=Prompt.FIELD_PRIORITY)
     at: str | None = Field(default=None, description=Prompt.FIELD_AT)
+    kind: ActionKind = Field(description=Prompt.FIELD_ACTION_KIND)
 
 
 class DecisionOut(BaseModel):
@@ -91,7 +92,7 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
     def act(a: ActionOut, default_owner: str | None = None) -> Action:
         return Action(
             description=a.description.strip(), owner=(default_owner or a.owner).strip(), source_meeting=meeting.id,
-            due=_parse_date(a.due), priority=a.priority, at=(a.at or None),
+            due=_parse_date(a.due), priority=a.priority, at=(a.at or None), kind=a.kind,
         )
 
     return Analysis(

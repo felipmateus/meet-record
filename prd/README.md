@@ -20,6 +20,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | Automation | daemon, agent | Detect Teams calls and chain recording → transcription → analysis with no intervention | Delivered (phase 5) |
 | Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
 | Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
+| User stories | stories, publish | Draft user stories from the plan's new actions, following the user's guide, and publish them to a board for review | Delivered: drafts and the Backlog.md board; publishing by hand until the user approves the stories, then automatic (GitHub and Azure later) |
 | Installation | install.sh, uninstall.sh | Install from scratch on another Mac/user | Delivered (phase 7) |
 | Windows | install.ps1, Windows adapters | Same flows on Windows 10 2004+/11 | Implemented, not yet run on Windows |
 
@@ -34,6 +35,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | 5 | Operations and diagnostics | `trec status` / `doctor` / `purge` / `version` | Operations | [→](./pages/05-operations.md) |
 | 6 | Daily plan | `trec plan` | Planning | [→](./pages/06-daily-plan.md) |
 | 7 | Installation | `scripts/install.sh` / `install.command` / `scripts/uninstall.sh` | Installation | [→](./pages/07-installation.md) |
+| 8 | User story drafts and publishing | `trec stories`, `trec publish` (and after `trec plan`) | User stories | [→](./pages/08-user-stories.md) |
 
 Appendices: [state and enumeration dictionary](./appendix/enum-dictionary.md) · [external integrations](./appendix/integrations.md) · [data layout and schemas](./appendix/data-layout.md) · [relationships between flows](./appendix/relationships.md).
 

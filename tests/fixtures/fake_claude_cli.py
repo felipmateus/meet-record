@@ -23,7 +23,7 @@ out = {
     "summary": "Revisão da sprint com entregas definidas.",
     "topics": [{"title": "Entregas", "points": ["Relatório até quarta."]}],
     "decisions": [{"text": "Relatório até quarta.", "at": "00:00:03"}],
-    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03"}],
+    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03", "kind": "communication"}],
     "risks": [],
     "others_actions": [],
     "deadlines": [],

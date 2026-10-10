@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.adapters.outbound.llm_claude import AnalysisOut, ClaudeAnalyzer, build_user_message, strict_schema, to_domain
-from teams_recorder.domain import AnalysisError, Meeting, Segment, Transcript
+from teams_recorder.domain import ActionKind, AnalysisError, Meeting, Segment, Transcript
 
 SAMPLE_OUT = AnalysisOut.model_validate({
     "summary": "Revisão da sprint e definição de entregas.",  # Portuguese: model output is data
@@ -17,8 +17,8 @@ SAMPLE_OUT = AnalysisOut.model_validate({
     "topics": [{"title": "Integração SAP", "points": ["Escopo em aberto", " "]}],
     "decisions": [{"text": "Relatório até quarta.", "at": "00:00:03"}, {"text": "  ", "at": None}],
     "risks": ["Escopo do SAP indefinido"],
-    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03"}],
-    "others_actions": [{"description": "Revisar escopo do SAP", "owner": "Mariana", "due": None}],
+    "my_actions": [{"description": "Enviar relatório de integração", "owner": "usuário", "due": "2026-10-08", "priority": "high", "at": "00:00:03", "kind": "communication"}],
+    "others_actions": [{"description": "Revisar escopo do SAP", "owner": "Mariana", "due": None, "kind": "management"}],
     "deadlines": [{"what": "Relatório de integração", "when": "2026-10-08", "who": "usuário"}],
     "open_questions": ["Escopo final da integração?"],
     "next_meetings": ["Cliente, semana de 13/10"],
@@ -89,7 +89,7 @@ def test_missing_prompt_is_an_error(tmp_path: Path, meeting, transcript):
 
 
 def test_to_domain_tolerates_bad_dates(meeting):
-    out = AnalysisOut(summary="s", my_actions=[{"description": "x", "owner": "usuário", "due": "quarta-feira"}])
+    out = AnalysisOut(summary="s", my_actions=[{"description": "x", "owner": "usuário", "due": "quarta-feira", "kind": "feature"}])
     assert to_domain(out, meeting).my_actions[0].due is None
 
 
@@ -104,7 +104,7 @@ def test_strict_schema_closes_objects_and_requires_all_fields():
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == set(schema["properties"])
     action = schema["$defs"]["ActionOut"]
-    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due", "priority", "at"}
+    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due", "priority", "at", "kind"}
     assert "default" not in action["properties"]["due"]
 
 
@@ -135,3 +135,8 @@ def test_schema_exposes_enums_and_timestamps():
         assert key in props and key in schema["required"]
     action = schema["$defs"]["ActionOut"]
     assert {"priority", "at"} <= set(action["required"])
+
+
+def test_actions_keep_the_kind_the_model_gave_them():
+    analysis = to_domain(SAMPLE_OUT, Meeting.start(datetime(2026, 10, 6, 10, 0)))
+    assert analysis.my_actions[0].kind == ActionKind.COMMUNICATION and analysis.others_actions[0].kind == ActionKind.MANAGEMENT

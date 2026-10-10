@@ -29,6 +29,10 @@ class MicBackend(StrEnum):
     FFMPEG = "ffmpeg"        # avfoundation; stalled when Teams opened the microphone
 
 
+class StoryDestination(StrEnum):
+    BACKLOG_MD = "backlog-md"  # a local Backlog.md project (Markdown kanban); see [stories.backlog_md]
+
+
 class Effort(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
@@ -67,6 +71,8 @@ class Bin:
     POWERSHELL = "powershell"     # Windows PowerShell 5.1, present on every Windows 10/11
     SCHTASKS = "schtasks"
     DOTNET = "dotnet"
+    BACKLOG = "backlog"           # Backlog.md CLI (npm i -g backlog.md / brew install backlog-md)
+    GIT = "git"
 
 
 # --- files and folders -------------------------------------------------------
@@ -77,6 +83,8 @@ class Files:
     PROMPTS_DIR = "prompts"
     ANALYZE_PROMPT = "analyze_system.md"
     PLAN_PROMPT = "plan_system.md"
+    STORIES_PROMPT = "stories_system.md"
+    STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
     PLAN_GLOB = "????-??-??.json"     # every saved plan (see PLAN_JSON below)
@@ -112,6 +120,9 @@ class Files:
     AGENT_ERR_LOG = "{name}.err.log"
     PLAN_MARKDOWN = "{day}.md"                         # day: ISO date
     PLAN_JSON = "{day}.json"
+    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
+    STORIES_JSON = "{day}.stories.json"
+    STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
@@ -190,6 +201,10 @@ class Parse:
         'display dialog "{body}" with title "{title}" buttons {{"{discard}", "{keep}"}} '
         'default button "{keep}" giving up after {timeout} with icon note'
     )
+    STORY_NUMBER = r"\s*[0-9]+\s*"              # one `--only` item (ASCII digits only)
+    BACKLOG_TASK_ID = r"^Task (\S+) - "            # `backlog task create --plain`: "Task TASK-7 - <title>"
+    BACKLOG_STATUS = r"^statuses:.*[\[,]\s*[\"']?{status}[\"']?\s*[,\]]"   # status: re.escape'd column name
+    BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
     DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
     DIALOG_GAVE_UP = "gave up:true"
 
@@ -279,3 +294,35 @@ class Logging:
 class Planner:
     DEFAULT_HOUR = 18
     RETENTION_DAYS = 30
+
+
+class BacklogMd:
+    """The Backlog.md CLI and project layout (checked against Backlog.md 1.53.0, techspec §9)."""
+
+    TASKS_DIR = "backlog"
+    ROOT_CONFIG = "backlog.config.yml"     # a config at the project root; the tasks still live in ./backlog
+    CONFIG_FILES = (Path(TASKS_DIR) / "config.yml", Path(".backlog") / "config.yml", Path(ROOT_CONFIG))
+    CREATE = ("task", "create")
+    DESC, STATUS, LABEL, PRIORITY, AC, PLAIN = "--desc", "-s", "-l", "--priority", "--ac", "--plain"
+    END_OF_OPTIONS = "--"                  # the title goes after it, so a title starting with "-" is not a flag
+    LABEL_SEPARATOR = ","                  # the CLI splits -l values at commas
+    SHIM_SUFFIXES = (".cmd", ".bat")       # Windows shims run under cmd.exe, which cuts multi-line arguments
+    GIT_MARKER = ".git"                    # a folder (or file, in worktrees) that marks a Git work tree
+    GIT_DIR = "-C"
+    GIT_CHECK_IGNORE = ("check-ignore", "-q")
+    GIT_IGNORED, GIT_NOT_IGNORED = 0, 1    # `git check-ignore -q` exit codes; anything else is an error
+    TIMEOUT = 60.0
+    TAIL_LINES = 3
+
+
+class Stories:
+    ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
+    DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
+    PUBLISH = False   # without [stories] publish = true, drafts are published only with `trec publish`
+    BACKLOG_STATUS = "Triagem"            # Backlog.md column where new stories wait for review
+    BACKLOG_LABELS = ("teams-recorder",)
+    # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
+    CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
+                      "decisions", "others_actions", "open_questions", "risks")
+    # Story fields the writer sees for each recent story, to recognise an action it already covers.
+    EXISTING_FIELDS = ("id", "title", "narrative")

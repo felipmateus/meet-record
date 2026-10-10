@@ -14,7 +14,11 @@ class TranscriptionError(TeamsRecorderError):
 
 
 class AnalysisError(TeamsRecorderError):
-    """LLM analysis or planning failed."""
+    """LLM analysis, planning or story drafting failed."""
+
+
+class PublishError(TeamsRecorderError):
+    """Publishing failed: a destination (a board) could not take a story, or the selection was invalid."""
 
 
 class RepositoryError(TeamsRecorderError):
