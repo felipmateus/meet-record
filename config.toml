@@ -84,7 +84,7 @@ enabled = true
 # against the project folder). Drafting fails if this file is missing or empty.
 guide = "prompts/user_story_guide.md"
 # Where drafted stories go (boards), by name. Available: "backlog-md". Empty = drafts only.
-destinations = []
+destinations = ["backlog-md"]
 # Publish to the destinations right after drafting, so the scheduled planner does it too.
 # false = drafts are published only with `trec publish [--date YYYY-MM-DD] [--only 1,3]`.
 publish = false
