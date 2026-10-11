@@ -47,10 +47,31 @@ class Segment:
     text: str
 
 
+@dataclass(frozen=True)
+class TranscriptHealth:
+    """How usable a transcript is (see domain/health.py, which computes it)."""
+
+    loop_share: float        # share of segments inside repetition loops, 0..1
+    covered_minutes: int     # minutes with speech text outside the loops
+    total_minutes: int
+    degraded: bool           # loop_share above the configured maximum
+    uncovered: tuple[tuple[int, int], ...] = ()  # minutes without text, as half-open [start, end) runs
+    retried: bool = False    # a second pass with the anti-loop settings ran (the healthier of the two was kept)
+
+    def is_healthier_than(self, other: "TranscriptHealth") -> bool:
+        """Not degraded beats degraded; then more minutes with text; then fewer segments in loops."""
+        return (self.degraded, -self.covered_minutes, self.loop_share) < (other.degraded, -other.covered_minutes, other.loop_share)
+
+    def uncovered_ranges(self) -> list[str]:
+        """The minutes without text as transcript times, e.g. ["00:00:00–00:59:00"]."""
+        return [f"{_fmt(start * 60)}–{_fmt(end * 60)}" for start, end in self.uncovered]
+
+
 @dataclass
 class Transcript:
     segments: list[Segment] = field(default_factory=list)
     language: str = "pt"
+    health: TranscriptHealth | None = None  # None: transcribed before the health check existed
 
     @property
     def text(self) -> str:
