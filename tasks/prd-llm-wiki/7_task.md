@@ -24,13 +24,16 @@ Build the repeatable evaluation of [evaluation.md](./evaluation.md): a fictional
 
 ## Subtasks
 
-- [ ] 7.1 Install the evals-skills (user approval); read `evals-start`, `generate-synthetic-data`, `write-code-eval`, `write-judge-prompt`, `validate-evaluator`; write the RUN_LOG.
-- [ ] 7.2 Write the corpus: people, projects, timeline, the planted facts of evaluation.md §4, then the eight transcripts and `facts.toml`.
-- [ ] 7.3 Write `questions.toml` (20 questions) with checks derived from `facts.toml`; review with the user that each check is unambiguous.
-- [ ] 7.4 Implement `scripts/wiki_eval.py` (`run`, `report`) and the condition builders; fix the read-only `claude -p` flags with a smoke test.
-- [ ] 7.5 Implement `judge`, `calibrate` and `fidelity`; write `judge_system.md`.
+Pulled forward on 2026-10-10, at the user's request, before tasks 2–6 (the wiki ingest is simulated by Claude Code following the schema until the real one exists). What was built differs from the plan below where noted.
+
+- [ ] 7.1 Install the evals-skills (user approval); read `evals-start`, `generate-synthetic-data`, `write-code-eval`, `write-judge-prompt`, `validate-evaluator`; write the RUN_LOG. (The user started `npx skills add`; not confirmed installed. The judge and checks below follow the course's method without the skills.)
+- [x] 7.2 Write the corpus. Built as nine dialogue scripts (`tests/fixtures/wiki_corpus/scripts/`, planted facts in each script's comments instead of a separate `facts.toml`) rendered to audio and run through the real pipeline, rather than hand-written transcripts: whisper's errors and the analysis's mistakes are part of what is measured.
+- [x] 7.3 Write `questions.toml` (20 questions). Two checks were tightened after the first run showed them too weak (whose vacation; the deadline question scoped to the two planted projects once distractors exist).
+- [x] 7.4 Implement the runner: `scripts/wiki_corpus.py` (`render`, `process`, `ask`, `score`) instead of `scripts/wiki_eval.py`; read-only flags `--tools Read,Grep,Glob --allowedTools Read,Grep,Glob`, smoke-tested.
+- [ ] 7.5 `judge` is implemented inside `score` (binary, critique first, through the project's transport); `calibrate` and `fidelity` are not yet, and the judge has not been calibrated against human labels.
 - [ ] 7.6 Unit tests on canned answers; the opt-in integration test.
-- [ ] 7.7 With approval, run the synthetic evaluation (`--runs 3`); label 20 judge outputs with the user; calibrate; write `report.md`; record G2.
+- [x] 7.7 Synthetic run on nine meetings (`--runs 3`): results in evaluation.md §13. Calibration with the user's labels still pending, so G2 is provisional.
+- [x] 7.8 Scale test, 90 meetings (evaluation.md §12): `fill`, `ingest`, `clean`, `autorun` implemented and run unattended; results in evaluation.md §13 (run 2). G2 as written not met; the wiki is not better than the minutes in context at this size and costs 3× per answer.
 
 ## Implementation details
 

@@ -22,9 +22,9 @@ Before writing code, build the wiki by hand with Claude Code over the 13 real me
 
 ## Subtasks
 
-- [ ] 1.1 Draft `data/wiki-spike/CLAUDE.md`: page types, sections per type, conventions (current value first, `Histórico`, `[[meetings/<id>]]` citations with timestamps, `⚠️ Conflito`), ingest, query and lint workflows, Brazilian Portuguese content.
-- [ ] 1.2 With the user's approval, ingest the 13 meetings oldest first from `minutes.md` (Claude Code interactive, in the spike folder); keep `index.md` and `log.md` as the pattern asks.
-- [ ] 1.3 Re-ingest two meetings with the transcript as the source and compare the pages; decide the `send_transcript` default.
+- [x] 1.1 Draft `data/wiki-spike/CLAUDE.md`: page types, sections per type, conventions (current value first, `Histórico`, `[[meetings/<id>]]` citations with timestamps, `⚠️ Conflito`), ingest, query and lint workflows, Brazilian Portuguese content.
+- [x] 1.2 With the user's approval, ingest the 13 meetings oldest first from `minutes.md` (Claude Code interactive, in the spike folder); keep `index.md` and `log.md` as the pattern asks.
+- [x] 1.3 Re-ingest two meetings with the transcript as the source and compare the pages; decide the `send_transcript` default.
 - [ ] 1.4 Review the pages with the user: correct facts, wrong facts, missing cross-references, usefulness per page type; count pages touched per meeting and page sizes.
 - [ ] 1.5 Ask the ten first real questions interactively (Claude Code in the spike folder) and record whether the answers were right; the user writes the answer key in `data/wiki-eval/questions.toml` first.
 - [ ] 1.6 Write `prompts/wiki_schema.md` from the final `CLAUDE.md`; fill techspec §9; write the go/no-go in `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (one paragraph, dated).

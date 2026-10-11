@@ -2,6 +2,8 @@
 
 ## Overview
 
+Starts once at least 15 work meetings are recorded (spike, techspec §9: only 3 existed on 2026-10-10, too few for the comparison to mean anything). Until then the wiki can be ingested by hand (`trec wiki ingest`) with `enabled = false`.
+
 Prove the wiki on the user's own meetings: backfill every analyzed meeting, run the evaluation with the user's answer key, sample the pages for fidelity, tune `prompts/wiki_schema.md` where the pages fall short, decide with the user whether automatic ingest is switched on, and bring every document in line with the shipped behavior. Every step that reads real content or calls the model waits for the user's approval.
 
 <skills>

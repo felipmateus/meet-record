@@ -87,7 +87,7 @@ class WikiHistory(Protocol):
 `execute(meeting_id, force=False) -> IngestOutcome` (`record: WikiIngest`, `skipped: bool`):
 
 1. `existing = repo.load_wiki_ingest(meeting_id)`; when set and not `force` → `IngestOutcome(existing, skipped=True)` (nothing else happens).
-2. Load meta and analysis (`RepositoryError` if the meeting is not analyzed); transcript text when `send_transcript` (missing transcript = `None`, never an error; truncated at `max_transcript_chars` with `Prompt.TRUNCATED`).
+2. Load meta and analysis (`RepositoryError` if the meeting is not analyzed); transcript text when `send_transcript` and the analysis is not the trivial one (spike §9); a missing transcript = `None`, never an error; truncated at `max_transcript_chars` with `Prompt.TRUNCATED`.
 3. `with store.lock(lock_timeout)`: `store.initialize(schema)`; `repo.clear_wiki_failed(meeting_id)`; `index = render_index(store.pages())`.
 4. `plan = writer.plan(source, index)`; refs in `plan.read` are validated (type, slug) and the valid ones that exist are read: `pages = {ref: store.read(ref)}` (at most `max_pages`).
 5. `edits = writer.compose(source, index, pages, plan)`; `accepted, rejected = validate_edits(edits, existing refs, max_pages, max_chars)`.
@@ -154,7 +154,7 @@ send_transcript = true   # the model also receives the transcript (quotes with t
 git = true               # one local Git commit per ingest (history and diffs); never a remote
 ```
 
-`Settings`: `wiki_enabled`, `wiki_dir: Path`, `wiki_send_transcript`, `wiki_git`; property `wiki_schema_path` (`prompts_dir / Files.WIKI_SCHEMA_PROMPT`). `constants.Wiki`: `ENABLED=False`, `SEND_TRANSCRIPT=True`, `GIT=True`, `MAX_READ_PAGES=15`, `MAX_WRITE_PAGES=20`, `MAX_PAGE_CHARS=20_000`, `MAX_TRANSCRIPT_CHARS=150_000`, `LOCK_TIMEOUT=900.0`, `LOCK_POLL=0.5`, `GIT_TIMEOUT=60.0`, `BACKUP_SUFFIX`. `Files`: `WIKI_DIR="wiki"`, `WIKI_SCHEMA_PROMPT`, `WIKI_INGEST_PROMPT`. `Env.REAL_WIKI="TREC_REAL_WIKI"`. `Step.WIKI`, `Notify.WIKI_FAILED/_BODY`, `Err.WIKI_*`, `Cli.WIKI_*`, `Log.WIKI_*`, `messages.WikiDoc` (index, log and meeting-page labels in Portuguese).
+`Settings`: `wiki_enabled`, `wiki_dir: Path`, `wiki_send_transcript`, `wiki_git`; property `wiki_schema_path` (`prompts_dir / Files.WIKI_SCHEMA_PROMPT`). `constants.Wiki`: `ENABLED=False`, `SEND_TRANSCRIPT=True`, `GIT=True`, `MAX_READ_PAGES=15`, `MAX_WRITE_PAGES=15`, `MAX_PAGE_CHARS=16_000`, `MAX_TRANSCRIPT_CHARS=150_000`, `LOCK_TIMEOUT=900.0`, `LOCK_POLL=0.5`, `GIT_TIMEOUT=60.0`, `BACKUP_SUFFIX`. `Files`: `WIKI_DIR="wiki"`, `WIKI_SCHEMA_PROMPT`, `WIKI_INGEST_PROMPT`. `Env.REAL_WIKI="TREC_REAL_WIKI"`. `Step.WIKI`, `Notify.WIKI_FAILED/_BODY`, `Err.WIKI_*`, `Cli.WIKI_*`, `Log.WIKI_*`, `messages.WikiDoc` (index, log and meeting-page labels in Portuguese).
 
 ## 7. CLI, doctor and status (`adapters/inbound/cli.py`)
 
@@ -205,7 +205,27 @@ The spike is a manual LLM wiki built with Claude Code over the 13 real meetings,
 4. How the model handles a fact that changed between two real meetings, if the data has one, and how the schema should instruct it.
 5. The user's first ten questions with answers for the real-data evaluation (`data/wiki-eval/questions.toml`).
 
-Results: _to be filled by task 1_.
+Results (2026-10-10; wiki in `data/wiki-spike/`, one Git commit per ingest; schema v1 = its `CLAUDE.md`):
+
+- **Corpus.** Of the 13 recordings, 10 are tests, noise or demos (no page besides the meeting page) and 3 are work meetings, all about the same client (07/10, 08/10, 09/10). The ingest produced 2 project, 4 person and 11 topic pages. Nothing sensitive leaked: a personal joke about a colleague in a test recording and the whisper hallucination "Legenda por <name>" stayed out, also when the transcript was the source.
+- **(1) Page types.** Person, project and topic pages with "current state first, dated history below" handled the one real change in the data: the report-rejection lock, a bug with a fix decided on 08/10, reframed on 09/10 as behavior the client asked for, with the old decision struck through, the old action moved to history and a `⚠️ Conflito` note. User verdict on usefulness: _pending (task 1.4)_.
+- **(2) Transcript.** Re-ingesting 09/10 from `analysis.json` + `transcript.txt` instead of the minutes: citations with a timestamp went from 69% to 99%, and the transcript exposed analysis errors the minutes-only ingest carried into the wiki: a participant that does not exist ("Marco", whisper's rendering of the client's name), a deadline nobody gave (31/10), a tentative "maybe next month" recorded as a decision, one wrong timestamp, a misleading description of the mock; it also added facts the analysis dropped (status thresholds, what the card shows today). Cost: about 7–8k tokens for a 27-minute meeting. Test recordings re-ingested from the transcript stayed clean. **Decision: `send_transcript = true` by default, skipped only when the analysis is the trivial one (transcript under `Llm.MIN_WORDS`).** Word count is a poor proxy for a test recording (real dailies have 200–300 words) and a short transcript costs a few hundred tokens; the cost only matters for long meetings, where the transcript is worth the most. The transcript makes the schema's filters (hallucinations, judgments, personal remarks) more important: it carries remarks about the client that the analysis had already dropped.
+- **(3) Sizing.** Pages per real meeting (created + updated, excluding meeting page, index, overview, log): 10, 8, 12; pages read: 2, 5, 11. Largest page 12.3k chars (the project page), median 3.6k. **Limits: `MAX_READ_PAGES = 15`, `MAX_WRITE_PAGES = 15`, `MAX_PAGE_CHARS = 16_000`.** The whole wiki after 3 real meetings is ~27k tokens, about 2.5× the minutes it came from, mostly because open actions repeat on person, project and topic pages; v2 of the schema keeps one home per action and lists it elsewhere as a link (see below).
+- **(4) Changed facts.** Handled as above; the rules needed for cases v1 did not cover are in the v2 list.
+- **(5) Questions.** Ten candidates drawn from the minutes are in `data/wiki-eval/questions.toml`; answers: _pending (task 1.5)_. Only three work meetings exist, so the real-data comparison (G3) needs more recorded meetings before it can say much (see the risk below).
+
+Schema v2 changes (from the three ingest agents' reports, to apply in `prompts/wiki_schema.md`):
+1. Test rule covers simulations, demos of the recorder and informal chats with no commitment about Felipe's work: meeting page only.
+2. Participants: only people who speak or own something; names that are only mentioned are linked in the text, not listed; never a name that appears only in a hallucination or an excluded remark.
+3. Rule 6 covers actions replaced or deferred (move to history with "substituída por …") and says indirect evidence never closes an action.
+4. Rule 4 covers a meeting contradicting itself.
+5. Topics gain `## Riscos e bloqueios`; person pages gain `## Perguntas em aberto`; the `Pendências` line gains an optional priority.
+6. One home per action (its topic, else its project); person pages list it as a short line with a link; project pages link to topic pages instead of repeating their actions. `## Estado atual` of a project at most ~8 bullets.
+7. Renaming keeps the slug and updates the link text on the pages the ingest touches.
+8. Tentative statements ("talvez", "às vezes") are recorded as tentative, never as decisions; a date is recorded only when someone said it.
+9. Log header time is the ingest time; a meeting page without changed pages omits `## Páginas atualizadas`; `overview.md` at most 40 lines excluding frontmatter; a new page's history starts with "DD/MM: primeiro registro".
+
+Risk found: with three work meetings the minutes baseline fits easily in one context, and the question set cannot be large. G3 is moved to after at least 15 recorded work meetings; G2 (synthetic) is unaffected.
 
 ## 10. Failure modes
 
