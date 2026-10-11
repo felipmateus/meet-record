@@ -20,12 +20,12 @@ from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.application.ports import MeetingRepository
-from teams_recorder.application.use_cases import stories_waiting
+from teams_recorder.application.use_cases import gaps_text, stories_waiting
 from teams_recorder.config import Settings, find_tool, load_settings
 from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
-from teams_recorder.container import Container, build_container, build_story_publishers, teams_tap_binary
-from teams_recorder.domain import MeetingStatus, TeamsRecorderError, derive_status, next_step
-from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_TXT
+from teams_recorder.container import Container, build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
+from teams_recorder.domain import MeetingStatus, TeamsRecorderError, TranscriptHealth, derive_status, next_step
+from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Cli, Err, Notify, Step
 
 app = typer.Typer(
@@ -74,15 +74,24 @@ def status() -> None:
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
     typer.echo(Cli.MEETINGS.format(count=len(meetings)))
+    degraded = 0
     for m in meetings:
-        st = derive_status(c.repo.files(m.id))
+        files = c.repo.files(m.id)
+        st = derive_status(files)
         nxt = next_step(st)
+        health = _transcript_health(c.repo, m.id) if TRANSCRIPT_JSON in files else None
+        marker = ""
+        if health is not None and health.degraded:
+            degraded += 1
+            marker = Cli.MEETING_DEGRADED.format(loop=health.loop_share)
         typer.echo(Cli.MEETING_LINE.format(
             meeting_id=m.id,
             title=Cli.MEETING_TITLE.format(title=m.title) if m.title else "",
             status=st.value,
             next=Cli.NEXT_STEP.format(step=nxt) if nxt else "",
+            health=marker,
         ))
+    typer.echo(Cli.DEGRADED_TRANSCRIPTS.format(count=degraded))
     active = c.repo.load_active()
     if active:
         typer.echo(Cli.RECORDING_IN_PROGRESS.format(meeting_id=active.meeting.id, tap_pid=active.process_handle.pid, mic_pid=active.mic_handle.pid))
@@ -90,6 +99,14 @@ def status() -> None:
     typer.echo(Cli.OPEN_ACTIONS.format(count=len(open_actions)))
     if c.story_publishers:
         typer.echo(Cli.STORIES_WAITING.format(count=len(c.stories_waiting())))
+
+
+def _transcript_health(repo: MeetingRepository, meeting_id: str) -> TranscriptHealth | None:
+    """The saved health of a meeting's transcript; None for transcripts made before the check, or unreadable ones."""
+    try:
+        return repo.load_transcript(meeting_id).health
+    except (TeamsRecorderError, KeyError, TypeError, ValueError):
+        return None
 
 
 @app.command(help=Cli.DOCTOR_CMD_HELP)
@@ -123,6 +140,7 @@ def doctor() -> None:
             path=settings.vad_model_path,
             hint="" if vad_ok else Cli.VAD_MODEL_HINT.format(script=Files.DOWNLOAD_MODEL_SCRIPT, model=Audio.DEFAULT_VAD_MODEL),
         ))
+    _check_transcript_health(settings)
     key_needed = settings.llm_provider == LlmProvider.API
     typer.echo(Cli.API_KEY_LINE.format(mark=_mark(settings.has_api_key, key_needed), hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
     env_file = settings.project_dir / Files.DOTENV
@@ -145,6 +163,24 @@ def doctor() -> None:
     typer.echo(Cli.DATA_IN.format(path=settings.data_dir))
     llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
     raise typer.Exit(code=0 if ok and llm_ok else 1)
+
+
+def _check_transcript_health(settings: Settings) -> None:
+    """Doctor lines for the hallucination-loop guard: the decoding setting, the threshold and the retry. Never fails the doctor."""
+    typer.echo(Cli.TRANSCRIPTION_LINE.format(mark=Cli.INFO, max_context=settings.whisper_max_context, share=settings.max_loop_share))
+    retry = build_retry_transcriber(settings)
+    vad = settings.retry_vad_model_path
+    vad_missing = vad is not None and not vad.exists() and settings.vad_model_path is None
+    script = Files.DOWNLOAD_MODEL_SCRIPT_WINDOWS if settings.platform is Platform.WINDOWS else Files.DOWNLOAD_MODEL_SCRIPT
+    hint = Cli.RETRY_VAD_MISSING.format(path=vad, script=script, model=settings.vad_model) if vad_missing else ""
+    if not settings.retry_on_loop:
+        state, mark = Cli.RETRY_OFF, Cli.INFO
+    elif retry is None:
+        state, mark = Cli.RETRY_SAME, Cli.WARNING if hint else Cli.INFO
+    else:
+        state = Cli.RETRY_ON_VAD.format(path=retry.vad_model_path) if retry.vad_model_path else Cli.RETRY_ON
+        mark = Cli.WARNING if hint else Cli.OK
+    typer.echo(Cli.RETRY_LINE.format(mark=mark, state=state, hint=hint))
 
 
 def _mark(found: bool, required: bool) -> str:
@@ -228,6 +264,12 @@ def transcribe(
             continue
         c.repo.clear_failed(mid)
         typer.echo(Cli.TRANSCRIBED_OK.format(segments=len(transcript.segments), minutes=transcript.duration_seconds / 60))
+        health = transcript.health
+        if health is not None:
+            typer.echo(Cli.TRANSCRIPT_HEALTH.format(loop=health.loop_share, covered=health.covered_minutes, total=health.total_minutes,
+                                                    retried=Cli.RETRIED if health.retried else ""))
+            if health.degraded:
+                typer.echo(Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""))
         typer.echo(Cli.TEXT_PATH.format(path=c.repo.path(mid, TRANSCRIPT_TXT)))
     if failures:
         raise typer.Exit(code=1)
