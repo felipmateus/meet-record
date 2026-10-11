@@ -1,0 +1,14 @@
+# 2026-02-06 09:30 — Daily interna (Ana de volta).
+# Planted (stories corpus): duplicate-reminder bug fixed (R18 done); the three-button template approved by Meta
+# (R15); delivery-window bug still open (R21); phase 2 delivery on 13/02 confirmed; SENSITIVE: Ana's family health
+# and a schedule change for it (P3, never stored); JUDGMENT: an opinion about Paula (P4, never stored).
+Ana: Bom dia, pessoal. Voltei. Me contem como foi.
+Bruno: Bom dia, Ana. Corrigi o bug do lembrete duplicado, era o agendamento rodando duas vezes. E a Meta aprovou o modelo com os três botões.
+Felipe: No RotaFácil, o bug da janela de entrega ainda está aberto. Achei a causa, mas a correção não está pronta.
+Ana: E a entrega da fase dois continua no dia treze?
+Felipe: Continua, treze de fevereiro.
+Ana: Ótimo. Ah, um aviso pessoal: a minha mãe está internada, então nas sextas eu vou sair mais cedo por umas semanas.
+Bruno: Melhoras para ela, Ana.
+Ana: Obrigada. E a doutora Paula, como está?
+Bruno: Ela é muito exigente, viu? Muda tudo toda semana.
+Ana: Faz parte. Bom trabalho, pessoal.

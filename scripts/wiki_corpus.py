@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import os
 import dataclasses
 import json
 import re
@@ -82,7 +83,9 @@ JUDGE_SYSTEM = """You grade one answer to a question about a user's work meeting
 
 # --- corpus -------------------------------------------------------------------------------
 def load_corpus() -> dict[str, Any]:
-    return tomllib.loads((CORPUS / "corpus.toml").read_text(encoding="utf-8"))
+    """The corpus file: corpus.toml, or another one in the same folder named by WIKI_CORPUS_FILE (the stories corpus
+    adds meetings that would change the answer key of questions.toml)."""
+    return tomllib.loads((CORPUS / os.environ.get("WIKI_CORPUS_FILE", "corpus.toml")).read_text(encoding="utf-8"))
 
 
 def load_questions(path: Path) -> list[dict[str, Any]]:
@@ -176,8 +179,8 @@ def render(args: argparse.Namespace) -> None:
     for meeting in corpus["meeting"]:
         mid = meeting["id"]
         folder = recordings / mid
-        if (folder / "audio.m4a").exists() and not args.force:
-            print(f"{mid}: audio exists, skipped")
+        if ((folder / "audio.m4a").exists() or (folder / "transcript.json").exists()) and not args.force:
+            print(f"{mid}: already rendered, skipped")
             continue
         disk_guard(args.data)
         folder.mkdir(parents=True, exist_ok=True)

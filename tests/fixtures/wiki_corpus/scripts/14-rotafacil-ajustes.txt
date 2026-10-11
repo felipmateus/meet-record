@@ -1,0 +1,14 @@
+# 2026-02-04 10:00 — RotaFácil: ajustes com a Logística Pampa.
+# Planted (stories corpus): CHANGED: at most 30 stops per route, not 25 (R10); drivers see the route on the phone
+# through a responsive web page, not a native app (R19); Carla sends the CSV template by 06/02 (R20);
+# BUG: some routes ignore the delivery window (R21, Felipe investigates).
+Zé: Bom dia, Felipe. Conversei com os motoristas. Vinte e cinco paradas é pouco para as rotas da região metropolitana. Pode subir para trinta.
+Felipe: Bom dia. Trinta paradas no máximo então, em vez de vinte e cinco.
+Zé: Isso. E os motoristas querem ver a rota no celular, não só no papel.
+Felipe: Um aplicativo nativo leva meses. Eu proponho uma página web responsiva, que abre no navegador do celular.
+Zé: Pode ser web, desde que funcione no celular.
+Carla: Para a importação por CSV, eu preciso do modelo da planilha. Aliás, eu que vou mandar o nosso modelo de exportação até sexta, dia seis.
+Felipe: Ótimo, Carla, aguardo o modelo até o dia seis.
+Zé: Mais uma coisa: no teste de ontem, algumas rotas ignoraram a janela de entrega. Uma entrega de manhã foi parar no fim da tarde.
+Felipe: Isso é bug. Eu vou investigar ainda hoje.
+Zé: Beleza. Obrigado.
