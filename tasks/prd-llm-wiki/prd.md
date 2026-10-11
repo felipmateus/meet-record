@@ -1,6 +1,6 @@
 # PRD: LLM wiki of meetings
 
-> **Status:** draft for approval · **Date:** 2026-10-10 · **Slug:** `llm-wiki`
+> **Status:** evaluated, implementation not started (2026-10-11): for question answering the wiki matched but did not beat the minutes in context, at three times the tokens ([evaluation.md](./evaluation.md) §13); the pipeline-fidelity findings (§14) led to [the fidelity guard](../prd-fidelity-guard/prd.md) as the next step · **Date:** 2026-10-10 · **Slug:** `llm-wiki`
 > **Builds on:** [Analysis](../../prd/pages/03-analysis.md) (`analysis.json`, `minutes.md`), [Daily plan](../../prd/pages/06-daily-plan.md), [User stories](../../prd/pages/08-user-stories.md)
 > **Technical design:** [techspec.md](./techspec.md) · **Evaluation protocol:** [evaluation.md](./evaluation.md)
 > **Pattern:** Andrej Karpathy's "LLM Wiki" (an LLM compiles raw sources into a persistent, interlinked Markdown wiki it maintains itself). The desktop implementation `nashsu/llm_wiki` was studied and not integrated (§9).

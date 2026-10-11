@@ -30,10 +30,11 @@ Pulled forward on 2026-10-10, at the user's request, before tasks 2–6 (the wik
 - [x] 7.2 Write the corpus. Built as nine dialogue scripts (`tests/fixtures/wiki_corpus/scripts/`, planted facts in each script's comments instead of a separate `facts.toml`) rendered to audio and run through the real pipeline, rather than hand-written transcripts: whisper's errors and the analysis's mistakes are part of what is measured.
 - [x] 7.3 Write `questions.toml` (20 questions). Two checks were tightened after the first run showed them too weak (whose vacation; the deadline question scoped to the two planted projects once distractors exist).
 - [x] 7.4 Implement the runner: `scripts/wiki_corpus.py` (`render`, `process`, `ask`, `score`) instead of `scripts/wiki_eval.py`; read-only flags `--tools Read,Grep,Glob --allowedTools Read,Grep,Glob`, smoke-tested.
-- [ ] 7.5 `judge` is implemented inside `score` (binary, critique first, through the project's transport); `calibrate` and `fidelity` are not yet, and the judge has not been calibrated against human labels.
-- [ ] 7.6 Unit tests on canned answers; the opt-in integration test.
+- [x] 7.5 `judge` is implemented inside `score` (binary, critique first). Instead of human labels, the synthetic runs use an oracle that reads the dialogues (who said what): two runs agreed on 99% of 359 claims, a hand check against the scripts agreed, and it labelled all 37 injected errors as wrong. Page fidelity is `scripts/fidelity_eval.py audit-wiki` (evaluation §14.6). Calibration against the user's labels remains for real data (task 8).
+- [x] 7.6 Unit tests of the deterministic parts (`tests/unit/test_eval_harness.py`: normalization, word error rate, checks, injection, marking, parsers). The opt-in integration test is replaced by the documented script runs.
 - [x] 7.7 Synthetic run on nine meetings (`--runs 3`): results in evaluation.md §13. Calibration with the user's labels still pending, so G2 is provisional.
 - [x] 7.8 Scale test, 90 meetings (evaluation.md §12): `fill`, `ingest`, `clean`, `autorun` implemented and run unattended; results in evaluation.md §13 (run 2). G2 as written not met; the wiki is not better than the minutes in context at this size and costs 3× per answer.
+- [x] 7.9 Pipeline fidelity (evaluation §14): transcription, analysis claims, defenses, stories in six variants, propagation, wiki audit, whisper settings; led to `tasks/prd-fidelity-guard/`.
 
 ## Implementation details
 
@@ -47,8 +48,8 @@ The runner builds its own temporary data dir from the corpus and runs the projec
 
 ## Task tests
 
-- [ ] Unit tests — `tests/unit/test_wiki_eval.py` (new).
-- [ ] Integration tests — none beyond the opt-in.
+- [x] Unit tests — `tests/unit/test_eval_harness.py`.
+- [x] Integration tests — none (the scripts' runs are the end-to-end evidence).
 - [ ] E2E tests — `TREC_REAL_WIKI=1 pytest -m slow tests/integration/test_wiki_eval_real.py` (new), and the full synthetic run.
 
 ## Relevant files
