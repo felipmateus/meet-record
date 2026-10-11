@@ -3,7 +3,8 @@
 Rendered from the structured analysis, without another LLM call: title, date, participants,
 type and purpose, summary, topics, decisions, an action table (owner, due date, priority and
 the transcript timestamp where it was said), risks, open questions and next steps. Empty
-sections are left out. Labels come from messages.Minutes.
+sections are left out. A degraded transcript (whisper hallucination loop) puts a warning banner
+under the title. Labels come from messages.Minutes.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from teams_recorder.constants import Llm
-from teams_recorder.domain import Action, Analysis, Meeting
+from teams_recorder.domain import Action, Analysis, Meeting, TranscriptHealth
 from teams_recorder.messages import Minutes
 
 
@@ -40,8 +41,11 @@ class MarkdownMinutesRenderer:
             at=a.at or Minutes.DASH,
         )
 
-    def render(self, meeting: Meeting, analysis: Analysis) -> str:
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
         out: list[str] = [Minutes.TITLE.format(title=analysis.title or meeting.title or meeting.id), ""]
+        if health is not None and health.degraded:
+            gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""
+            out += [Minutes.DEGRADED.format(loop=health.loop_share, gaps=gaps), ""]
 
         start = meeting.started_at
         if meeting.ended_at:
