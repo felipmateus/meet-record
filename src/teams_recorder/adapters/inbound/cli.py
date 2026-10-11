@@ -105,7 +105,7 @@ def _transcript_health(repo: MeetingRepository, meeting_id: str) -> TranscriptHe
     """The saved health of a meeting's transcript; None for transcripts made before the check, or unreadable ones."""
     try:
         return repo.load_transcript(meeting_id).health
-    except (TeamsRecorderError, KeyError, TypeError, ValueError):
+    except TeamsRecorderError:
         return None
 
 
