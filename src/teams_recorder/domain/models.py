@@ -59,8 +59,10 @@ class TranscriptHealth:
     retried: bool = False    # a second pass with the anti-loop settings ran (the healthier of the two was kept)
 
     def is_healthier_than(self, other: "TranscriptHealth") -> bool:
-        """Not degraded beats degraded; then more minutes with text; then fewer segments in loops."""
-        return (self.degraded, -self.covered_minutes, self.loop_share) < (other.degraded, -other.covered_minutes, other.loop_share)
+        """More minutes with text beats everything, so an empty or cut-short pass never replaces one with
+        usable text; then not degraded beats degraded; then fewer segments in loops. Compare passes of the
+        same audio measured against the same duration (transcript_health's duration_seconds)."""
+        return (-self.covered_minutes, self.degraded, self.loop_share) < (-other.covered_minutes, other.degraded, other.loop_share)
 
     def uncovered_ranges(self) -> list[str]:
         """The minutes without text as transcript times, e.g. ["00:00:00–00:59:00"]."""
