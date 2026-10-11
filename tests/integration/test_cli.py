@@ -485,3 +485,24 @@ def test_doctor_shows_the_loop_guard(tmp_path: Path, monkeypatch):
     assert Cli.RETRY_LINE.format(mark=Cli.OK, state=Cli.RETRY_ON_VAD.format(path=vad), hint="") in runner.invoke(app, ["doctor"]).output
     (project / "config.toml").write_text("[transcription]\nretry_on_loop = false\n")
     assert Cli.RETRY_LINE.format(mark=Cli.INFO, state=Cli.RETRY_OFF, hint="") in runner.invoke(app, ["doctor"]).output
+
+
+def test_a_damaged_transcript_is_reported_not_a_traceback(tmp_path: Path, monkeypatch):
+    import json as _json
+    from teams_recorder.adapters.outbound import codec
+    from teams_recorder.domain import Segment, Transcript, TranscriptHealth
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 8, 10, 30, 52)); repo.create(m)
+    repo.save_transcript(m.id, Transcript([Segment(0, 1, "oi")], "pt", TranscriptHealth(0.7, 1, 2, True)))
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "sample_analysis_v2.json"
+    repo.save_analysis(m.id, codec.analysis_from_dict(_json.loads(fixture.read_text())))
+    path = repo.path(m.id, "transcript.json")
+    path.write_text(path.read_text().replace('"covered_minutes"', '"covered"'))
+
+    status = runner.invoke(app, ["status"])
+    minutes = runner.invoke(app, ["minutes", m.id])
+
+    assert status.exit_code == 0 and Cli.DEGRADED_TRANSCRIPTS.format(count=0) in status.output
+    assert minutes.exit_code == 1 and isinstance(minutes.exception, SystemExit)   # a clean error, not a KeyError traceback
+    assert "invalid JSON in" in minutes.output and "covered_minutes" in minutes.output

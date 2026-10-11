@@ -1,7 +1,7 @@
 import pytest
 
 from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
-from teams_recorder.domain import MeetingStatus, RepositoryError, TranscriptHealth, TranscriptionError, derive_status
+from teams_recorder.domain import MeetingStatus, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, derive_status
 from teams_recorder.domain.status import AUDIO, LOCK
 from teams_recorder.messages import Notify
 from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript
@@ -177,3 +177,34 @@ def test_render_minutes_without_a_transcript_has_no_health(repo, meeting):
     renderer = FakeMinutesRenderer()
     RenderMinutes(repo, renderer).execute(meeting.id)
     assert renderer.healths == [None]
+
+
+def test_any_retry_failure_keeps_the_first_pass(repo, meeting):
+    # e.g. a KeyError from whisper's JSON or an OSError reading it: not translated, still not worth losing the first pass
+    notifier = FakeNotifier()
+
+    result = _transcribe(repo, meeting, FakeTranscriber(looped_transcript()), FakeTranscriber(fail=True), notifier)
+
+    assert repo.load_transcript(meeting.id) is result and result.health is not None and result.health.degraded
+    assert LOCK not in repo.files(meeting.id) and [t for t, _ in notifier.messages] == [Notify.TRANSCRIPT_DEGRADED]
+
+
+def test_an_empty_retry_does_not_replace_a_first_pass_with_text(repo, meeting):
+    first = FakeTranscriber(looped_transcript(minutes=20, loop_minutes=15))   # 5 minutes of speech after the loop
+
+    result = _transcribe(repo, meeting, first, FakeTranscriber(Transcript()))
+
+    assert result is first.transcript and result.health is not None and result.health.retried and result.health.covered_minutes == 5
+
+
+def test_health_is_measured_against_the_meeting_length(repo, clock):
+    from datetime import timedelta
+    from teams_recorder.domain import Meeting
+    m = Meeting.start(clock.now())
+    m.ended_at = m.started_at + timedelta(minutes=30, seconds=10)
+    repo.seed(m, {AUDIO})
+
+    result = TranscribeMeeting(repo, FakeTranscriber(speech_transcript(minutes=20)), "pt").execute(m.id)
+
+    assert result.health is not None and (result.health.covered_minutes, result.health.total_minutes) == (20, 30)
+    assert result.health.uncovered == ((20, 30),)   # the silent end of the meeting is reported, not hidden
