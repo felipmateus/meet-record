@@ -5,7 +5,7 @@
 
 ## Tasks
 
-- [x] 1.0 Transcript health: `-mc 0` by default, `transcript_health()`, a VAD retry when still degraded, `degraded` marking, notification and banner (P0; validates G1 on the real 2026-10-08 audio) — done 2026-10-11; the loop is counted within 10 consecutive segments (see requirements §10 notes); the banner in the drafts document moves to 4.0; G1 on the meeting itself awaits the user's approval to retranscribe it
+- [x] 1.0 Transcript health: `-mc 0` by default, `transcript_health()`, a VAD retry when still degraded, `degraded` marking, notification and banner (P0; validates G1 on the real 2026-10-08 audio) — done 2026-10-11; the loop is counted within 30 consecutive segments (see requirements §10 notes); the banner in the drafts document moves to 4.0; G1 met on the real meeting retranscribed by the product (text in 86 of 86 minutes, ~1% in loops); code-review findings fixed the same day
 - [ ] 2.0 Verification in the domain and persistence: `Verification`, optional fields, codec defaults for old analyses
 - [ ] 3.0 Claim verifier port, Sonnet adapter with transcript windows, the two code checks, the `VerifyAnalysis` pipeline step
 - [ ] 4.0 Downstream use of the marks: minutes ⚠️, planner input "a confirmar", story sources limited to confirmed actions

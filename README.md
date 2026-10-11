@@ -283,9 +283,9 @@ trec transcribe 2026-10-06_14-00-00  # one meeting
 
 The M4A is converted to 16 kHz mono WAV and passed to `whisper-cli` with the language fixed to `pt` and no text context between windows (`-mc 0`). The output is `transcript.json` (segments with start, end and text, plus the transcript's health) and `transcript.txt`. On a MacBook Air M1, long meetings transcribe at about a quarter of their length.
 
-**Hallucination loops.** On long audio whisper can get stuck repeating one line: in an 86-minute meeting held largely in English, "A CIDADE NO BRASIL" filled 70% of the transcript and the first 59 minutes had no usable text. `-mc 0` (`transcription.max_context = 0`) stops a loop from carrying over and leaves Portuguese accuracy unchanged. After whisper, a health check measures the share of segments in repetition loops (the same text 5+ times within 10 consecutive segments) and the minutes that have speech text:
+**Hallucination loops.** On long audio whisper can get stuck repeating one line: in an 86-minute meeting held largely in English, "A CIDADE NO BRASIL" filled 70% of the transcript and the first 59 minutes had no usable text. `-mc 0` (`transcription.max_context = 0`) stops a loop from carrying over and leaves Portuguese accuracy unchanged. After whisper, a health check measures the share of segments in repetition loops (the same text 5+ times within 30 consecutive segments) and the minutes that have speech text:
 
-- Above `transcription.max_loop_share` (10%), the transcript is **degraded** and is transcribed once more with `-mc 0` and Silero VAD (about 30% slower). The healthier result is kept.
+- Above `transcription.max_loop_share` (10%), the transcript is **degraded** and is transcribed once more with `-mc 0` and Silero VAD (about 30% slower). The result with more minutes of text is kept, so an empty retry never replaces a usable first pass.
 - If it is still degraded, it is saved anyway and the analysis runs on it. You get a "Degraded transcript" notification with the time ranges that have no text, `minutes.md` opens with a warning banner, and `trec status` marks the meeting.
 - `trec transcribe` prints a health line for each meeting, and `trec doctor` shows whether the retry is on.
 
