@@ -12,7 +12,7 @@ from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNo
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Platform, Stories, StoryDestination
-from teams_recorder.container import build_container, build_story_publishers, teams_tap_binary
+from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
 from tests.fakes import FakeStoryPublisher
 
 
@@ -94,3 +94,32 @@ def test_every_destination_has_a_publisher_and_backlog_md_gets_its_settings(tmp_
     assert isinstance(publisher, BacklogMdPublisher)
     assert publisher.project_dir == tmp_path.resolve() and publisher.status == "Inbox"
     assert publisher.drafts_dir == settings.data_dir / "plans" and publisher.destination == StoryDestination.BACKLOG_MD
+
+
+def _models(tmp_path: Path, config: str = "", vad_model: bool = True):
+    (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config.toml").write_text(f'[transcription]\nmodels_dir = "{tmp_path / "models"}"\n' + config)
+    if vad_model:
+        (tmp_path / "models" / "ggml-silero-v5.1.2.bin").write_bytes(b"\x00")
+    return load_settings(tmp_path)
+
+
+def test_first_pass_gets_max_context_and_the_retry_adds_vad(tmp_path: Path):
+    c = build_container(_models(tmp_path), headless=True)
+    assert c.transcriber.max_context == 0 and c.transcriber.vad_model_path is None
+    retry = c.retry_transcriber
+    assert retry is not None and retry.max_context == 0 and retry.vad_model_path == tmp_path / "models" / "ggml-silero-v5.1.2.bin"
+    use_case = c.transcribe_meeting()
+    assert use_case.retry is retry and use_case.notifier is c.notifier and use_case.max_loop_share == 0.10
+
+
+def test_no_retry_when_it_would_repeat_the_first_pass(tmp_path: Path):
+    assert build_retry_transcriber(_models(tmp_path, "retry_on_loop = false\n")) is None
+    assert build_retry_transcriber(_models(tmp_path, "retry_vad = false\n")) is None          # -mc 0 already, nothing to add
+    assert build_retry_transcriber(_models(tmp_path, "vad = true\n")) is None                # VAD already on the first pass
+    assert build_retry_transcriber(_models(tmp_path / "novad", vad_model=False)) is None       # VAD model missing
+
+
+def test_retry_without_vad_when_the_first_pass_keeps_text_context(tmp_path: Path):
+    retry = build_retry_transcriber(_models(tmp_path, "max_context = -1\nretry_vad = false\n"))
+    assert retry is not None and retry.max_context == 0 and retry.vad_model_path is None

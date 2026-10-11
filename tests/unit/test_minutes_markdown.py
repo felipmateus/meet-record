@@ -61,3 +61,22 @@ def test_owner_without_user_name_and_pipes_escaped():
 def test_short_meeting_shows_under_a_minute():
     m = Meeting.start(datetime(2026, 10, 5, 18, 54, 22)); m.ended_at = datetime(2026, 10, 5, 18, 55, 0)
     assert "18:54–18:55 (<1 min)" in MarkdownMinutesRenderer().render(m, Analysis(meeting_id="m", summary="s"))
+
+
+def test_degraded_transcript_puts_a_banner_under_the_title():
+    from teams_recorder.domain import TranscriptHealth
+    health = TranscriptHealth(0.668, 28, 86, True, ((0, 14), (15, 59)))
+    lines = MarkdownMinutesRenderer().render(_meeting(), _analysis(), health).splitlines()
+    assert lines[0] == "# Ata: Revisão da sprint de integração" and lines[1] == ""
+    assert lines[2].startswith("> ⚠️ **Transcrição degradada:** 67% dos trechos são uma mesma frase repetida")
+    assert ", e não há texto em 00:00:00–00:14:00, 00:15:00–00:59:00." in lines[2]
+    assert lines[3] == "" and lines[4].startswith("📅 **Data:**")
+
+
+def test_degraded_without_gaps_and_healthy_transcripts():
+    from teams_recorder.domain import TranscriptHealth
+    md = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.2, 45, 45, True))
+    assert "20% dos trechos" in md and "não há texto" not in md
+    healthy = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.0, 45, 45, False))
+    assert "Transcrição degradada" not in healthy
+    assert healthy == MarkdownMinutesRenderer().render(_meeting(), _analysis())   # same as before the check existed

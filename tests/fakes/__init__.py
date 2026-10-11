@@ -22,6 +22,8 @@ from teams_recorder.domain import (
     SkippedAction,
     StoryDrafts,
     Transcript,
+    TranscriptHealth,
+    TranscriptionError,
     UserStory,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
@@ -93,16 +95,33 @@ class FakeMixer:
 
 
 class FakeTranscriber:
-    def __init__(self, transcript: Transcript | None = None, fail: bool = False) -> None:
+    """Returns `transcript`; `fail` raises a bug-like error, `fail_cleanly` a TranscriptionError."""
+
+    def __init__(self, transcript: Transcript | None = None, fail: bool = False, fail_cleanly: bool = False) -> None:
         self.transcript = transcript or Transcript(segments=[Segment(0.0, 2.5, "Olá, bom dia a todos.")])
         self.fail = fail
+        self.fail_cleanly = fail_cleanly
         self.calls: list[tuple[Path, str]] = []
 
     def transcribe(self, audio: Path, language: str) -> Transcript:
         self.calls.append((audio, language))
         if self.fail:
             raise RuntimeError("whisper blew up")
+        if self.fail_cleanly:
+            raise TranscriptionError("whisper-cli timed out")
         return self.transcript
+
+
+def looped_transcript(minutes: int = 20, loop_minutes: int = 15, line: str = "A CIDADE NO BRASIL") -> Transcript:
+    """A meeting whose first `loop_minutes` are one hallucinated line repeated every 5 s (whisper's loop), then speech."""
+    segments = [Segment(t, t + 5.0, line) for t in range(0, loop_minutes * 60, 5)]
+    segments += [Segment(t, t + 8.0, f"Fala número {t} sobre o relatório.") for t in range(loop_minutes * 60, minutes * 60, 10)]
+    return Transcript(segments=segments)
+
+
+def speech_transcript(minutes: int = 20) -> Transcript:
+    """A healthy meeting: different text every 10 s."""
+    return Transcript(segments=[Segment(t, t + 8.0, f"Fala número {t} sobre o relatório.") for t in range(0, minutes * 60, 10)])
 
 
 class FakeAnalyzer:
@@ -296,9 +315,11 @@ class InMemoryMeetingRepository:
 class FakeMinutesRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[Meeting, Analysis]] = []
+        self.healths: list[TranscriptHealth | None] = []
 
-    def render(self, meeting: Meeting, analysis: Analysis) -> str:
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
         self.calls.append((meeting, analysis))
+        self.healths.append(health)
         return f"# Minutes {meeting.id}\n{analysis.summary}\n"
 
 

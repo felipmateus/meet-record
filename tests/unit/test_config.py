@@ -240,3 +240,31 @@ def test_the_repository_config_loads(tmp_path: Path):
     (tmp_path / "config.toml").write_text(repo_config.read_text(encoding="utf-8"))   # a copy: no .env loaded
     s = load_settings(tmp_path)
     assert s.stories_enabled and s.backlog_project_dir == tmp_path.resolve()
+
+
+def test_transcription_guard_defaults(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.whisper_max_context == 0 and s.max_loop_share == 0.10 and s.retry_on_loop and s.retry_vad
+    assert s.vad_model_path is None   # VAD stays off on the first pass...
+    assert s.retry_vad_model_path == s.models_dir / "ggml-silero-v5.1.2.bin"   # ...and is used by the retry
+
+
+def test_transcription_guard_settings(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nmax_context = -1\nmax_loop_share = 0.25\nretry_on_loop = false\n')
+    s = load_settings(tmp_path)
+    assert s.whisper_max_context == -1 and s.max_loop_share == 0.25 and not s.retry_on_loop
+    assert s.retry_vad_model_path is None
+    (tmp_path / "config.toml").write_text('[transcription]\nretry_vad = false\n')
+    assert load_settings(tmp_path).retry_vad_model_path is None
+
+
+@pytest.mark.parametrize("value", ["0", "1.5", '"many"', "-0.1"])
+def test_invalid_loop_share(tmp_path: Path, value: str):
+    (tmp_path / "config.toml").write_text(f"[transcription]\nmax_loop_share = {value}\n")
+    with pytest.raises(ValueError, match="max_loop_share"):
+        load_settings(tmp_path)
+
+
+def test_repository_config_turns_the_guard_on():
+    s = load_settings(Path(__file__).resolve().parents[2])
+    assert s.whisper_max_context == 0 and s.max_loop_share == 0.10 and s.retry_on_loop and s.retry_vad

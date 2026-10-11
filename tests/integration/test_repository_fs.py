@@ -16,8 +16,11 @@ from teams_recorder.domain import (
     Priority,
     Publication,
     RepositoryError,
+    Segment,
     SkippedAction,
     StoryDrafts,
+    Transcript,
+    TranscriptHealth,
     UserStory,
     derive_status,
 )
@@ -237,3 +240,17 @@ def test_action_kind_round_trip_and_actions_from_before_classification(fs: FsMee
     assert fs.load_open_actions() == [classified]
     (fs.plans / "open_actions.json").write_text(json.dumps([{"id": "o1", "description": "x", "owner": "usuário", "source_meeting": "m"}]))
     assert fs.load_open_actions()[0].kind is None
+
+
+def test_transcript_health_roundtrip_and_old_files_without_it(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 8, 10, 30, 52)); fs.create(m)
+    health = TranscriptHealth(0.668, 28, 86, True, ((0, 14), (15, 59)), retried=True)
+    transcript = Transcript([Segment(0.0, 5.0, "A CIDADE NO BRASIL")], "pt", health)
+
+    fs.save_transcript(m.id, transcript)
+
+    assert fs.load_transcript(m.id) == transcript
+    assert json.loads(fs.path(m.id, TRANSCRIPT_JSON).read_text())["health"]["uncovered"] == [[0, 14], [15, 59]]
+    assert fs.path(m.id, TRANSCRIPT_TXT).read_text() == "[00:00:00] A CIDADE NO BRASIL\n"   # the text file is unchanged
+    old = json.loads((FIXTURES / "sample_transcript.json").read_text())   # written before the health check
+    assert "health" not in old and codec.transcript_from_dict(old).health is None

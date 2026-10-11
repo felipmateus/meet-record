@@ -1,9 +1,10 @@
 import pytest
 
-from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting
-from teams_recorder.domain import MeetingStatus, RepositoryError, TranscriptionError, derive_status
+from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
+from teams_recorder.domain import MeetingStatus, RepositoryError, TranscriptHealth, TranscriptionError, derive_status
 from teams_recorder.domain.status import AUDIO, LOCK
-from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeTranscriber
+from teams_recorder.messages import Notify
+from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript
 
 
 def test_transcribe_requires_audio(repo, meeting):
@@ -85,3 +86,94 @@ def test_render_minutes_from_existing_analysis(repo, meeting):
     repo.seed(meeting, {AUDIO}, transcript=FakeTranscriber().transcript, analysis=analysis)
     md = RenderMinutes(repo, FakeMinutesRenderer()).execute(meeting.id)
     assert repo.minutes[meeting.id] == md
+
+
+# --- transcript health and the retry of a degraded transcript ----------------------------------
+
+def _transcribe(repo, meeting, first, retry=None, notifier=None, **kwargs):
+    repo.seed(meeting, {AUDIO})
+    return TranscribeMeeting(repo, first, "pt", retry=retry, notifier=notifier, **kwargs).execute(meeting.id)
+
+
+def test_healthy_transcript_is_saved_with_its_health_and_never_retried(repo, meeting):
+    retry, notifier = FakeTranscriber(speech_transcript()), FakeNotifier()
+
+    result = _transcribe(repo, meeting, FakeTranscriber(speech_transcript(minutes=10)), retry, notifier)
+
+    assert result.health is not None and not result.health.degraded and not result.health.retried
+    assert (result.health.covered_minutes, result.health.total_minutes) == (10, 10)
+    assert repo.load_transcript(meeting.id).health == result.health
+    assert retry.calls == [] and notifier.messages == []
+
+
+def test_degraded_transcript_is_retried_and_the_healthier_result_kept(repo, meeting):
+    first, retry, notifier = FakeTranscriber(looped_transcript()), FakeTranscriber(speech_transcript()), FakeNotifier()
+
+    result = _transcribe(repo, meeting, first, retry, notifier)
+
+    assert retry.calls == first.calls == [(repo.path(meeting.id, AUDIO), "pt")]
+    assert result is retry.transcript and repo.load_transcript(meeting.id) is result
+    assert result.health is not None and not result.health.degraded and result.health.retried
+    assert notifier.messages == []   # repaired: nothing to warn about
+
+
+def test_still_degraded_after_the_retry_keeps_the_healthier_pass_and_notifies(repo, meeting):
+    worse = looped_transcript(minutes=20, loop_minutes=18)
+    first, retry, notifier = FakeTranscriber(looped_transcript(minutes=20, loop_minutes=15)), FakeTranscriber(worse), FakeNotifier()
+
+    result = _transcribe(repo, meeting, first, retry, notifier)
+
+    assert result is first.transcript and len(retry.calls) == 1
+    assert result.health is not None and result.health.degraded and result.health.retried
+    title, body = notifier.messages[-1]
+    assert title == Notify.TRANSCRIPT_DEGRADED
+    assert body == Notify.TRANSCRIPT_DEGRADED_BODY.format(
+        meeting_id=meeting.id, loop=result.health.loop_share, gaps=Notify.NO_TEXT_IN.format(ranges="00:00:00–00:15:00"))
+
+
+def test_without_a_retry_a_degraded_transcript_is_saved_marked_and_notified(repo, meeting):
+    notifier = FakeNotifier()
+
+    result = _transcribe(repo, meeting, FakeTranscriber(looped_transcript()), None, notifier)
+
+    assert repo.load_transcript(meeting.id).health == result.health
+    assert result.health is not None and result.health.degraded and not result.health.retried
+    assert [t for t, _ in notifier.messages] == [Notify.TRANSCRIPT_DEGRADED]
+
+
+def test_a_failed_retry_keeps_the_first_pass(repo, meeting):
+    notifier = FakeNotifier()
+
+    result = _transcribe(repo, meeting, FakeTranscriber(looped_transcript()), FakeTranscriber(fail_cleanly=True), notifier)
+
+    assert result.health is not None and result.health.degraded and not result.health.retried
+    assert LOCK not in repo.files(meeting.id) and [t for t, _ in notifier.messages] == [Notify.TRANSCRIPT_DEGRADED]
+
+
+def test_loop_threshold_comes_from_the_use_case(repo, meeting):
+    result = _transcribe(repo, meeting, FakeTranscriber(looped_transcript()), max_loop_share=0.95)
+    assert result.health is not None and not result.health.degraded
+
+
+def test_notification_lists_only_the_first_gaps():
+    health = TranscriptHealth(0.5, 10, 30, True, ((0, 2), (4, 6), (8, 10), (12, 14), (20, 30)))
+    assert gaps_text(health, limit=3) == Notify.RANGES_MORE.format(shown="00:00:00–00:02:00, 00:04:00–00:06:00, 00:08:00–00:10:00", more=2)
+    assert gaps_text(health, limit=5).endswith("00:20:00–00:30:00")
+
+
+def test_minutes_receive_the_transcript_health(repo, meeting):
+    transcript = looped_transcript()
+    _transcribe(repo, meeting, FakeTranscriber(transcript))
+    renderer = FakeMinutesRenderer()
+
+    AnalyzeMeeting(repo, FakeAnalyzer(), renderer).execute(meeting.id)
+    RenderMinutes(repo, renderer).execute(meeting.id)
+
+    assert renderer.healths == [transcript.health, transcript.health] and transcript.health is not None
+
+
+def test_render_minutes_without_a_transcript_has_no_health(repo, meeting):
+    repo.seed(meeting, {AUDIO}, analysis=FakeAnalyzer().analyze(FakeTranscriber().transcript, meeting))
+    renderer = FakeMinutesRenderer()
+    RenderMinutes(repo, renderer).execute(meeting.id)
+    assert renderer.healths == [None]
