@@ -16,6 +16,7 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 ## 2. Domain
 
 - `TranscriptHealth(loop_share: float, covered_minutes: int, total_minutes: int, degraded: bool, uncovered: list[tuple[int, int]])` and the pure function `transcript_health(transcript, max_loop_share, repeat_threshold=5)`; `Transcript.health: TranscriptHealth | None` (old transcripts: `None`).
+  - As built (task 1.0): `uncovered` is a tuple of half-open minute ranges, `retried` records the second pass, and a loop is 5+ copies of a text **within 10 consecutive segments** (`domain/health.py`), because counting repeats over the whole meeting gave a healthy real meeting 9.8% from natural fillers.
 - `Verification(status: VerificationStatus, reason: str)` with `VerificationStatus = confirmed | unconfirmed`; optional `verification` on `Decision`, `Action`, `Deadline`; `Analysis.participant_checks: dict[str, Verification]`. `None` means "not verified" (analyses made before this feature behave as today).
 - `Criterion(text, source: str | None)` replaces plain strings in `UserStory.acceptance_criteria` (old drafts: `source=None`, shown as today); `source` is `hh:mm:ss` or `sugestao`.
 - Pure code checks moved from the prototype: `sensitive_data(text)`, `participant_confirmed(name, transcript)`.
