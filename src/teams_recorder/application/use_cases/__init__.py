@@ -8,11 +8,11 @@ from .planning import (
     PurgeOldAudio,
     stories_waiting,
 )
-from .processing import AnalyzeMeeting, RenderMinutes, TranscribeMeeting
+from .processing import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
 from .recording import ActiveRecording, CancelRecording, StartRecording, StopRecording
 
 __all__ = [
     "ActiveRecording", "AnalyzeMeeting", "BuildDailyPlan", "CancelRecording", "DraftUserStories",
     "PublishedStory", "PublishFailure", "PublishReport", "PublishUserStories", "PurgeOldAudio", "RenderMinutes", "StartRecording",
-    "StopRecording", "TranscribeMeeting", "stories_waiting",
+    "StopRecording", "TranscribeMeeting", "gaps_text", "stories_waiting",
 ]

@@ -31,6 +31,10 @@ class Notify:
     PUBLISH_FAILED = "Publishing user stories failed"
     PUBLISH_ERROR_BODY = "Stories of {day}: {error}"
     PUBLISH_FAILED_BODY = "{failed} failure(s), {published} published; run `trec publish` again after fixing it"
+    TRANSCRIPT_DEGRADED = "Degraded transcript"
+    TRANSCRIPT_DEGRADED_BODY = "Meeting {meeting_id}: {loop:.0%} of the transcript is one line repeated by whisper{gaps}. The minutes may be incomplete."
+    NO_TEXT_IN = "; no text in {ranges}"
+    RANGES_MORE = "{shown} and {more} more"
 
 
 class Ask:
@@ -128,6 +132,7 @@ class Err:
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
     INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
+    INVALID_LOOP_SHARE = "invalid transcription.max_loop_share: {value!r}; use a fraction above 0 and up to 1 (e.g. 0.10)"
     NO_DETECTOR = "daemon without a configured detector"
     # pipeline: content of error.txt (step: "transcription" / "analysis")
 
@@ -165,7 +170,9 @@ class Cli:
     API_KEY = "API key: {state}"
     CONFIGURED, MISSING = "configured", "MISSING"
     MEETINGS = "Meetings: {count}"
-    MEETING_LINE = "  {meeting_id}{title}  [{status}]{next}"
+    MEETING_LINE = "  {meeting_id}{title}  [{status}]{next}{health}"
+    MEETING_DEGRADED = "  ⚠ degraded transcript ({loop:.0%} in repetition loops)"
+    DEGRADED_TRANSCRIPTS = "Degraded transcripts: {count}"
     MEETING_TITLE = " {title}"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
@@ -180,6 +187,13 @@ class Cli:
     WHISPER_MODEL_HINT = "  → {script}"
     VAD_MODEL_LINE = "[{mark}] VAD model: {path}{hint}"
     VAD_MODEL_HINT = "  → {script} {model} (without it transcription runs without VAD)"
+    TRANSCRIPTION_LINE = "[{mark}] transcription: whisper -mc {max_context}; a transcript is degraded above {share:.0%} of its segments in repetition loops"
+    RETRY_LINE = "[{mark}] retry of a degraded transcript: {state}{hint}"
+    RETRY_ON_VAD = "on (-mc 0 with VAD: {path})"
+    RETRY_ON = "on (-mc 0 without VAD)"
+    RETRY_OFF = "off ([transcription] retry_on_loop = false)"
+    RETRY_SAME = "off (it would only repeat the first pass)"
+    RETRY_VAD_MISSING = "; VAD model missing at {path}  → {script} {model}"
     API_KEY_LINE = "[{mark}] ANTHROPIC_API_KEY in .env{hint}"
     API_KEY_NOT_REQUIRED = " (not required with provider = claude-code)"
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
@@ -209,6 +223,10 @@ class Cli:
     ANALYZING = "Analyzing {meeting_id}…"
     FAILED = " FAILED: {error}"
     TRANSCRIBED_OK = " ok ({segments} segments, {minutes:.1f} min)"
+    TRANSCRIPT_HEALTH = "  Health: {loop:.0%} of segments in repetition loops, text in {covered} of {total} min{retried}"
+    RETRIED = " (after a second pass with the anti-loop settings)"
+    TRANSCRIPT_DEGRADED = "  WARNING: degraded transcript{gaps}. The analysis still runs on it and the minutes will say so."
+    NO_TEXT_IN = "; no text in {ranges}"
     TEXT_PATH = "  Text: {path}"
     ANALYZE_HINT = "Analyze with `trec analyze`."
     API_KEY_MISSING = "ANTHROPIC_API_KEY missing from .env (or set llm.provider = \"claude-code\")"
@@ -315,6 +333,11 @@ class Log:
     TRACK_INFO = "track %s: %.1f MB, %.1f s, mean %s dB, peak %s dB"
     TRACK_DISCARDED = "track %s: %.1f MB (discarded)"
     TRACK_ANOMALY = "track anomaly (%s); raw copies kept in %s"
+    TRANSCRIPT_DEGRADED = "transcript of %s is degraded: %.0f%% of segments in repetition loops, text in %s of %s min"
+    TRANSCRIPT_RETRY = "transcribing %s again with the anti-loop settings"
+    TRANSCRIPT_RETRY_RESULT = "retry of %s: %.0f%% of segments in loops, text in %s of %s min; keeping the %s pass"
+    PASS_FIRST, PASS_RETRY = "first", "retry"   # names used in TRANSCRIPT_RETRY_RESULT
+    TRANSCRIPT_RETRY_FAILED = "retry of %s failed; keeping the first pass: %s"
 
 
 class Prompt:
@@ -371,6 +394,9 @@ class Minutes:
     LLM content that is in Portuguese (same exception as the daily plan's section names)."""
 
     TITLE = "# Ata: {title}"
+    DEGRADED = ("> ⚠️ **Transcrição degradada:** {loop:.0%} dos trechos são uma mesma frase repetida pelo reconhecimento de voz{gaps}. "
+                "Esta ata pode estar incompleta: ouça o áudio desses trechos antes de usá-la.")
+    DEGRADED_GAPS = ", e não há texto em {ranges}"
     DATE = "📅 **Data:** {date}, {start}–{end} ({minutes} min)"
     DATE_NO_END = "📅 **Data:** {date}, {start}"
     UNDER_A_MINUTE = "<1"
