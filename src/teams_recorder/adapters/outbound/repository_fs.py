@@ -178,7 +178,11 @@ class FsMeetingRepository:
         _write_atomic(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
 
     def load_transcript(self, meeting_id: str) -> Transcript:
-        return codec.transcript_from_dict(_read_json(self._require(meeting_id) / TRANSCRIPT_JSON))
+        path = self._require(meeting_id) / TRANSCRIPT_JSON
+        try:
+            return codec.transcript_from_dict(_read_json(path))
+        except (KeyError, TypeError, ValueError) as exc:  # valid JSON, wrong shape (a segment or the health block)
+            raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
 
     def save_analysis(self, meeting_id: str, analysis: Analysis) -> None:
         _write_json(self._require(meeting_id) / ANALYSIS, codec.analysis_to_dict(analysis))
