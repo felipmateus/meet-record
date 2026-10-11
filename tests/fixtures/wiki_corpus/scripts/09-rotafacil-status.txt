@@ -1,0 +1,14 @@
+# 2026-01-23 10:00 — RotaFácil: status com a Logística Pampa.
+# Planted: Google Maps integration done (F26); mileage report CONFIRMED for phase 3 by Rafael
+# (F18 closed); 13/02 deadline kept (F16); Carla sends the remaining 12 vehicles by 28/01 (F27);
+# alias: Carla calls Zé "José" (F6).
+Felipe: Bom dia, Zé. Bom dia, Carla. Trago boas notícias: a integração com o Google Maps está concluída. Já estou calculando as rotas com a janela de entrega.
+Zé: Que ótimo, Felipe.
+Carla: José, você conseguiu falar com o Rafael sobre o relatório de quilometragem?
+Zé: Consegui. O Rafael confirmou: o relatório de quilometragem fica para a fase três. Na fase dois, só a roteirização.
+Felipe: Perfeito, então o escopo da fase dois está fechado. E o prazo continua treze de fevereiro?
+Zé: Continua. Treze de fevereiro, sem mudança.
+Felipe: Uma pendência: dos quarenta e cinco veículos, ainda faltam os dados de doze. Sem eles eu não consigo testar as rotas dessas filiais.
+Carla: Esses doze são da filial de Pelotas. Eu mando até o dia vinte e oito.
+Felipe: Combinado, vinte e oito de janeiro. Obrigado, Carla.
+Zé: Então estamos bem. Obrigado, pessoal.

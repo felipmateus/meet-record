@@ -20,6 +20,9 @@ TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real
 TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_publisher_backlogmd_real.py # real Backlog.md CLI, throwaway board
 TREC_REAL_CLAUDE_CLI=1 TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_story_publishing_e2e_real.py  # stories end to end
 
+scripts/wiki_corpus.py <render|process|fill|ingest|ask|score|autorun|clean>   # synthetic meetings → audio (recorder's mixer) → this pipeline → wiki → Q&A eval
+scripts/fidelity_eval.py <setup|oracle|inject|defend|report|gate|stories|verify-stories|propagate|glossary|audit-wiki|review-kit>   # pipeline fidelity tests
+                                       # both spend the Claude Code subscription (ask first); keep their data dirs OUTSIDE the repo (CLAUDE.md is inherited)
 scripts/install.sh [--dry-run]         # idempotent installer (deps, .venv, teams-tap, model, config, LaunchAgents); install.command wraps it for Finder
 scripts/uninstall.sh [--all]           # removes this copy's LaunchAgents (+ .venv/build with --all); never data
 scripts\install.ps1 / uninstall.ps1    # Windows counterparts (install.cmd wraps the installer); config edits go through scripts/config_tool.py

@@ -1,0 +1,23 @@
+# 2026-01-26 14:00 — Hospital Santa Clara: requisitos da mensagem de lembrete (Ana de férias; Felipe é o contato).
+# Planted (stories corpus): reminder sent 48 hours before the appointment, not one day (R1, refined on 02/02);
+# buttons "Confirmar" and "Remarcar", no "Cancelar" (R2, reversed on 02/02); messages only between 8h and 18h and
+# never on Sundays (R3); "Remarcar" opens the clinic's scheduling link (R4); weekly confirmation report for the
+# coordination (R5); OWNER TRAP: Bruno offers to do the report and Felipe takes it (R6: Felipe owns the report,
+# Bruno the buttons); TENTATIVE: "talvez no futuro um painel" (R7, never a requirement).
+Felipe: Boa tarde, doutora Paula. A Ana está de férias essa semana, então eu e o Bruno vamos fechar os detalhes da mensagem com a senhora.
+Paula: Boa tarde. Ótimo, eu anotei algumas coisas.
+Paula: Primeiro, o lembrete de um dia antes é pouco. Muitos pacientes moram longe. Eu quero que a mensagem vá quarenta e oito horas antes da consulta.
+Felipe: Quarenta e oito horas antes, anotado.
+Paula: Segundo, os botões. Eu quero dois botões: Confirmar e Remarcar. Cancelar eu não quero, porque o paciente cancela e a gente perde a vaga sem chance de oferecer outro horário.
+Bruno: Então são só dois botões, Confirmar e Remarcar. E quando ele clicar em Remarcar, o que acontece?
+Paula: Abre o link da nossa agenda online, para ele escolher outro horário.
+Bruno: Fechado, o botão Remarcar abre o link da agenda.
+Paula: Outra coisa: nada de mensagem de madrugada. Só entre oito da manhã e seis da tarde. E nunca no domingo.
+Felipe: Entre oito e dezoito horas, e sem envio aos domingos. Se a mensagem cair fora desse horário, a gente segura e manda no próximo horário permitido.
+Paula: Perfeito. E eu preciso de um relatório semanal para a coordenação, com quantos pacientes confirmaram, quantos remarcaram e quantos não responderam.
+Bruno: Esse relatório eu posso fazer.
+Felipe: Não, Bruno, deixa que o relatório eu faço. Você fica focado nos botões e na integração, que é o mais crítico.
+Bruno: Tá bom, então eu fico com os botões.
+Paula: Ah, e talvez no futuro a gente queira um painel com esses números em tempo real, mas isso não é agora. Agora é só o relatório.
+Felipe: Entendido, o painel fica como ideia para depois.
+Paula: Então é isso. Obrigada, meninos.

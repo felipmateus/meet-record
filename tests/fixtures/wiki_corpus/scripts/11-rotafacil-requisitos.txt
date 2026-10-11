@@ -1,0 +1,24 @@
+# 2026-01-27 10:00 — RotaFácil: requisitos do módulo de rotas com a Logística Pampa.
+# Planted (stories corpus): route exported as PDF for the driver (R8); stops reordered by drag and drop (R9);
+# at most 25 stops per route (R10, changed to 30 on 04/02); estimated time shown per stop (R11); deliveries whose
+# window ends before noon go first (R12); late-truck alert is TENTATIVE, phase 3 at most, needs real-time GPS
+# (R13, never a phase 2 requirement); orders imported by CSV spreadsheet in phase 2, not ERP integration (R14).
+Felipe: Bom dia, Zé. Bom dia, Carla. Hoje eu queria fechar os requisitos da tela de rotas.
+Zé: Bom dia. Vamos lá. O mais importante para o motorista é ter a rota impressa. Precisa exportar a rota em PDF.
+Felipe: Exportar em PDF, com a ordem das paradas e o endereço de cada uma.
+Zé: Isso. E o despachante precisa poder mudar a ordem. Às vezes ele sabe que uma rua está fechada.
+Felipe: Dá para fazer arrastando as paradas na tela, para reordenar.
+Zé: Arrastar é ótimo.
+Carla: Tem um limite de paradas por rota? O sistema antigo travava com muitas.
+Zé: Coloca no máximo vinte e cinco paradas por rota. Mais do que isso o motorista não dá conta num dia.
+Felipe: Vinte e cinco paradas no máximo. E eu sugiro mostrar o tempo estimado de chegada em cada parada.
+Zé: Sim, o tempo estimado por parada ajuda muito.
+Zé: Ah, e as entregas que têm janela até o meio-dia têm que vir primeiro na rota.
+Felipe: Prioridade para as janelas que terminam antes das doze horas, anotado.
+Zé: E um alerta quando o caminhão atrasar mais de trinta minutos?
+Felipe: Isso precisa de GPS em tempo real nos caminhões, que a gente não tem na fase dois. Talvez dê para fazer na fase três, mas não prometo.
+Zé: Tudo bem, então fica para depois, sem compromisso.
+Carla: E os pedidos? O ideal seria integrar com o nosso ERP.
+Felipe: A integração com o ERP é grande. Para a fase dois, eu proponho importar os pedidos por planilha CSV.
+Carla: Por mim tudo bem. Na fase dois, planilha CSV, e o ERP a gente vê depois.
+Zé: Combinado.

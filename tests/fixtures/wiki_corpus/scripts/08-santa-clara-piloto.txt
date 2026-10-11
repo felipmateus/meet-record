@@ -1,0 +1,17 @@
+# 2026-01-21 15:00 — Hospital Santa Clara: piloto dos lembretes.
+# Planted: PILOT MOVED 02/02 → 16/02 because of the Meta verification (F23); DECISION REFINED:
+# WhatsApp as the main channel with SMS as fallback when WhatsApp fails (F24); Paula's list
+# arrived: three appointment types (F13 closed); Bruno tests the SMS fallback by 06/02 (F25).
+Felipe: Boa tarde, doutora Paula. A Ana pediu para eu e o Bruno conduzirmos hoje.
+Paula: Boa tarde. Pode falar.
+Bruno: Doutora, a integração com o WhatsApp depende de uma verificação da empresa no Meta Business. Leva de cinco a dez dias úteis, e a gente pediu na segunda. Não vai dar para começar o piloto no dia dois.
+Paula: Que pena. Qual seria a nova data?
+Felipe: A nossa sugestão é dezesseis de fevereiro. Com isso a gente tem folga mesmo se a verificação demorar os dez dias.
+Paula: Dezesseis de fevereiro, tudo bem. Mas e se o WhatsApp falhar para algum paciente? Tem gente que não tem WhatsApp.
+Bruno: A gente pode manter o SMS como reserva. Se a mensagem do WhatsApp não for entregue, o sistema manda por SMS.
+Paula: Gostei. Então fica assim: o WhatsApp é o canal principal e o SMS é a reserva quando o WhatsApp falhar.
+Felipe: Combinado. O piloto continua no ambulatório de ortopedia?
+Paula: Continua. E eu já mandei aquela lista por e-mail ontem: são três tipos de consulta, primeira consulta, retorno e exame.
+Felipe: Recebi, obrigado. Já está configurado.
+Bruno: Eu vou testar o SMS como reserva até o dia seis de fevereiro.
+Paula: Ótimo. Então nos vemos dia dezesseis no piloto.

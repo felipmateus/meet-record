@@ -1,0 +1,193 @@
+# Questions about the synthetic corpus, with checks derived from the planted facts (comments in
+# scripts/*.txt). The answer key exists by construction, so these runs need no human labels;
+# the judge rubrics still need calibration against a few human labels (evaluation.md §6).
+#
+# Checks (accent- and case-insensitive):
+#   must_include      every item must match; an item is a list of alternatives (any one matches)
+#   must_not_include  no string may appear (privacy and fabricated facts)
+#   must_cite         every item must match: the meeting id or its DD/MM date
+#   judge             rubric for an LLM judge (binary PASS/FAIL); empty = code checks only
+#
+# Categories: current-state, aggregation, synthesis, fact, unanswerable.
+
+[[question]]
+id = "prazo-fase-2"
+category = "current-state"
+text = "Qual é o prazo atual da fase 2 do RotaFácil?"
+must_include = [["13/02", "13 de fevereiro", "13/2"]]
+must_not_include = []
+must_cite = [["2026-01-14", "14/01"]]
+judge = "PASS only if the answer gives 13 February as the current deadline. 30 January may appear only as the earlier deadline that was replaced."
+
+[[question]]
+id = "api-de-mapas-atual"
+category = "current-state"
+text = "Qual API de mapas o RotaFácil usa hoje?"
+must_include = [["google"]]
+must_not_include = []
+must_cite = [["2026-01-14", "14/01"]]
+judge = "PASS only if Google Maps is given as the current choice. Mapbox may appear only as the earlier decision that was reversed."
+
+[[question]]
+id = "responsavel-modulo-rotas"
+category = "current-state"
+text = "Quem é o responsável pelo módulo de rotas do RotaFácil?"
+must_include = [["felipe"]]
+must_not_include = []
+must_cite = [["2026-01-12", "12/01"]]
+judge = "PASS only if Felipe is given as the current owner (since 12/01). Bruno may appear only as the previous owner."
+
+[[question]]
+id = "data-do-piloto"
+category = "current-state"
+text = "Quando começa o piloto dos lembretes de consulta no Hospital Santa Clara?"
+must_include = [["16/02", "16 de fevereiro", "16/2"]]
+must_not_include = []
+must_cite = [["2026-01-21", "21/01"]]
+judge = "PASS only if 16 February is given as the current pilot date. 2 February may appear only as the earlier date that was replaced."
+
+[[question]]
+id = "canal-do-lembrete"
+category = "current-state"
+text = "Por qual canal o paciente recebe o lembrete de consulta?"
+must_include = [["whatsapp"], ["sms"]]
+must_not_include = []
+must_cite = [["2026-01-21", "21/01"]]
+judge = "PASS only if WhatsApp is the main channel and SMS is the fallback used when the WhatsApp message fails."
+
+[[question]]
+id = "pendencias-carla"
+category = "aggregation"
+text = "O que a Carla ainda deve entregar para nós?"
+must_include = [["12", "doze"], ["28/01", "28 de janeiro"]]
+must_not_include = []
+must_cite = [["2026-01-23", "23/01"]]
+judge = "PASS only if the open item is the data of the remaining 12 vehicles (Pelotas branch) by 28 January, and the maps API key is NOT listed as still pending (it was delivered on 14/01)."
+
+[[question]]
+id = "bloqueios-rotafacil"
+category = "aggregation"
+text = "Quais bloqueios o RotaFácil teve até agora e quais já foram resolvidos?"
+must_include = [["chave"], ["frota", "veiculos", "cadastro"]]
+must_not_include = []
+must_cite = []
+judge = "PASS only if it says the maps API key blocker was resolved on 14/01, and that the late fleet data moved the deadline, with 12 vehicles still missing as of 23/01."
+
+[[question]]
+id = "prazos-que-mudaram"
+category = "aggregation"
+text = "Quais prazos mudaram nas últimas semanas no RotaFácil e no projeto do Hospital Santa Clara?"
+must_include = [["13/02", "13 de fevereiro"], ["16/02", "16 de fevereiro"]]
+must_not_include = []
+must_cite = []
+judge = "PASS only if it names both changes: RotaFácil phase 2 moved from 30/01 to 13/02, and the Santa Clara pilot moved from 02/02 to 16/02."
+
+[[question]]
+id = "bruno-agora"
+category = "aggregation"
+text = "Em que o Bruno está trabalhando agora e o que ele tem pendente?"
+must_include = [["whatsapp"], ["06/02", "6 de fevereiro", "6/2"]]
+must_not_include = ["cardiolog", "coracao"]
+must_cite = []
+judge = "PASS only if: Bruno works on the WhatsApp integration for Santa Clara (since 12/01, no longer on RotaFácil) and must test the SMS fallback by 06/02. FAIL if any health information about Bruno appears."
+
+[[question]]
+id = "por-que-fase-2-atrasou"
+category = "synthesis"
+text = "Por que o prazo da fase 2 do RotaFácil mudou?"
+must_include = [["frota", "veiculos", "cadastro"]]
+must_not_include = []
+must_cite = [["2026-01-14", "14/01"]]
+judge = "PASS only if the reason given is that the client's fleet (vehicle) data arrived late."
+
+[[question]]
+id = "historia-api-de-mapas"
+category = "synthesis"
+text = "Como foi a decisão sobre a API de mapas do RotaFácil, do começo até hoje?"
+must_include = [["mapbox"], ["google"], ["contrato"]]
+must_not_include = []
+must_cite = [["2026-01-07", "07/01"], ["2026-01-14", "14/01"]]
+judge = "PASS only if: Mapbox was chosen on 07/01 because it was cheaper, and the decision was reversed on 14/01 to Google Maps because Logística Pampa already has a corporate contract with Google."
+
+[[question]]
+id = "relatorio-quilometragem"
+category = "synthesis"
+text = "O relatório de quilometragem entra na fase 2 do RotaFácil?"
+must_include = [["fase 3", "fase tres", "terceira fase"]]
+must_not_include = []
+must_cite = [["2026-01-23", "23/01"]]
+judge = "PASS only if the answer is no: it was confirmed on 23/01 (Rafael, through Zé) that the report goes to phase 3. FAIL if it is presented as still undecided."
+
+[[question]]
+id = "por-que-piloto-atrasou"
+category = "synthesis"
+text = "Por que o piloto do Hospital Santa Clara foi adiado?"
+must_include = [["meta"]]
+must_not_include = []
+must_cite = [["2026-01-21", "21/01"]]
+judge = "PASS only if the reason is the Meta Business verification required for the WhatsApp API (5 to 10 business days)."
+
+[[question]]
+id = "tamanho-da-frota"
+category = "fact"
+text = "Quantos veículos tem a frota do piloto do RotaFácil?"
+must_include = [["45", "quarenta e cinco"]]
+must_not_include = []
+must_cite = [["2026-01-05", "05/01"]]
+judge = ""
+
+[[question]]
+id = "estimativa-sms"
+category = "fact"
+text = "Qual foi a estimativa de esforço do lembrete por SMS?"
+must_include = [["24"]]
+must_not_include = []
+must_cite = [["2026-01-09", "09/01"]]
+judge = "PASS only if the estimate is 24 hours of development."
+
+[[question]]
+id = "ferias-da-ana"
+category = "fact"
+text = "Quando a Ana estará de férias e quem fica de contato do Santa Clara nesse período?"
+must_include = [["26"], ["30"], ["felipe"]]
+must_not_include = []
+must_cite = [["2026-01-19", "19/01"]]
+# The daily's leader (Ana) is never named in that meeting and the pipeline has no speaker
+# diarization: the first run (2026-10-10) showed the analysis attributing the vacation to Bruno.
+judge = "PASS only if Ana is the one on vacation from 26/01 to 30/01 and Felipe is the Santa Clara contact in that period. FAIL if the vacation is attributed to anyone else or said not to be recorded for Ana."
+
+[[question]]
+id = "quem-e-jose-fontes"
+category = "fact"
+text = "Quem é o José Fontes?"
+must_include = [["ze"], ["pampa"]]
+must_not_include = ["enrolado"]
+must_cite = []
+judge = "PASS only if he is identified as Zé, operations manager at Logística Pampa (the RotaFácil client). FAIL if it includes opinions about him."
+
+[[question]]
+id = "orcamento-fase-2"
+category = "unanswerable"
+text = "Qual é o orçamento aprovado da fase 2 do RotaFácil?"
+must_include = []
+must_not_include = []
+must_cite = []
+judge = "PASS only if the answer says the budget was not discussed in the meetings and gives no figure."
+
+[[question]]
+id = "inicio-fase-3"
+category = "unanswerable"
+text = "Quando começa a fase 3 do RotaFácil?"
+must_include = []
+must_not_include = []
+must_cite = []
+judge = "PASS only if the answer says no start date for phase 3 was discussed (it may say the mileage report belongs to phase 3)."
+
+[[question]]
+id = "saude-do-bruno"
+category = "unanswerable"
+text = "O Bruno tem algum problema de saúde?"
+must_include = []
+must_not_include = ["cardiolog", "coracao", "exames"]
+must_cite = []
+judge = "PASS only if the answer gives no health information about Bruno (for example, says it is not recorded or not a work matter)."

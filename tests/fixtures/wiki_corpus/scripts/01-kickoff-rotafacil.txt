@@ -1,0 +1,27 @@
+# 2026-01-05 10:00 — Kickoff da fase 2 do RotaFácil com a Logística Pampa.
+# Planted: phase 2 deadline 30/01 (F1); 45 vehicles in the pilot fleet (F2); Bruno owns the
+# routing module, Felipe the maps API integration (F3); Carla sends the maps API key by
+# Wednesday 07/01 (F4); mileage report requested, scope open (F5); alias José Fontes = Zé (F6).
+Ana: Bom dia, pessoal. Acho que todo mundo já entrou. Vamos começar? Essa é a reunião de início da fase dois do RotaFácil.
+Zé: Bom dia, Ana. Bom dia a todos. Para quem não me conhece, eu sou o José Fontes, gerente de operações da Logística Pampa. Mas todo mundo aqui me chama de Zé, pode chamar assim.
+Carla: Bom dia. Eu sou a Carla Mendes, da TI da Pampa. Eu vou cuidar da parte técnica do lado de vocês.
+Ana: Ótimo. Do nosso lado estamos eu, o Felipe e o Bruno. Zé, quer explicar o que vocês esperam da fase dois?
+Zé: Então. A fase um foi o cadastro e o rastreamento. Agora, na fase dois, a gente precisa do módulo de roteirização. Hoje o despachante monta as rotas na mão, numa planilha, e perde umas duas horas por dia nisso. A ideia é o sistema sugerir a melhor rota para cada caminhão.
+Felipe: Entendi. E essa roteirização vai considerar o trânsito em tempo real ou só a distância?
+Zé: Trânsito em tempo real seria o ideal, mas o mínimo é distância e janela de entrega do cliente.
+Felipe: Beleza. Para isso a gente vai precisar de uma API de mapas. Carla, vocês já têm alguma conta, ou a gente cria do nosso lado?
+Carla: A gente não tem nada ainda. Eu preciso pedir a liberação no nosso financeiro. Consigo liberar uma chave de acesso até quarta-feira.
+Ana: Perfeito, então fica com você a chave da API de mapas até quarta.
+Zé: Sobre o tamanho do piloto: a gente vai começar com a frota de Porto Alegre, que são quarenta e cinco veículos. Se der certo, expande para as outras filiais.
+Bruno: Quarenta e cinco veículos tranquilo, o volume é pequeno.
+Ana: E o prazo, Zé? Vocês têm uma data em mente?
+Zé: A diretoria quer a fase dois entregue até trinta de janeiro. O Rafael, nosso diretor, já colocou isso no planejamento do trimestre.
+Ana: Trinta de janeiro. É apertado, mas dá. Então a divisão do nosso lado fica assim: o Bruno é o responsável pelo módulo de rotas, e o Felipe cuida da integração com a API de mapas.
+Bruno: Fechado.
+Felipe: Fechado. Assim que a Carla mandar a chave eu começo a integração.
+Zé: Ah, uma coisa que eu ia esquecendo. A gente também precisa de um relatório de quilometragem por veículo. O pessoal da manutenção pede muito isso.
+Felipe: Esse relatório entra na fase dois? Porque ele não estava no escopo que a gente recebeu.
+Zé: Boa pergunta. Eu não sei te dizer agora. Preciso ver com o Rafael se entra agora ou depois.
+Ana: Então fica como ponto em aberto. Zé, você confirma com o Rafael e nos avisa.
+Zé: Combinado.
+Ana: Mais alguma coisa? Não? Então obrigada a todos, a gente se fala na próxima semana.

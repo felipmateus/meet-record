@@ -1,0 +1,18 @@
+# 2026-01-09 14:00 — Reunião com o Hospital Santa Clara sobre lembretes de consulta.
+# Planted: SMS reminder estimate 24 hours (F10); channel changed to WhatsApp because patients
+# do not read SMS (F11, refined on 21/01); pilot on 02/02 at the orthopedics clinic (F12,
+# moved on 21/01); Paula sends the list of appointment types (F13, done on 21/01).
+Ana: Boa tarde, doutora Paula. Obrigada por receber a gente.
+Paula: Boa tarde, Ana. Boa tarde, Felipe. Vamos lá, eu tenho meia hora.
+Ana: O Felipe fez a estimativa do lembrete por SMS que vocês pediram. Felipe, explica para ela.
+Felipe: Claro. O lembrete por SMS ficaria em vinte e quatro horas de desenvolvimento. Isso inclui o envio automático um dia antes da consulta e a tela para o paciente confirmar ou cancelar.
+Paula: Vinte e quatro horas, ok. Mas olha, pensando melhor desde a última conversa: os nossos pacientes não leem SMS. A maioria só olha o WhatsApp. Não dá para fazer pelo WhatsApp em vez de SMS?
+Felipe: Dá, sim. O WhatsApp tem uma API oficial para empresas. Só que a integração é um pouco diferente, eu precisaria revisar a estimativa.
+Paula: Então eu prefiro WhatsApp. Pode considerar o lembrete pelo WhatsApp, não por SMS.
+Ana: Combinado, doutora. A gente muda para WhatsApp e o Felipe revisa a estimativa.
+Paula: E sobre o piloto: eu queria começar no ambulatório de ortopedia, que tem o maior número de faltas. Pode ser no dia dois de fevereiro?
+Ana: Dois de fevereiro no ambulatório de ortopedia. Para a gente funciona.
+Felipe: Doutora, para configurar as mensagens eu preciso saber quais tipos de consulta vão receber lembrete.
+Paula: Boa. Eu te mando a lista dos tipos de consulta por e-mail. Acho que são três tipos.
+Felipe: Perfeito, fico aguardando.
+Paula: Então está bom. Obrigada, até a próxima.

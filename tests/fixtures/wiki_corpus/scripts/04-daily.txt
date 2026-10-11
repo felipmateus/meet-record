@@ -1,0 +1,16 @@
+# 2026-01-12 09:30 — Daily interna.
+# Planted: maps API key still missing (blocker, 2nd mention, F7); Ana escalates to Rafael,
+# Pampa's director (F14); OWNER CHANGE: Bruno moves to Santa Clara's WhatsApp integration and
+# Felipe takes over the routing module from today (F15).
+Ana: Bom dia. Felipe, e a chave da API de mapas? Chegou?
+Felipe: Ainda não. Eu cobrei a Carla na quarta e na sexta. Ela disse que está parada no financeiro deles.
+Ana: Isso já está atrasando a gente. Hoje eu vou escalar com o Rafael, o diretor da Pampa. Não dá para continuar esperando.
+Felipe: Seria bom. Sem a chave eu estou testando só com dados falsos.
+Ana: Outra coisa. Como o Santa Clara mudou para WhatsApp, eu preciso de alguém dedicado nessa integração. Bruno, a partir de hoje você sai do RotaFácil e vai para o Santa Clara cuidar da integração com o WhatsApp.
+Bruno: Tudo bem. E o módulo de rotas?
+Ana: O Felipe assume o módulo de rotas a partir de hoje. Felipe, tudo bem para você ficar com rotas e mapas?
+Felipe: Tudo bem. Bruno, depois me passa o que você já fez do algoritmo de ordenação?
+Bruno: Passo, sim. Hoje à tarde eu te mostro. Está no repositório, na branch de rotas.
+Ana: Ótimo. Então, resumindo: Felipe fica com todo o RotaFácil, o Bruno vai para o WhatsApp do Santa Clara, e eu falo com o Rafael sobre a chave.
+Felipe: Beleza.
+Bruno: Combinado.

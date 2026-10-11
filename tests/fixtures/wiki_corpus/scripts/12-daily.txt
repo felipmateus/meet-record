@@ -1,0 +1,14 @@
+# 2026-01-29 09:30 — Daily interna (Ana de férias).
+# Planted (stories corpus): buttons working; WhatsApp messages with buttons need a template approved by Meta,
+# about 24 hours (R15, approved by 06/02); PDF export done (R8 done); reordered route saved only when the user clicks
+# "Salvar rota", not automatically (R16); BUG: dates in the PDF come out in the American format month/day and must
+# be day/month (R17, Felipe fixes).
+Felipe: Bom dia, Bruno. Como a Ana está de férias, vamos fazer rapidinho só nós dois.
+Bruno: Bom dia. Os botões Confirmar e Remarcar já estão funcionando no ambiente de teste.
+Bruno: Mas descobri uma coisa: mensagem com botão no WhatsApp precisa de um modelo aprovado pela Meta. A aprovação leva umas vinte e quatro horas. Eu já enviei o modelo ontem.
+Felipe: Beleza. No RotaFácil, a exportação em PDF está pronta.
+Felipe: Só que achei um bug: no PDF as datas estão saindo no formato americano, mês antes do dia. Tem que ser dia e mês, no padrão brasileiro. Eu corrijo isso hoje.
+Bruno: E a reordenação das paradas, salva sozinha quando arrasta?
+Felipe: Eu estava em dúvida, mas acho melhor não. Fica assim: a nova ordem só é salva quando o despachante clicar em Salvar rota. Assim ele pode testar e desistir.
+Bruno: Faz sentido.
+Felipe: Fechado então. Bom trabalho.

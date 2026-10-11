@@ -1,0 +1,16 @@
+# 2026-02-02 14:00 — Hospital Santa Clara: ajustes depois do teste (Ana is back from vacation but not in this meeting).
+# Planted (stories corpus): CHANGED: 72 hours before for exams, 48 hours for consultations (R1 refined);
+# REVERSED: the "Cancelar" button comes back, so three buttons Confirmar, Remarcar and Cancelar (R2 reversed);
+# BUG: some patients received the reminder twice in the test (R18, Bruno fixes); the weekly report goes as a PDF by
+# e-mail every Monday at 8h (R5 refined).
+Paula: Boa tarde. Testamos com alguns pacientes na semana passada e tenho ajustes.
+Felipe: Boa tarde, doutora. Pode falar.
+Paula: Para exames, quarenta e oito horas é pouco, porque muitos exames pedem preparo, jejum. Para exames, o lembrete vai setenta e duas horas antes. Para consultas continua quarenta e oito.
+Felipe: Exames setenta e duas horas antes, consultas quarenta e oito. Certo.
+Paula: E pensei melhor sobre o botão Cancelar. Tem paciente que simplesmente não vem e não avisa. É melhor ele cancelar e liberar a vaga. Então quero o Cancelar de volta: três botões, Confirmar, Remarcar e Cancelar.
+Bruno: Três botões então. Vou ter que mandar o modelo de novo para a Meta aprovar.
+Paula: Tudo bem. Outra coisa: dois pacientes receberam o lembrete duas vezes no teste.
+Bruno: Isso é bug. Deve ser o agendamento rodando duas vezes. Eu investigo e corrijo.
+Paula: E o relatório semanal: quero receber em PDF por e-mail, toda segunda-feira às oito da manhã.
+Felipe: PDF por e-mail, segunda às oito. Eu faço.
+Paula: Ótimo, obrigada.
