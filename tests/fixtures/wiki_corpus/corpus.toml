@@ -1,0 +1,56 @@
+# Synthetic meeting corpus for the LLM wiki evaluation (tasks/prd-llm-wiki/evaluation.md §4).
+# Everything here is fictional: companies, people, projects and numbers. The user is Felipe,
+# as in config.toml, so the analysis attributes his commitments to him.
+#
+# Each meeting script is a dialogue, one turn per line ("Speaker: text"). Lines starting with
+# "#" are comments; "[pausa N]" inserts N seconds of silence. scripts/wiki_corpus.py renders
+# every script to audio with macOS `say` (one voice per speaker) and runs the project's own
+# transcription and analysis on it, in a data dir of its own.
+
+[voices]            # speaker → "<macOS voice>:<words per minute>"
+# Every speaker uses Luciana, the only good pt_BR voice installed by default: the other pt_BR
+# voices (Eddy, Flo, Rocko, Grandpa…) mispronounce Portuguese (they read "é" as "e acute") and
+# whisper's output on them looks nothing like a real call. The pipeline has no speaker
+# diarization, so one voice at different rates loses nothing the evaluation measures.
+Felipe = "Luciana:185"
+Ana = "Luciana:175"
+Bruno = "Luciana:195"
+"Zé" = "Luciana:165"
+Carla = "Luciana:190"
+Paula = "Luciana:170"
+
+[[meeting]]
+id = "2026-01-05_10-00-00"
+script = "scripts/01-kickoff-rotafacil.txt"
+
+[[meeting]]
+id = "2026-01-07_09-30-00"
+script = "scripts/02-daily.txt"
+
+[[meeting]]
+id = "2026-01-09_14-00-00"
+script = "scripts/03-santa-clara-lembretes.txt"
+
+[[meeting]]
+id = "2026-01-12_09-30-00"
+script = "scripts/04-daily.txt"
+
+[[meeting]]
+id = "2026-01-14_11-00-00"
+script = "scripts/05-rotafacil-cronograma.txt"
+
+[[meeting]]
+id = "2026-01-16_16-40-00"
+script = "scripts/06-teste-de-audio.txt"
+
+[[meeting]]
+id = "2026-01-19_09-30-00"
+script = "scripts/07-daily.txt"
+
+[[meeting]]
+id = "2026-01-21_15-00-00"
+script = "scripts/08-santa-clara-piloto.txt"
+
+[[meeting]]
+id = "2026-01-23_10-00-00"
+script = "scripts/09-rotafacil-status.txt"

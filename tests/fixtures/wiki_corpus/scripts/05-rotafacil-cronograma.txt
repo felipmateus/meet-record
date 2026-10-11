@@ -1,0 +1,22 @@
+# 2026-01-14 11:00 — RotaFácil com a Logística Pampa: cronograma.
+# Planted: DEADLINE MOVED 30/01 → 13/02 because the client's fleet data were late (F16);
+# blocker resolved: key sent this morning (F7 closed); DECISION REVERSED: Google Maps instead of
+# Mapbox because the client already has a Google contract (F8 → F17); TENTATIVE: mileage report
+# "maybe" in phase 3, Zé will confirm with Rafael (F18, confirmed on 23/01); Felipe sends the
+# updated schedule by Friday 16/01 (F19).
+Zé: Bom dia, pessoal. Tenho uma notícia não muito boa. O cadastro da nossa frota atrasou. O pessoal das filiais não mandou os dados dos veículos a tempo.
+Ana: Entendi. Isso impacta o prazo de trinta de janeiro?
+Zé: Impacta. Sem os dados da frota vocês não conseguem testar a roteirização direito. Eu conversei com o Rafael e a gente prefere mudar o prazo da fase dois para treze de fevereiro.
+Ana: Treze de fevereiro. Para a gente fica até mais confortável. Então o novo prazo da fase dois é treze de fevereiro.
+Zé: Isso, treze de fevereiro.
+Carla: E tenho uma boa notícia. A chave da API de mapas saiu. Eu mandei hoje de manhã para o Felipe.
+Felipe: Recebi, Carla, obrigado. Só uma dúvida: a chave que você mandou é do Google Maps. A gente tinha decidido usar o Mapbox por causa do custo.
+Carla: Pois é. Acontece que a Pampa já tem um contrato corporativo com o Google. O financeiro só liberou porque já está dentro desse contrato. Para o Mapbox eu teria que abrir uma compra nova, e isso leva meses.
+Ana: Faz sentido. Se o custo já está coberto pelo contrato de vocês, o argumento do preço não vale mais. Felipe, vamos de Google Maps então.
+Felipe: Tudo bem. Muda pouca coisa na integração, eu só não tinha começado com o Google. Vou trocar.
+Zé: E sobre aquele relatório de quilometragem. Eu ainda não consegui falar com o Rafael. Talvez ele fique só para a fase três, mas eu preciso confirmar.
+Felipe: Então por enquanto eu não incluo no cronograma da fase dois, certo?
+Zé: Por enquanto não. Eu confirmo depois.
+Ana: Felipe, você consegue mandar o cronograma atualizado com a data de treze de fevereiro até sexta?
+Felipe: Consigo. Até sexta-feira eu mando para todos.
+Ana: Ótimo. Obrigada, Zé. Obrigada, Carla.
