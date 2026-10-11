@@ -26,8 +26,10 @@ class TranscribeMeeting:
     """Transcribes a meeting and checks the result for whisper hallucination loops.
 
     A degraded transcript (more than `max_loop_share` of its segments in loops) is transcribed once
-    more with `retry`, the anti-loop settings, and the healthier of the two is kept. One still degraded
-    is saved anyway, marked in its health, so the analysis runs on what there is, and the user is notified.
+    more with `retry`, the anti-loop settings, and the healthier of the two is kept; both are measured
+    against the meeting's length, so a retry that comes back empty or cut short never wins. A retry that
+    fails, for any reason, keeps the first pass. One still degraded is saved anyway, marked in its health,
+    so the analysis runs on what there is, and the user is notified.
     """
 
     repo: MeetingRepository
@@ -40,8 +42,9 @@ class TranscribeMeeting:
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
             raise TranscriptionError(Err.NO_AUDIO_FILE.format(meeting_id=meeting_id, filename=AUDIO))
+        duration = self.repo.load_meta(meeting_id).duration_seconds
         with self.repo.lock(meeting_id):
-            transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO))
+            transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration)
             self.repo.save_transcript(meeting_id, transcript)
         health = transcript.health
         if health is not None and health.degraded and self.notifier is not None:
@@ -50,13 +53,13 @@ class TranscribeMeeting:
                                  Notify.TRANSCRIPT_DEGRADED_BODY.format(meeting_id=meeting_id, loop=health.loop_share, gaps=gaps))
         return transcript
 
-    def _checked(self, transcriber: Transcriber, audio: Path) -> tuple[Transcript, TranscriptHealth]:
+    def _checked(self, transcriber: Transcriber, audio: Path, duration: float | None) -> tuple[Transcript, TranscriptHealth]:
         transcript = transcriber.transcribe(audio, self.language)
-        health = transcript.health = transcript_health(transcript, self.max_loop_share)
+        health = transcript.health = transcript_health(transcript, self.max_loop_share, duration)
         return transcript, health
 
-    def _transcribe(self, meeting_id: str, audio: Path) -> Transcript:
-        first, health = self._checked(self.transcriber, audio)
+    def _transcribe(self, meeting_id: str, audio: Path, duration: float | None) -> Transcript:
+        first, health = self._checked(self.transcriber, audio, duration)
         if not health.degraded:
             return first
         log.warning(Log.TRANSCRIPT_DEGRADED, meeting_id, 100 * health.loop_share, health.covered_minutes, health.total_minutes)
@@ -64,9 +67,9 @@ class TranscribeMeeting:
             return first
         log.info(Log.TRANSCRIPT_RETRY, meeting_id)
         try:
-            second, retried = self._checked(self.retry, audio)
-        except TranscriptionError as exc:  # the first pass is degraded but still the best there is
-            log.warning(Log.TRANSCRIPT_RETRY_FAILED, meeting_id, exc)
+            second, retried = self._checked(self.retry, audio, duration)
+        except Exception as exc:  # noqa: BLE001 - any failure: the first pass is degraded but still the best there is
+            log.exception(Log.TRANSCRIPT_RETRY_FAILED, meeting_id, exc)
             return first
         keep_retry = retried.is_healthier_than(health)
         log.info(Log.TRANSCRIPT_RETRY_RESULT, meeting_id, 100 * retried.loop_share, retried.covered_minutes, retried.total_minutes,
