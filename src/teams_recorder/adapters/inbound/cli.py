@@ -70,6 +70,13 @@ def version() -> None:
 def status() -> None:
     settings = _settings()
     c = build_container(settings, headless=True)
+    try:
+        _status(settings, c)
+    except TeamsRecorderError as exc:  # a damaged meta.json, open_actions.json or drafts file: say which, no traceback
+        _fail(str(exc))
+
+
+def _status(settings: Settings, c: Container) -> None:
     meetings = c.repo.list_meetings()
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
