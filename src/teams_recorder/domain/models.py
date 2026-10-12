@@ -143,6 +143,20 @@ def route_of(kind: ActionKind | None) -> ActionRoute:
     return kind.route if kind is not None else ActionRoute.STORY
 
 
+class VerificationStatus(StrEnum):
+    CONFIRMED = "confirmed"      # the transcript supports the claim
+    UNCONFIRMED = "unconfirmed"  # it does not, or the check could not tell: shown as unconfirmed, never deleted
+
+
+@dataclass(frozen=True)
+class Verification:
+    """Whether a claim of the analysis (decision, action, deadline, participant) was confirmed against the
+    transcript, and why. A claim without one was not verified (analyses made before the fidelity guard)."""
+
+    status: VerificationStatus
+    reason: str = ""
+
+
 class MeetingType(StrEnum):
     STANDUP = "standup"
     CLIENT = "client"
@@ -162,6 +176,7 @@ class Action:
     priority: Priority | None = None
     at: str | None = None  # transcript timestamp (HH:MM:SS) where it was said, for verification
     kind: ActionKind | None = None  # None: extracted before actions were classified
+    verification: Verification | None = None  # None: not verified
 
     @property
     def route(self) -> ActionRoute:
@@ -175,6 +190,7 @@ class Action:
 class Decision:
     text: str
     at: str | None = None  # transcript timestamp (HH:MM:SS) where it was decided
+    verification: Verification | None = None  # None: not verified
 
 
 @dataclass(frozen=True)
@@ -188,6 +204,7 @@ class Deadline:
     what: str
     when: date | None
     who: str
+    verification: Verification | None = None  # None: not verified
 
 
 @dataclass
@@ -206,6 +223,7 @@ class Analysis:
     participants: list[str] = field(default_factory=list)  # names mentioned (no diarization yet)
     topics: list[Topic] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
+    participant_checks: dict[str, Verification] = field(default_factory=dict)  # by name, as in `participants`; absent: not verified
 
     @property
     def all_actions(self) -> list[Action]:
