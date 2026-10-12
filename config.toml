@@ -47,6 +47,19 @@ threads = 0
 # scripts/download-model.sh silero-v5.1.2 and vad = true.
 vad = false
 vad_model = "silero-v5.1.2"
+# Hallucination loops (2026-10-11): in a long meeting held largely in English, whisper repeated one
+# line for 59 minutes ("A CIDADE NO BRASIL", 70% of the transcript). max_context is whisper's -mc,
+# the text of the previous window it keeps as context: 0 keeps a loop from carrying over (it removed
+# that loop and left Portuguese accuracy unchanged); -1 = whisper's default.
+max_context = 0
+# A transcript is degraded when more than this share of its segments are in repetition loops (the
+# same line 5+ times within 30 segments). Healthy meetings measured 0%; the looped one 68%.
+max_loop_share = 0.10
+# A degraded transcript is transcribed once more with -mc 0 and, with retry_vad, Silero VAD (about
+# 30% slower; needs the VAD model above); the one with more minutes of text is kept. If it is still degraded, it is
+# saved marked as such, you get a notification and minutes.md shows a warning.
+retry_on_loop = true
+retry_vad = true
 
 [llm]
 # provider: "api" uses the Claude API with the key from .env (pay-as-you-go);

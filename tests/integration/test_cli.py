@@ -428,3 +428,81 @@ def test_status_counts_the_stories_waiting_in_the_window(tmp_path: Path, monkeyp
     result = runner.invoke(app, ["status"])
 
     assert Cli.STORIES_WAITING.format(count=2) in result.output        # today and yesterday, not the published one
+
+
+# --- transcript health -------------------------------------------------------------------------
+def _with_transcribers(monkeypatch, first, retry=None):
+    """`trec` with fake transcribers in the container it builds (everything else as configured)."""
+    from dataclasses import replace
+    from teams_recorder.adapters.inbound import cli
+    build = cli.build_container
+    monkeypatch.setattr(cli, "build_container", lambda settings, **kw: replace(build(settings, **kw), transcriber=first, retry_transcriber=retry))
+
+
+def test_transcribe_reports_health_and_a_degraded_transcript(tmp_path: Path, monkeypatch):
+    from tests.fakes import FakeTranscriber, looped_transcript
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 8, 10, 30, 52)); repo.create(m)
+    repo.path(m.id, AUDIO).write_bytes(b"\x00")
+    _with_transcribers(monkeypatch, FakeTranscriber(looped_transcript(minutes=20, loop_minutes=15)), FakeTranscriber(looped_transcript(minutes=20, loop_minutes=16)))
+
+    result = runner.invoke(app, ["transcribe", m.id])
+
+    assert result.exit_code == 0, result.output
+    health = repo.load_transcript(m.id).health
+    assert health is not None and health.degraded and health.retried
+    assert Cli.TRANSCRIPT_HEALTH.format(loop=health.loop_share, covered=5, total=20, retried=Cli.RETRIED) in result.output
+    assert Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges="00:00:00–00:15:00")) in result.output
+
+
+def test_status_marks_and_counts_degraded_transcripts(tmp_path: Path, monkeypatch):
+    from teams_recorder.domain import Segment, Transcript, TranscriptHealth
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    for minute, health in ((0, TranscriptHealth(0.668, 28, 86, True, ((0, 14),))), (10, TranscriptHealth(0.0, 30, 30, False)), (20, None)):
+        m = Meeting.start(datetime(2026, 10, 8, 10, minute, 0)); repo.create(m)
+        repo.save_transcript(m.id, Transcript([Segment(0, 1, "oi")], "pt", health))
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "2026-10-08_10-00-00  [transcribed] → next: analyze" + Cli.MEETING_DEGRADED.format(loop=0.668) in result.output
+    assert "2026-10-08_10-10-00  [transcribed] → next: analyze\n" in result.output   # healthy, and old (no health): no marker
+    assert Cli.DEGRADED_TRANSCRIPTS.format(count=1) in result.output
+
+
+def test_doctor_shows_the_loop_guard(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    vad = project / "data" / "models" / "ggml-silero-v5.1.2.bin"
+
+    missing = runner.invoke(app, ["doctor"]).output
+
+    assert Cli.TRANSCRIPTION_LINE.format(mark=Cli.INFO, max_context=0, share=0.10) in missing
+    assert Cli.RETRY_LINE.format(mark=Cli.WARNING, state=Cli.RETRY_SAME, hint=Cli.RETRY_VAD_MISSING.format(
+        path=vad, script="scripts/download-model.sh", model="silero-v5.1.2")) in missing
+    vad.parent.mkdir(parents=True); vad.write_bytes(b"\x00")
+    assert Cli.RETRY_LINE.format(mark=Cli.OK, state=Cli.RETRY_ON_VAD.format(path=vad), hint="") in runner.invoke(app, ["doctor"]).output
+    (project / "config.toml").write_text("[transcription]\nretry_on_loop = false\n")
+    assert Cli.RETRY_LINE.format(mark=Cli.INFO, state=Cli.RETRY_OFF, hint="") in runner.invoke(app, ["doctor"]).output
+
+
+def test_a_damaged_transcript_is_reported_not_a_traceback(tmp_path: Path, monkeypatch):
+    import json as _json
+    from teams_recorder.adapters.outbound import codec
+    from teams_recorder.domain import Segment, Transcript, TranscriptHealth
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 8, 10, 30, 52)); repo.create(m)
+    repo.save_transcript(m.id, Transcript([Segment(0, 1, "oi")], "pt", TranscriptHealth(0.7, 1, 2, True)))
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "sample_analysis_v2.json"
+    repo.save_analysis(m.id, codec.analysis_from_dict(_json.loads(fixture.read_text())))
+    path = repo.path(m.id, "transcript.json")
+    path.write_text(path.read_text().replace('"covered_minutes"', '"covered"'))
+
+    status = runner.invoke(app, ["status"])
+    minutes = runner.invoke(app, ["minutes", m.id])
+
+    assert status.exit_code == 0 and Cli.DEGRADED_TRANSCRIPTS.format(count=0) in status.output
+    assert minutes.exit_code == 1 and isinstance(minutes.exception, SystemExit)   # a clean error, not a KeyError traceback
+    assert "invalid JSON in" in minutes.output and "covered_minutes" in minutes.output

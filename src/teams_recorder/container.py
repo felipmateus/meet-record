@@ -60,7 +60,7 @@ from teams_recorder.application.use_cases import (
     TranscribeMeeting,
 )
 from teams_recorder.config import Settings, find_tool
-from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform, StoryDestination
+from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform, StoryDestination, Transcription
 from teams_recorder.domain import UserStory
 
 
@@ -96,6 +96,7 @@ class Container:
     story_publishers: list[StoryPublisher]
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
     disk: DiskSpace | None = None
+    retry_transcriber: Transcriber | None = None   # anti-loop pass for a degraded transcript; None: no retry
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
@@ -108,7 +109,8 @@ class Container:
         return CancelRecording(self.repo, self.process_capture, self.mic_capture, self.notifier)
 
     def transcribe_meeting(self) -> TranscribeMeeting:
-        return TranscribeMeeting(self.repo, self.transcriber, self.settings.language)
+        return TranscribeMeeting(self.repo, self.transcriber, self.settings.language, self.settings.max_loop_share,
+                                 self.retry_transcriber, self.notifier)
 
     def analyze_meeting(self) -> AnalyzeMeeting:
         return AnalyzeMeeting(self.repo, self.analyzer, self.minutes)
@@ -180,8 +182,9 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         mixer=FfmpegMixer(ffmpeg=ffmpeg, bitrate_kbps=settings.bitrate_kbps, denoise=settings.denoise),
         transcriber=WhisperCppTranscriber(
             settings.whisper_model_path, whisper_cli=find_tool(Bin.WHISPER_CLI, settings.project_dir), ffmpeg=ffmpeg,
-            threads=settings.whisper_threads, vad_model_path=settings.vad_model_path,
+            threads=settings.whisper_threads, vad_model_path=settings.vad_model_path, max_context=settings.whisper_max_context,
         ),
+        retry_transcriber=build_retry_transcriber(settings),
         analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT, user_name=settings.user_name),
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
@@ -193,6 +196,28 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         story_publishers=build_story_publishers(settings),
         confirmation=platform.confirmation,
         disk=DataDirDiskSpace(settings.data_dir),
+    )
+
+
+def _uses_vad(model: Path | None) -> bool:
+    return model is not None and model.exists()   # the transcriber leaves VAD out when its model is missing
+
+
+def build_retry_transcriber(settings: Settings) -> WhisperCppTranscriber | None:
+    """The second pass for a degraded transcript: no text context (-mc 0) and, with retry_vad, Silero VAD.
+
+    None when [transcription] retry_on_loop is off, or when the retry would only repeat the first pass
+    (max_context already 0 and no VAD to add: retry_vad off, VAD already on, or its model missing).
+    """
+    if not settings.retry_on_loop:
+        return None
+    vad = settings.retry_vad_model_path if _uses_vad(settings.retry_vad_model_path) else None
+    adds_vad = vad is not None and not _uses_vad(settings.vad_model_path)
+    if settings.whisper_max_context == Transcription.ANTI_LOOP_MAX_CONTEXT and not adds_vad:
+        return None
+    return WhisperCppTranscriber(
+        settings.whisper_model_path, whisper_cli=find_tool(Bin.WHISPER_CLI, settings.project_dir), ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir),
+        threads=settings.whisper_threads, vad_model_path=vad, max_context=Transcription.ANTI_LOOP_MAX_CONTEXT,
     )
 
 

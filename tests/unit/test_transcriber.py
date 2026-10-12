@@ -45,3 +45,18 @@ def test_vad_flags_only_when_model_exists(tmp_path: Path):
     vad.write_bytes(b"\x00")
     with_vad = WhisperCppTranscriber(tmp_path / "m.bin", vad_model_path=vad).whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
     assert "--vad" in with_vad and with_vad[with_vad.index("-vm") + 1] == str(vad)
+
+
+def test_max_context_is_passed_as_mc_and_defaults_to_zero(tmp_path: Path):
+    default = WhisperCppTranscriber(tmp_path / "m.bin").whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
+    assert default[default.index("-mc") + 1] == "0"   # no text context: a hallucination loop cannot carry over
+    whisper_default = WhisperCppTranscriber(tmp_path / "m.bin", max_context=-1).whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
+    assert whisper_default[whisper_default.index("-mc") + 1] == "-1"
+
+
+def test_anti_loop_retry_command_has_mc_zero_and_vad(tmp_path: Path):
+    vad = tmp_path / "ggml-silero-v5.1.2.bin"
+    vad.write_bytes(b"\x00")
+    wc = WhisperCppTranscriber(tmp_path / "m.bin", vad_model_path=vad, max_context=0).whisper_command(tmp_path / "a.wav", "pt", tmp_path / "o")
+    assert wc[wc.index("-mc") + 1] == "0" and "--vad" in wc
+    assert wc[wc.index("-vt") + 1] == "0.5" and wc[wc.index("-vsd") + 1] == "300" and wc[wc.index("-vp") + 1] == "150"

@@ -12,7 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript, UserStory
+from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript, TranscriptHealth, UserStory
 
 
 class CallState(StrEnum):
@@ -84,7 +84,9 @@ class MeetingAnalyzer(Protocol):
 
 @runtime_checkable
 class MinutesRenderer(Protocol):
-    def render(self, meeting: Meeting, analysis: Analysis) -> str: ...
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
+        """minutes.md; `health` is the transcript's, so a degraded transcript gets a warning banner."""
+        ...
 
 
 @runtime_checkable

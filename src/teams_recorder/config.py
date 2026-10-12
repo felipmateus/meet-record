@@ -26,6 +26,7 @@ from teams_recorder.constants import (
     Platform,
     Stories,
     StoryDestination,
+    Transcription,
     Windows,
     ggml_model_file,
     raw_bytes_per_hour,
@@ -96,6 +97,10 @@ class Settings:
     backlog_project_dir: Path | None = None   # Backlog.md project root ("." = this project)
     backlog_status: str = Stories.BACKLOG_STATUS
     backlog_labels: tuple[str, ...] = Stories.BACKLOG_LABELS
+    whisper_max_context: int = Transcription.MAX_CONTEXT   # whisper -mc
+    max_loop_share: float = Transcription.MAX_LOOP_SHARE
+    retry_on_loop: bool = Transcription.RETRY_ON_LOOP
+    retry_vad: bool = Transcription.RETRY_VAD
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -112,6 +117,11 @@ class Settings:
     @property
     def vad_model_path(self) -> Path | None:
         return (self.models_dir / ggml_model_file(self.vad_model)) if self.vad else None
+
+    @property
+    def retry_vad_model_path(self) -> Path | None:
+        """The VAD model the retry of a degraded transcript uses; None when the retry runs without VAD (or does not run)."""
+        return (self.models_dir / ggml_model_file(self.vad_model)) if self.retry_on_loop and self.retry_vad else None
 
     @property
     def prompts_dir(self) -> Path:
@@ -266,7 +276,22 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         backlog_project_dir=_project_path(project_dir, backlog_md.get("project_dir")),
         backlog_status=str(backlog_md.get("status", Stories.BACKLOG_STATUS)),
         backlog_labels=tuple(str(label) for label in _as_list(backlog_md.get("labels", list(Stories.BACKLOG_LABELS)))),
+        whisper_max_context=int(transcription.get("max_context", Transcription.MAX_CONTEXT)),
+        max_loop_share=_parse_share(transcription.get("max_loop_share", Transcription.MAX_LOOP_SHARE)),
+        retry_on_loop=bool(transcription.get("retry_on_loop", Transcription.RETRY_ON_LOOP)),
+        retry_vad=bool(transcription.get("retry_vad", Transcription.RETRY_VAD)),
     )
+
+
+def _parse_share(value: object) -> float:
+    """A fraction in (0, 1]: [transcription] max_loop_share."""
+    try:
+        share = float(str(value))
+    except ValueError:
+        share = -1.0
+    if not 0 < share <= 1:
+        raise ValueError(Err.INVALID_LOOP_SHARE.format(value=value))
+    return share
 
 
 def _as_list(value: object) -> list[object]:

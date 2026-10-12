@@ -197,7 +197,7 @@ Windows asks for no permission to capture Teams audio. The microphone needs "Let
 
 ## First run checklist
 
-1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present.
+1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present.
 2. **Grant the two macOS permissions** under System Settings > Privacy & Security. Both are requested on the first recording:
    - **Microphone**, for the process that records the microphone.
    - **Screen & System Audio Recording**, for `teams-tap`. Without it, the Teams track comes out silent and only your voice is recorded.
@@ -220,8 +220,8 @@ Once installed, there is nothing to do: join Teams calls as usual.
 
 | Command | What it does |
 |---|---|
-| `trec status` | Data folder, API key status, meetings with state and next step, recording in progress, open actions, stories waiting to be published |
-| `trec doctor` | Checks dependencies, models, permissions, disk and story destinations |
+| `trec status` | Data folder, API key status, meetings with state and next step, degraded transcripts, recording in progress, open actions, stories waiting to be published |
+| `trec doctor` | Checks dependencies, models, the transcript-loop guard, permissions, disk and story destinations |
 | `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`) |
 | `trec stop` | Stops the recording, mixes the tracks and writes `audio.m4a`. Works from any terminal |
 | `trec cancel` | Discards the recording in progress and deletes its files |
@@ -281,9 +281,15 @@ trec transcribe                      # every recorded meeting not yet transcribe
 trec transcribe 2026-10-06_14-00-00  # one meeting
 ```
 
-The M4A is converted to 16 kHz mono WAV and passed to `whisper-cli` with the language fixed to `pt`. The output is `transcript.json` (segments with start, end and text) and `transcript.txt`. On a MacBook Air M1, long meetings transcribe at about a quarter of their length.
+The M4A is converted to 16 kHz mono WAV and passed to `whisper-cli` with the language fixed to `pt` and no text context between windows (`-mc 0`). The output is `transcript.json` (segments with start, end and text, plus the transcript's health) and `transcript.txt`. On a MacBook Air M1, long meetings transcribe at about a quarter of their length.
 
-Voice activity detection (Silero) is off by default. In a test with short sentences it cut off speech, and the noise reduction in the mix is what improved the text. To try it, run `scripts/download-model.sh silero-v5.1.2` and set `transcription.vad = true`.
+**Hallucination loops.** On long audio whisper can get stuck repeating one line: in an 86-minute meeting held largely in English, "A CIDADE NO BRASIL" filled 70% of the transcript and the first 59 minutes had no usable text. `-mc 0` (`transcription.max_context = 0`) stops a loop from carrying over and leaves Portuguese accuracy unchanged. After whisper, a health check measures the share of segments in repetition loops (the same text 5+ times within 30 consecutive segments) and the minutes that have speech text:
+
+- Above `transcription.max_loop_share` (10%), the transcript is **degraded** and is transcribed once more with `-mc 0` and Silero VAD (about 30% slower). The result with more minutes of text is kept, so an empty retry never replaces a usable first pass.
+- If it is still degraded, it is saved anyway and the analysis runs on it. You get a "Degraded transcript" notification with the time ranges that have no text, `minutes.md` opens with a warning banner, and `trec status` marks the meeting.
+- `trec transcribe` prints a health line for each meeting, and `trec doctor` shows whether the retry is on.
+
+Voice activity detection (Silero) is off on the first pass. In a test with short sentences it cut off speech, and the noise reduction in the mix is what improved the text. The installer downloads the VAD model for the retry; to use VAD on every pass, set `transcription.vad = true`.
 
 ## Analysis with Claude
 
@@ -426,7 +432,10 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `language` | `"pt"` | Transcription language |
 | | `models_dir` | `""` | Empty means `<data_dir>/models` |
 | | `threads` | `0` | `0` means automatic |
-| | `vad`, `vad_model` | `false`, `"silero-v5.1.2"` | Voice activity detection |
+| | `vad`, `vad_model` | `false`, `"silero-v5.1.2"` | Voice activity detection on every pass |
+| | `max_context` | `0` | whisper `-mc`; `0` keeps a hallucination loop from carrying over, `-1` is whisper's default |
+| | `max_loop_share` | `0.10` | Share of segments in repetition loops above which a transcript is degraded |
+| | `retry_on_loop`, `retry_vad` | `true`, `true` | Transcribe a degraded transcript once more (`-mc 0`, with VAD) |
 | `[llm]` | `provider` | `"api"` | `api` or `claude-code` |
 | | `model` | `"claude-opus-5-5"` | Model for the `api` provider |
 | | `cli_model` | `"opus"` | Model alias for `claude-code` |
@@ -650,6 +659,9 @@ Read `data/recordings/<id>/error.txt`, fix the cause and re-run the step (`trec 
 
 **Transcription fails with "model not found" or "whisper-cli not found".**
 Run `scripts/download-model.sh` or `brew install whisper-cpp`. `trec doctor` lists what is missing.
+
+**A meeting's minutes say "Transcrição degradada", or `trec status` marks a degraded transcript.**
+whisper repeated one line for part of the meeting, and the retry with VAD did not repair it. The ranges listed have no text, so the minutes miss what was said there. Check that `trec doctor` shows the retry as on (it needs the VAD model: `scripts/download-model.sh silero-v5.1.2`). While `audio.m4a` still exists, `trec transcribe <id>` and then `trec analyze <id>` redo the transcript, the analysis and the minutes (they replace the previous files).
 
 **Analysis fails with an authentication error.**
 With `api`, check that `.env` has `ANTHROPIC_API_KEY` and permission 600. With `claude-code`, run `claude` once in a terminal and log in. The daemon needs a logged-in session too.

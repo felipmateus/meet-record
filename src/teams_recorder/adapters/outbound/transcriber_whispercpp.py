@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from teams_recorder.adapters.outbound.process_control import NO_WINDOW
-from teams_recorder.constants import Audio, Bin, Files, Proc
+from teams_recorder.constants import Audio, Bin, Files, Proc, Transcription
 from teams_recorder.domain import Segment, Transcript, TranscriptionError
 from teams_recorder.messages import Err
 
@@ -28,6 +28,7 @@ class WhisperCppTranscriber:
         threads: int = 0,
         timeout: float = Proc.WHISPER_TIMEOUT,
         vad_model_path: Path | None = None,
+        max_context: int = Transcription.MAX_CONTEXT,
     ) -> None:
         self.model_path = Path(model_path)
         self.whisper_cli = whisper_cli
@@ -35,6 +36,7 @@ class WhisperCppTranscriber:
         self.threads = threads or max(1, (os.cpu_count() or 4) // 2)
         self.timeout = timeout
         self.vad_model_path = Path(vad_model_path) if vad_model_path else None
+        self.max_context = max_context
 
     # --- commands (public for testing) ------------------------------------
     def convert_command(self, audio: Path, wav: Path) -> list[str]:
@@ -47,6 +49,7 @@ class WhisperCppTranscriber:
             "-f", str(wav),
             "-l", language,
             "-t", str(self.threads),
+            "-mc", str(self.max_context),  # text context carried between windows; 0 keeps a hallucination loop from carrying over
             "-oj",                 # writes <prefix>.json
             "-of", str(out_prefix),
             "-np",                 # no progress prints

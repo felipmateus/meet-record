@@ -189,6 +189,20 @@ class Audio:
     CRITICAL_DISK_BYTES = 1_000_000_000  # warn once during a call below this
 
 
+class Transcription:
+    """Defaults of [transcription] that guard against whisper hallucination loops (tasks/prd-fidelity-guard)."""
+
+    # whisper -mc: text tokens of the previous window kept as context. 0 = none, so a hallucinated line
+    # cannot carry over into the next window: on a real 86-minute meeting it removed a loop that covered
+    # 70% of the lines, and it left Portuguese accuracy unchanged (evaluation §14.7). -1 = whisper's default.
+    MAX_CONTEXT = 0
+    ANTI_LOOP_MAX_CONTEXT = 0       # the retry of a degraded transcript always runs without text context
+    MAX_LOOP_SHARE = 0.10           # above this share of segments in loops the transcript is degraded
+    RETRY_ON_LOOP = True            # transcribe a degraded transcript once more with the anti-loop settings
+    RETRY_VAD = True                # with Silero VAD on that retry (skips silence, where whisper hallucinates)
+    RANGES_IN_NOTIFICATION = 3      # time ranges without text listed in a notification or a CLI line
+
+
 # --- output formats of external tools (parsing) -------------------------------------
 class Parse:
     FFMPEG_DURATION = r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)"

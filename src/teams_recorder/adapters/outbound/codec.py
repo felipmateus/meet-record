@@ -26,6 +26,7 @@ from teams_recorder.domain import (
     StoryDrafts,
     Topic,
     Transcript,
+    TranscriptHealth,
     UserStory,
 )
 
@@ -62,14 +63,38 @@ def meeting_from_dict(d: dict[str, Any]) -> Meeting:
 
 
 # Transcript
+def health_to_dict(h: TranscriptHealth) -> dict[str, Any]:
+    return {
+        "loop_share": h.loop_share,
+        "covered_minutes": h.covered_minutes,
+        "total_minutes": h.total_minutes,
+        "degraded": h.degraded,
+        "uncovered": [list(span) for span in h.uncovered],
+        "retried": h.retried,
+    }
+
+
+def health_from_dict(d: dict[str, Any]) -> TranscriptHealth:
+    return TranscriptHealth(
+        loop_share=float(d["loop_share"]),
+        covered_minutes=int(d["covered_minutes"]),
+        total_minutes=int(d["total_minutes"]),
+        degraded=bool(d["degraded"]),
+        uncovered=tuple((int(start), int(end)) for start, end in d.get("uncovered", [])),
+        retried=bool(d.get("retried", False)),
+    )
+
+
 def transcript_to_dict(t: Transcript) -> dict[str, Any]:
-    return {"language": t.language, "segments": [asdict(s) for s in t.segments]}
+    return {"language": t.language, "health": health_to_dict(t.health) if t.health else None, "segments": [asdict(s) for s in t.segments]}
 
 
 def transcript_from_dict(d: dict[str, Any]) -> Transcript:
+    # transcripts written before 2026-10-11 have no health
     return Transcript(
         language=d.get("language", Audio.DEFAULT_LANGUAGE),
         segments=[Segment(float(s["start"]), float(s["end"]), s["text"]) for s in d.get("segments", [])],
+        health=health_from_dict(d["health"]) if d.get("health") else None,
     )
 
 
