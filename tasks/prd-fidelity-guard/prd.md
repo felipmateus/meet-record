@@ -74,7 +74,7 @@ Notes on FR1 and FR7 (2026-10-11, task 1.0):
 | G3 stories | On the same corpus, over three runs, silent story errors (wrong and unmarked) average at most 4% and never exceed 6% (measured with the prototype: 3.8%, 1.9–5.5%, against 8.2% today), with the number of drafted stories unchanged. | Pending (tasks 5.0, 8.0) |
 | G4 real data | The user reviews one week of real drafts and agrees with at least 80% of the ⚠️ marks. | Pending (task 8.0) |
 
-## 7. Decisions and open questions
+## 7. Decisions
 
 Decisions proposed (from the evidence):
 1. Verifier model: Sonnet at medium effort (fast, cheap; the 100% catch of injected errors and 6% false positives came from it). The analysis keeps the project's model.
@@ -85,10 +85,10 @@ Decisions proposed (from the evidence):
 Decisions taken while building task 1.0 (from measurements on the real and synthetic transcripts):
 5. A loop is 5+ copies of a text within 30 consecutive segments, not 5+ copies anywhere (see the notes on FR1).
 6. Between the first pass and the retry, the one with more minutes of text wins, both measured against the meeting's length; "not degraded" only breaks ties.
-7. A degraded transcript is still saved and analyzed (FR2); it is not held back. Whether it should still produce stories remains an open question below.
+7. A degraded transcript is still saved and analyzed (FR2); it is not held back (whether it also produces stories: decision 9).
 8. The first pass is not saved before the retry: if the daemon restarts during the retry, the meeting is retranscribed from scratch instead of being analyzed without the retry.
 
-Open questions for the user:
-- Should a degraded transcript still produce stories, or should drafting wait for the user to confirm?
-- Published tasks with ⚠️ marks: publish them marked, or hold them in the drafts until reviewed?
-- Is the extra model call per meeting (and per drafted day) acceptable on the subscription's five-hour window, given the daemon's analyses share it?
+Decided by the user on 2026-10-12 (the three questions this PRD left open):
+9. **A degraded transcript still produces stories, marked.** Its meeting's actions go through planning and drafting like any other, and the drafts document shows the degraded-transcript banner for that meeting (task 4.0). Nothing waits for a confirmation, because publishing to the board is already a manual step (`[stories] publish = false`), so the user reviews before anything leaves the drafts.
+10. **Tasks with ⚠️ marks are published marked**, into the board's Triagem column, with the marks and their reasons in the task description (tasks 4.0–5.0). They are not held back in the drafts: Triagem is already where the user reviews them, and holding them would make a second place to review.
+11. **The extra verifier call is accepted** (one Sonnet call at medium effort per meeting, and per drafted day, on the same subscription window as the daemon's analyses). Its cost and calls are measured in `llm_usage.jsonl` during the G4 week (FR8). If it crowds the window, `[verification] enabled = false` turns it off without touching the rest of the guard.
