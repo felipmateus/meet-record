@@ -14,7 +14,7 @@ import shutil
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Iterator, cast
+from typing import Any, Callable, Iterator, TypeVar, cast
 
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.fs_retry import retry_io
@@ -32,6 +32,8 @@ from teams_recorder.domain import (
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Err
+
+T = TypeVar("T")
 
 
 def _write_atomic(path: Path, text: str) -> None:
@@ -68,6 +70,17 @@ def _read_json_list(path: Path) -> list[Any]:
     return data
 
 
+def _decoded(path: Path, decode: Callable[[Any], T], read: Callable[[Path], Any] = _read_json) -> T:
+    """Reads a JSON file and converts it to the domain; a file of the wrong shape (a missing key, an unknown
+    enum value such as a verification status, a list where an object belongs) is a RepositoryError naming
+    the file, like invalid JSON."""
+    data = read(path)
+    try:
+        return decode(data)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+
+
 class FsMeetingRepository:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = Path(data_dir)
@@ -97,7 +110,7 @@ class FsMeetingRepository:
         _write_json(self._require(meeting.id) / META, codec.meeting_to_dict(meeting))
 
     def load_meta(self, meeting_id: str) -> Meeting:
-        return codec.meeting_from_dict(_read_json(self._require(meeting_id) / META))
+        return _decoded(self._require(meeting_id) / META, codec.meeting_from_dict)
 
     def list_meetings(self) -> list[Meeting]:
         meetings: list[Meeting] = []
@@ -152,21 +165,19 @@ class FsMeetingRepository:
     def load_active(self) -> ActiveRecording | None:
         if not self._active_path.exists():
             return None
-        data = _read_json(self._active_path)
+        meeting_id, process_handle, mic_handle = _decoded(self._active_path, self._pointer_from_dict)
         try:
-            meeting = self.load_meta(str(data["meeting_id"]))
+            meeting = self.load_meta(meeting_id)
         except MeetingNotFound:
             self.clear_active()  # orphan pointer: the meeting folder is gone
             return None
-        return ActiveRecording(
-            meeting=meeting,
-            process_handle=self._handle_from_dict(data["process_handle"]),
-            mic_handle=self._handle_from_dict(data["mic_handle"]),
-        )
+        return ActiveRecording(meeting=meeting, process_handle=process_handle, mic_handle=mic_handle)
 
     @staticmethod
-    def _handle_from_dict(d: dict[str, Any]) -> CaptureHandle:
-        return CaptureHandle(int(d["pid"]), Path(d["out"]))
+    def _pointer_from_dict(d: dict[str, Any]) -> tuple[str, CaptureHandle, CaptureHandle]:
+        def handle(h: dict[str, Any]) -> CaptureHandle:
+            return CaptureHandle(int(h["pid"]), Path(h["out"]))
+        return str(d["meeting_id"]), handle(d["process_handle"]), handle(d["mic_handle"])
 
     def clear_active(self) -> None:
         self._active_path.unlink(missing_ok=True)
@@ -178,17 +189,13 @@ class FsMeetingRepository:
         _write_atomic(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
 
     def load_transcript(self, meeting_id: str) -> Transcript:
-        path = self._require(meeting_id) / TRANSCRIPT_JSON
-        try:
-            return codec.transcript_from_dict(_read_json(path))
-        except (KeyError, TypeError, ValueError) as exc:  # valid JSON, wrong shape (a segment or the health block)
-            raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+        return _decoded(self._require(meeting_id) / TRANSCRIPT_JSON, codec.transcript_from_dict)
 
     def save_analysis(self, meeting_id: str, analysis: Analysis) -> None:
         _write_json(self._require(meeting_id) / ANALYSIS, codec.analysis_to_dict(analysis))
 
     def load_analysis(self, meeting_id: str) -> Analysis:
-        return codec.analysis_from_dict(_read_json(self._require(meeting_id) / ANALYSIS))
+        return _decoded(self._require(meeting_id) / ANALYSIS, codec.analysis_from_dict)
 
     def save_minutes(self, meeting_id: str, markdown: str) -> None:
         _write_atomic(self._require(meeting_id) / MINUTES, markdown)
@@ -212,7 +219,7 @@ class FsMeetingRepository:
 
     def load_plan(self, day: date) -> DailyPlan | None:
         p = self._plan_json(day)
-        return codec.plan_from_dict(_read_json(p)) if p.exists() else None
+        return _decoded(p, codec.plan_from_dict) if p.exists() else None
 
     def _dated(self, pattern: str) -> list[tuple[date, Path]]:
         """Files in plans/ matching the pattern, with the ISO day their name starts with, oldest first."""
@@ -226,13 +233,13 @@ class FsMeetingRepository:
 
     def latest_plan_before(self, day: date) -> DailyPlan | None:
         earlier = [p for d, p in self._dated(Files.PLAN_GLOB) if d < day]
-        return codec.plan_from_dict(_read_json(earlier[-1])) if earlier else None
+        return _decoded(earlier[-1], codec.plan_from_dict) if earlier else None
 
     def load_open_actions(self) -> list[Action]:
         p = self.plans / Files.OPEN_ACTIONS
         if not p.exists():
             return []
-        return [codec.action_from_dict(x) for x in _read_json_list(p)]
+        return _decoded(p, lambda items: [codec.action_from_dict(x) for x in items], _read_json_list)
 
     def save_open_actions(self, actions: list[Action]) -> None:
         _write_json(self.plans / Files.OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])
@@ -247,10 +254,7 @@ class FsMeetingRepository:
 
     @staticmethod
     def _load_drafts(path: Path) -> StoryDrafts:
-        try:
-            return codec.story_drafts_from_dict(_read_json(path))
-        except (KeyError, TypeError, ValueError) as exc:  # valid JSON, wrong shape
-            raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+        return _decoded(path, codec.story_drafts_from_dict)
 
     def load_story_drafts(self, day: date) -> StoryDrafts | None:
         p = self._stories_json(day)

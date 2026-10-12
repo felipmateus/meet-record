@@ -121,6 +121,8 @@ class Err:
     # repository
     FILE_MISSING = "file not found: {path}"
     BAD_JSON = "invalid JSON in {path}: {error}"
+    BAD_REASON = "verification reason must be text, not {value!r}"               # detail inside BAD_JSON
+    BAD_PARTICIPANT_CHECKS = "participant_checks must be an object, not {value!r}"  # detail inside BAD_JSON
     MEETING_EXISTS = "meeting already exists: {meeting_id}"
     MEETING_LOCKED = "meeting {meeting_id} is already being processed"
     STEP_ERROR = "{step}: {error}"                      # content of error.txt
