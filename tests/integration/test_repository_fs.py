@@ -6,6 +6,7 @@ import pytest
 
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.constants import Files
 from teams_recorder.domain import (
     Action,
     ActionKind,
@@ -265,3 +266,98 @@ def test_a_transcript_of_the_wrong_shape_is_a_repository_error(fs: FsMeetingRepo
 
     with pytest.raises(RepositoryError, match="covered_minutes"):
         fs.load_transcript(m.id)
+
+
+def _verified_analysis(meeting_id: str):
+    from teams_recorder.domain import Analysis, Deadline, Decision, Verification, VerificationStatus
+    yes = Verification(VerificationStatus.CONFIRMED, "dito em 00:01:10")
+    no = Verification(VerificationStatus.UNCONFIRMED, "a transcrição não diz quem fará")
+    return Analysis(
+        meeting_id=meeting_id, summary="s",
+        decisions=[Decision("Usar o Mapbox", "00:01:10", yes), Decision("Adiar o piloto")],
+        my_actions=[Action("Enviar o cronograma", "me", meeting_id, verification=no)],
+        others_actions=[Action("Revisar o mapa", "Ana", meeting_id)],
+        deadlines=[Deadline("Cronograma", date(2026, 10, 15), "me", no), Deadline("Mapa", None, "Ana")],
+        participants=["Felipe", "Ana", "Marcos"],
+        participant_checks={"Ana": yes, "Marcos": Verification(VerificationStatus.UNCONFIRMED, "só mencionado")},
+    )
+
+
+def test_verification_roundtrips_through_analysis_plan_and_open_actions(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
+    analysis = _verified_analysis(m.id)
+
+    fs.save_analysis(m.id, analysis)
+    fs.save_open_actions(analysis.all_actions)
+    fs.save_plan(DailyPlan(day=date(2026, 10, 12), markdown="# p", new_actions=analysis.all_actions))
+
+    assert fs.load_analysis(m.id) == analysis
+    assert fs.load_open_actions() == analysis.all_actions
+    assert fs.load_plan(date(2026, 10, 12)).new_actions == analysis.all_actions
+
+
+def test_unverified_claims_are_written_exactly_as_before():
+    # files, and the JSON the planner and the story writer receive, only change once a claim is verified
+    old = json.loads((FIXTURES / "sample_analysis_v2.json").read_text())
+    analysis = codec.analysis_from_dict(old)
+    assert all(a.verification is None for a in analysis.all_actions) and analysis.participant_checks == {}
+    written = codec.analysis_to_dict(analysis)
+    assert "participant_checks" not in written
+    assert not any("verification" in x for key in ("decisions", "my_actions", "others_actions", "deadlines") for x in written[key])
+    assert codec.analysis_from_dict(written) == analysis
+
+
+@pytest.mark.parametrize("damage", [
+    lambda d: d["my_actions"][0]["verification"].update(status="maybe"),       # unknown status
+    lambda d: d["deadlines"][0]["verification"].pop("status"),                # missing key
+    lambda d: d["participant_checks"].update(Ana="confirmed"),                # a check that is not an object
+    lambda d: d.update(participant_checks=["Ana"]),                           # the whole field as a list
+    lambda d: d.update(participant_checks="Ana"),                             # ...or as text
+    lambda d: d["decisions"][0]["verification"].update(reason=None),          # a reason that is not text
+    lambda d: d["my_actions"][0]["verification"].update(reason=5),
+], ids=["status", "missing-status", "check-type", "checks-list", "checks-text", "reason-null", "reason-number"])
+def test_a_damaged_verification_is_a_repository_error(fs: FsMeetingRepository, damage):
+    m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
+    fs.save_analysis(m.id, _verified_analysis(m.id))
+    path = fs.path(m.id, ANALYSIS)
+    data = json.loads(path.read_text()); damage(data); path.write_text(json.dumps(data))
+
+    with pytest.raises(RepositoryError, match="invalid JSON in"):
+        fs.load_analysis(m.id)
+
+
+def test_damaged_open_actions_and_plans_are_repository_errors(fs: FsMeetingRepository):
+    fs.save_open_actions([Action("Enviar", "me", "m1")])
+    (fs.plans / Files.OPEN_ACTIONS).write_text('[{"description": "sem id"}]')
+    with pytest.raises(RepositoryError, match=Files.OPEN_ACTIONS):
+        fs.load_open_actions()
+    fs.save_plan(DailyPlan(day=date(2026, 10, 12), markdown="# p"))
+    (fs.plans / "2026-10-12.json").write_text('{"markdown": "sem dia"}')
+    with pytest.raises(RepositoryError, match="2026-10-12.json"):
+        fs.load_plan(date(2026, 10, 12))
+    with pytest.raises(RepositoryError, match="2026-10-12.json"):
+        fs.latest_plan_before(date(2026, 10, 13))
+
+
+@pytest.mark.parametrize("empty", [None, {}])
+def test_a_null_or_empty_verification_means_not_verified(empty):
+    analysis = codec.analysis_from_dict({"meeting_id": "m", "summary": "s", "participant_checks": empty,
+                                         "decisions": [{"text": "Usar o Mapbox", "at": None, "verification": empty}]})
+    assert analysis.decisions[0].verification is None and analysis.participant_checks == {}
+
+
+def test_a_damaged_meta_is_a_repository_error(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
+    fs.path(m.id, META).write_text('{"id": "%s"}' % m.id)   # no started_at
+    with pytest.raises(RepositoryError, match="meta.json"):
+        fs.list_meetings()
+
+
+def test_a_damaged_recording_pointer_is_a_repository_error_and_an_orphan_one_is_cleared(fs: FsMeetingRepository):
+    pointer = fs.data_dir / Files.ACTIVE_RECORDING
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text('{"meeting_id": "2026-10-12_09-00-00"}')   # no handles
+    with pytest.raises(RepositoryError, match=Files.ACTIVE_RECORDING):
+        fs.load_active()
+    pointer.write_text('{"meeting_id": "gone", "process_handle": {"pid": 1, "out": "a"}, "mic_handle": {"pid": 2, "out": "b"}}')
+    assert fs.load_active() is None and not pointer.exists()   # the meeting folder is gone: unchanged behavior

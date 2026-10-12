@@ -506,3 +506,15 @@ def test_a_damaged_transcript_is_reported_not_a_traceback(tmp_path: Path, monkey
     assert status.exit_code == 0 and Cli.DEGRADED_TRANSCRIPTS.format(count=0) in status.output
     assert minutes.exit_code == 1 and isinstance(minutes.exception, SystemExit)   # a clean error, not a KeyError traceback
     assert "invalid JSON in" in minutes.output and "covered_minutes" in minutes.output
+
+
+def test_status_reports_a_damaged_file_instead_of_a_traceback(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    plans = project / "data" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "open_actions.json").write_text('[{"description": "sem id"}]')
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
+    assert "invalid JSON in" in result.output and "open_actions.json" in result.output

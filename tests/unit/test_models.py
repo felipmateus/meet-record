@@ -118,3 +118,15 @@ def test_action_kinds_route_and_shape_story_cards():
     assert (card.title, card.narrative, card.kind) == ("Estimar horas da nova tela", "", ActionKind.TECHNICAL)
     assert card.is_task_card and not UserStory("s", "n", kind=ActionKind.FEATURE).is_task_card
     assert card.source_action_ids == ["t1"] and card.source_meetings == ["m1"] and card.priority == Priority.HIGH and card.due == date(2026, 10, 9)
+
+
+def test_claims_are_not_verified_until_a_check_says_so():
+    from teams_recorder.domain import Analysis, Deadline, Decision, Verification, VerificationStatus
+    assert Decision("Usar o Mapbox").verification is None
+    assert Deadline("Relatório", None, "Ana").verification is None
+    assert Action("Enviar o relatório", "me", "m1").verification is None
+    assert Analysis(meeting_id="m1", summary="s").participant_checks == {}
+    unconfirmed = Verification(VerificationStatus.UNCONFIRMED, "a transcrição não diz quem fará")
+    assert Verification(VerificationStatus.CONFIRMED).reason == ""
+    assert Decision("Usar o Mapbox", "00:01:02", unconfirmed) != Decision("Usar o Mapbox", "00:01:02")   # part of the claim's value
+    assert VerificationStatus("unconfirmed") is VerificationStatus.UNCONFIRMED
