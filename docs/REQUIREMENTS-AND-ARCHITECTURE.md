@@ -397,3 +397,14 @@ teams-recorder/
   - Non-speech markers hid gaps.
   - The repository raised `KeyError` for a damaged `health` block instead of `RepositoryError`, and `trec minutes` showed a traceback.
 - Left to the user's decision (not done): VAD use decided in four places, the transcriber built twice in the container, duplicated range texts, "-mc 0" written into the doctor texts, `Path.exists()` at daemon start without `retry_io`, unused `repeats`/`window` parameters, and warning when minutes have no text but no loop (FR1 sets the threshold on loops only). The banner in the story drafts document (FR2 also names it) needs the drafts to know their source meetings' transcript health and is planned with tasks 4.0–5.0.
+
+### Claim verification in the domain and persistence (2026-10-12)
+
+- Task 2.0 of `tasks/prd-fidelity-guard/`, the first step toward the claim verifier (3.0). `Verification(status: confirmed | unconfirmed, reason)` is optional on `Decision`, `Action` and `Deadline`, and `Analysis.participant_checks` holds one per participant name. A claim without one was not verified, which is how every analysis made so far loads.
+- Nothing sets them yet, and the files do not change until something does: the codec writes `verification` and `participant_checks` only when present, so `analysis.json`, plans, `open_actions.json` and the JSON the planner and the story writer receive stay byte-identical for unverified claims. How the prompts and the minutes show the marks is task 4.0.
+- The repository now turns a file of the wrong shape into a `RepositoryError` naming the file, through one helper, for every JSON it decodes:
+  - files: `meta.json`, the active-recording pointer, transcripts, analyses, plans, open actions and story drafts;
+  - shapes: a missing key, an unknown enum value such as a verification status, a list where an object belongs, a reason that is not text.
+
+  Before, only drafts and (since task 1.0) transcripts did; the others raised `KeyError` or `AttributeError`. `trec status` prints that error instead of a traceback.
+- Code review (`code-review` skill, run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-12-19-40.md`) found that a `participant_checks` stored as a list escaped as `AttributeError`, that a non-text reason was accepted, and that `meta.json` and the pointer were still outside the helper; all fixed before the commit, with tests. Noted for task 3.0: verdicts reach the planner and story-writer prompts as soon as 3.0 sets them, before 4.0 explains them (ship 3.0 and 4.0 together or strip them until then), and copies of actions already in `open_actions.json` are not refreshed with later verdicts.
