@@ -12,6 +12,7 @@ from teams_recorder.domain import (
     Action,
     Analysis,
     AnalysisError,
+    ClaimRef,
     DailyPlan,
     Decision,
     Meeting,
@@ -25,6 +26,7 @@ from teams_recorder.domain import (
     TranscriptHealth,
     TranscriptionError,
     UserStory,
+    Verification,
 )
 from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
@@ -313,6 +315,21 @@ class InMemoryMeetingRepository:
     def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
         start = before - timedelta(days=days)
         return [self.story_drafts[d][0] for d in sorted(self.story_drafts) if start <= d < before]
+
+
+class FakeClaimVerifier:
+    """Returns the given verdicts (or raises `fail`), recording each call."""
+
+    def __init__(self, verdicts: dict[ClaimRef, Verification] | None = None, fail: Exception | None = None) -> None:
+        self.verdicts = verdicts or {}
+        self.fail = fail
+        self.calls: list[tuple[Meeting, Analysis, Transcript]] = []
+
+    def verify(self, meeting: Meeting, analysis: Analysis, transcript: Transcript) -> dict[ClaimRef, Verification]:
+        self.calls.append((meeting, analysis, transcript))
+        if self.fail is not None:
+            raise self.fail
+        return dict(self.verdicts)
 
 
 class FakeMinutesRenderer:

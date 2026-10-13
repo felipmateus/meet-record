@@ -1,0 +1,146 @@
+"""ClaudeClaimVerifier with a fake transport: the claims and transcript it sends, and how verdicts become statuses."""
+from dataclasses import dataclass, field
+from datetime import date, datetime
+
+import pytest
+
+from teams_recorder.adapters.outbound.llm_schema import load_prompt, strict_schema
+from teams_recorder.adapters.outbound.verifier_claude import (
+    ClaudeClaimVerifier,
+    VerdictOut,
+    VerifyOut,
+    claims_of,
+    to_verification,
+    transcript_for,
+)
+from teams_recorder.config import load_settings
+from teams_recorder.constants import Files
+from teams_recorder.domain import (
+    Action,
+    AnalysisError,
+    Analysis,
+    ClaimKind,
+    ClaimRef,
+    Deadline,
+    Decision,
+    Meeting,
+    Segment,
+    Transcript,
+    Verification,
+    VerificationStatus,
+)
+from teams_recorder.messages import Minutes, Prompt
+
+MEETING = Meeting.start(datetime(2026, 10, 12, 9, 0, 0))   # a Monday
+ANALYSIS = Analysis(
+    meeting_id=MEETING.id, summary="s",
+    decisions=[Decision("Usar o Mapbox", "00:00:05")],
+    my_actions=[Action("Enviar o cronograma", "usuário", MEETING.id, due=date(2026, 10, 15), at="00:00:10", id="a1")],
+    others_actions=[Action("Revisar o mapa", "indefinido", MEETING.id, id="a2")],
+    deadlines=[Deadline("Piloto", date(2026, 10, 30), "Ana")],
+    participants=["Ana"],
+)
+TRANSCRIPT = Transcript([Segment(0, 4, "Bom dia, Ana."), Segment(5, 9, "Vamos usar o Mapbox."), Segment(10, 14, "Eu mando o cronograma na quarta.")])
+
+
+def verdict(id_: str, support: str = "supported", owner: bool | None = None, date_said: bool | None = None,
+            tentative: bool = False, sensitive: bool = False, reason: str = "dito na reunião") -> VerdictOut:
+    return VerdictOut(id=id_, support=support, owner_evident=owner, date_said=date_said, tentative=tentative, sensitive=sensitive, reason=reason)
+
+
+@dataclass
+class FakeTransport:
+    out: VerifyOut
+    name: str = "fake"
+    calls: list[dict] = field(default_factory=list)
+
+    def complete(self, system, user, schema, *, tag, extra=None):
+        self.calls.append({"system": system, "user": user, "schema": schema, "tag": tag, "extra": extra})
+        return self.out
+
+
+def test_claims_get_short_ids_and_readable_owners():
+    claims = claims_of(ANALYSIS, user_name="Felipe")
+    assert [(c.id, c.ref) for c in claims] == [
+        ("c1", ClaimRef(ClaimKind.DECISION, "0")), ("c2", ClaimRef(ClaimKind.ACTION, "a1")), ("c3", ClaimRef(ClaimKind.ACTION, "a2")),
+        ("c4", ClaimRef(ClaimKind.DEADLINE, "0")), ("c5", ClaimRef(ClaimKind.PARTICIPANT, "Ana")),
+    ]
+    assert claims[1].owner == "Felipe (the user)" and claims[1].due == "2026-10-15" and claims[1].at == "00:00:10"
+    assert claims[2].owner is None   # "indefinido": no owner to check
+    assert claims_of(ANALYSIS)[1].owner == "the user"
+
+
+def test_the_message_has_the_meeting_date_the_whole_transcript_and_every_claim():
+    transport = FakeTransport(VerifyOut(verdicts=[]))
+    ClaudeClaimVerifier(transport, system_prompt="SYS", user_name="Felipe").verify(MEETING, ANALYSIS, TRANSCRIPT)
+
+    call = transport.calls[0]
+    assert call["system"] == "SYS" and call["schema"] is VerifyOut
+    assert call["tag"] == f"verify:{MEETING.id}" and call["extra"] == {"meeting": MEETING.id}
+    user = call["user"]
+    assert user.startswith("User (recording owner): Felipe\nMeeting date: 2026-10-12 (Monday)")
+    assert Prompt.VERIFY_TRANSCRIPT in user and "[00:00:10] Eu mando o cronograma na quarta." in user
+    assert "[c2] (action) Enviar o cronograma; owner: Felipe (the user); date: 2026-10-15; said at: 00:00:10" in user
+    assert "[c5] (participant) Ana" in user
+
+
+def test_a_long_transcript_is_cut_to_its_start_and_the_lines_around_each_claim():
+    segments = [Segment(i * 10.0, i * 10.0 + 8, f"fala {i} da reunião longa") for i in range(600)]   # 100 minutes
+    claims = claims_of(Analysis(meeting_id="m", summary="s", decisions=[Decision("x", "01:00:00")]))
+
+    text, excerpt = transcript_for(Transcript(segments), claims, max_chars=300, window=30)
+
+    lines = text.splitlines()
+    assert excerpt and lines[0] == "[00:00:00] fala 0 da reunião longa"
+    assert Prompt.EXCERPT_GAP in lines and lines.count(Prompt.EXCERPT_GAP) == 2   # after the start, after the window
+    window = [line for line in lines if line.startswith("[00:59") or line.startswith("[01:00")]
+    assert window == ["[00:59:30] fala 357 da reunião longa", "[00:59:40] fala 358 da reunião longa", "[00:59:50] fala 359 da reunião longa",
+                      "[01:00:00] fala 360 da reunião longa", "[01:00:10] fala 361 da reunião longa", "[01:00:20] fala 362 da reunião longa",
+                      "[01:00:30] fala 363 da reunião longa"]
+    assert transcript_for(TRANSCRIPT, claims)[1] is False   # a short one goes whole
+
+
+@pytest.mark.parametrize("found, expected", [
+    (verdict("c"), VerificationStatus.CONFIRMED),
+    (verdict("c", support="partial"), VerificationStatus.UNCONFIRMED),
+    (verdict("c", support="contradicted"), VerificationStatus.UNCONFIRMED),
+    (verdict("c", owner=False), VerificationStatus.UNCONFIRMED),        # the owner is not evident
+    (verdict("c", date_said=False), VerificationStatus.UNCONFIRMED),    # the date is not said
+    (verdict("c", sensitive=True), VerificationStatus.UNCONFIRMED),
+    (verdict("c", tentative=True), VerificationStatus.CONFIRMED),       # tentative only matters for decisions
+])
+def test_an_action_is_confirmed_only_when_every_check_passes(found, expected):
+    action = claims_of(ANALYSIS, "Felipe")[1]   # has an owner and a date
+    assert to_verification(action, found).status is expected
+
+
+def test_owner_and_date_checks_only_apply_when_the_claim_has_them_and_tentative_only_to_decisions():
+    decision, unowned = claims_of(ANALYSIS)[0], claims_of(ANALYSIS)[2]
+    assert to_verification(decision, verdict("c1", tentative=True)).status is VerificationStatus.UNCONFIRMED
+    assert to_verification(unowned, verdict("c3", owner=False, date_said=False)).status is VerificationStatus.CONFIRMED
+
+
+def test_every_claim_gets_a_status_and_unknown_verdicts_are_ignored():
+    out = VerifyOut(verdicts=[verdict("c1", reason=" o Mapbox foi escolhido "), verdict(" c2 ", support="unsupported", reason="ninguém disse"),
+                              verdict("c99")])
+    result = ClaudeClaimVerifier(FakeTransport(out), system_prompt="SYS").verify(MEETING, ANALYSIS, TRANSCRIPT)
+
+    assert result[ClaimRef(ClaimKind.DECISION, "0")] == Verification(VerificationStatus.CONFIRMED, "o Mapbox foi escolhido")
+    assert result[ClaimRef(ClaimKind.ACTION, "a1")] == Verification(VerificationStatus.UNCONFIRMED, "ninguém disse")
+    assert result[ClaimRef(ClaimKind.PARTICIPANT, "Ana")] == Verification(VerificationStatus.UNCONFIRMED, Minutes.REASON_NO_VERDICT)
+    assert len(result) == 5
+
+
+def test_an_analysis_without_claims_makes_no_call():
+    transport = FakeTransport(VerifyOut(verdicts=[]))
+    assert ClaudeClaimVerifier(transport, system_prompt="SYS").verify(MEETING, Analysis(meeting_id="m", summary="s"), TRANSCRIPT) == {}
+    assert transport.calls == []
+
+
+def test_the_prompt_ships_with_the_project_and_the_schema_is_strict():
+    settings = load_settings()
+    assert "Brazilian Portuguese" in load_prompt(settings.prompts_dir / Files.VERIFY_PROMPT)
+    schema = strict_schema(VerifyOut)["$defs"]["VerdictOut"]
+    assert schema["additionalProperties"] is False and len(schema["required"]) == 7
+    with pytest.raises(AnalysisError):
+        ClaudeClaimVerifier(FakeTransport(VerifyOut(verdicts=[]))).verify(MEETING, ANALYSIS, TRANSCRIPT)   # no prompt configured
