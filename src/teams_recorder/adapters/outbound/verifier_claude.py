@@ -8,13 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 from teams_recorder.adapters.outbound.llm_schema import load_prompt
 from teams_recorder.adapters.outbound.llm_transport import StructuredTransport
-from teams_recorder.constants import Llm, Verify
+from teams_recorder.constants import Llm, VerdictSupport, Verify
 from teams_recorder.domain import (
     Analysis,
     AnalysisError,
@@ -24,13 +22,15 @@ from teams_recorder.domain import (
     Transcript,
     Verification,
     VerificationStatus,
+    claims,
+    clock_time,
 )
 from teams_recorder.messages import Err, Minutes, Prompt
 
 
 class VerdictOut(BaseModel):
     id: str = Field(description=Prompt.FIELD_VERDICT_ID)
-    support: Literal["supported", "partial", "unsupported", "contradicted"] = Field(description=Prompt.FIELD_SUPPORT)
+    support: VerdictSupport = Field(description=Prompt.FIELD_SUPPORT)
     owner_evident: bool | None = Field(description=Prompt.FIELD_OWNER_EVIDENT)
     date_said: bool | None = Field(description=Prompt.FIELD_DATE_SAID)
     tentative: bool = Field(description=Prompt.FIELD_TENTATIVE)
@@ -44,7 +44,7 @@ class VerifyOut(BaseModel):
 
 @dataclass(frozen=True)
 class Claim:
-    """A claim as the model sees it: an id local to the call, and the fields a reader would trust."""
+    """A claim as the model sees it: an id local to the call, the owner as a name, the date in ISO format."""
 
     id: str
     ref: ClaimRef
@@ -55,21 +55,15 @@ class Claim:
 
 
 def claims_of(analysis: Analysis, user_name: str = "") -> list[Claim]:
-    """The analysis's decisions, actions, deadlines and participants as claims with ids c1, c2, ..."""
-    def owner(raw: str) -> str | None:
+    """The analysis's claims (domain `claims`) with ids c1, c2, ...; the recording owner is named as the prototype
+    did, so the model can match "Felipe, você manda..." to the action."""
+    def owner(raw: str | None) -> str | None:
         if raw == Llm.OWNER_SELF:
-            return Prompt.OWNER_SELF_NAMED.format(name=user_name) if user_name else Prompt.OWNER_SELF
+            return user_name or Prompt.OWNER_SELF
         return None if not raw or raw == Llm.OWNER_UNKNOWN else raw
 
-    found: list[tuple[ClaimRef, str, str | None, str | None, str | None]] = [
-        *((ClaimRef(ClaimKind.DECISION, str(i)), d.text, None, None, d.at) for i, d in enumerate(analysis.decisions)),
-        *((ClaimRef(ClaimKind.ACTION, a.id), a.description, owner(a.owner), a.due.isoformat() if a.due else None, a.at)
-          for a in analysis.all_actions),
-        *((ClaimRef(ClaimKind.DEADLINE, str(i)), d.what, owner(d.who), d.when.isoformat() if d.when else None, None)
-          for i, d in enumerate(analysis.deadlines)),
-        *((ClaimRef(ClaimKind.PARTICIPANT, name), name, None, None, None) for name in analysis.participants),
-    ]
-    return [Claim(f"c{n}", ref, text, who, due, at) for n, (ref, text, who, due, at) in enumerate(found, 1)]
+    return [Claim(f"c{n}", c.ref, c.text, owner(c.owner), c.due.isoformat() if c.due else None, c.at)
+            for n, c in enumerate(claims(analysis), 1)]
 
 
 def _seconds(at: str | None) -> int | None:
@@ -88,7 +82,7 @@ def transcript_for(transcript: Transcript, claims: list[Claim], max_chars: int =
     timestamp: deadlines, participants) plus the lines within `window` seconds of each claim's timestamp,
     in order, with a gap marker where lines were left out.
     """
-    lines = [(s.start, f"[{_clock(s.start)}] {s.text.strip()}") for s in transcript.segments]
+    lines = [(s.start, f"[{clock_time(s.start)}] {s.text.strip()}") for s in transcript.segments]
     full = "\n".join(text for _, text in lines)
     if len(full) <= max_chars:
         return full, False
@@ -105,11 +99,6 @@ def transcript_for(transcript: Transcript, claims: list[Claim], max_chars: int =
         elif out and out[-1] != Prompt.EXCERPT_GAP:
             out.append(Prompt.EXCERPT_GAP)
     return "\n".join(out), True
-
-
-def _clock(seconds: float) -> str:
-    total = int(seconds)
-    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
 
 
 def describe(claim: Claim) -> str:
@@ -129,7 +118,7 @@ def to_verification(claim: Claim, verdict: VerdictOut | None) -> Verification:
     if verdict is None:
         return Verification(VerificationStatus.UNCONFIRMED, Minutes.REASON_NO_VERDICT)
     doubtful = (
-        verdict.support != "supported"
+        verdict.support is not VerdictSupport.SUPPORTED
         or (claim.owner is not None and verdict.owner_evident is False)
         or (claim.due is not None and verdict.date_said is False)
         or (claim.ref.kind is ClaimKind.DECISION and verdict.tentative)
