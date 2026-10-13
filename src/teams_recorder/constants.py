@@ -84,6 +84,7 @@ class Files:
     ANALYZE_PROMPT = "analyze_system.md"
     PLAN_PROMPT = "plan_system.md"
     STORIES_PROMPT = "stories_system.md"
+    VERIFY_PROMPT = "verify_system.md"
     STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
@@ -100,7 +101,6 @@ class Files:
     NATIVE_BINARY = Path("native") / "teams-tap" / ".build" / "release" / "teams-tap"
     BUILD_NATIVE_SCRIPT = "scripts/build-native.sh"
     DOWNLOAD_MODEL_SCRIPT = "scripts/download-model.sh"
-    VERIFY_PROMPT = "verify_system.md"
     NATIVE_BINARY_WINDOWS = Path("native") / "teams-tap-win" / "bin" / "Release" / "net8.0" / "win-x64" / "publish" / "teams-tap.exe"
     BUILD_NATIVE_SCRIPT_WINDOWS = r"scripts\build-native-windows.ps1"
     DOWNLOAD_MODEL_SCRIPT_WINDOWS = r"scripts\download-model.ps1"
@@ -188,6 +188,15 @@ class Audio:
     WAV_CODECS = {16: "pcm_s16le", 32: "pcm_f32le"}   # ffmpeg microphone backend
     LOW_DISK_HOURS = 2.0            # warn at recording start when less than this much recording fits
     CRITICAL_DISK_BYTES = 1_000_000_000  # warn once during a call below this
+
+
+class VerdictSupport(StrEnum):
+    """How far the transcript supports a claim (the claim verifier's answer; only `supported` confirms it)."""
+
+    SUPPORTED = "supported"
+    PARTIAL = "partial"
+    UNSUPPORTED = "unsupported"
+    CONTRADICTED = "contradicted"
 
 
 class Verify:
