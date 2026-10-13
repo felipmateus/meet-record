@@ -9,6 +9,7 @@ from teams_recorder.adapters.inbound.cli import app
 from teams_recorder.adapters.outbound.launchd import AgentStatus
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.config import ENV_PROJECT_DIR
+from teams_recorder.constants import Files
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
 from teams_recorder.domain import Action, DailyPlan, Meeting, Publication, StoryDrafts, UserStory
@@ -512,9 +513,24 @@ def test_status_reports_a_damaged_file_instead_of_a_traceback(tmp_path: Path, mo
     project = _project(tmp_path, monkeypatch)
     plans = project / "data" / "plans"
     plans.mkdir(parents=True)
-    (plans / "open_actions.json").write_text('[{"description": "sem id"}]')
+    (plans / Files.OPEN_ACTIONS).write_text('[{"description": "sem id"}]')
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
-    assert "invalid JSON in" in result.output and "open_actions.json" in result.output
+    assert "Open actions: unreadable (invalid JSON in" in result.output and Files.OPEN_ACTIONS in result.output
+    assert "Meetings: 0" in result.output   # the rest of the status is still shown
+
+
+def test_status_shows_a_damaged_meeting_on_its_own_line(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    broken, fine = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)), Meeting.start(datetime(2026, 10, 12, 10, 0, 0), title="Daily")
+    repo.create(broken); repo.create(fine)
+    repo.path(broken.id, "meta.json").write_text('{"id": "%s"}' % broken.id)   # no started_at
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
+    assert f"  {broken.id}  [unreadable: invalid JSON in" in result.output
+    assert f"{fine.id} Daily  [recording]" in result.output and "Open actions: 0" in result.output

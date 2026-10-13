@@ -315,7 +315,15 @@ def test_unverified_claims_are_written_exactly_as_before():
     lambda d: d.update(participant_checks="Ana"),                             # ...or as text
     lambda d: d["decisions"][0]["verification"].update(reason=None),          # a reason that is not text
     lambda d: d["my_actions"][0]["verification"].update(reason=5),
-], ids=["status", "missing-status", "check-type", "checks-list", "checks-text", "reason-null", "reason-number"])
+    lambda d: d.update(participant_checks=[]),                                # falsy values that are not objects
+    lambda d: d.update(participant_checks=False),
+    lambda d: d["decisions"][0].update(verification=[]),
+    lambda d: d["decisions"][0].update(verification=False),
+    lambda d: d["decisions"][0].update(verification=""),
+    lambda d: d["decisions"][0].update(verification="confirmed"),
+], ids=["status", "missing-status", "check-type", "checks-list", "checks-text", "reason-null", "reason-number",
+        "checks-empty-list", "checks-false", "verification-empty-list", "verification-false", "verification-empty-text",
+        "verification-text"])
 def test_a_damaged_verification_is_a_repository_error(fs: FsMeetingRepository, damage):
     m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
     fs.save_analysis(m.id, _verified_analysis(m.id))
@@ -353,11 +361,28 @@ def test_a_damaged_meta_is_a_repository_error(fs: FsMeetingRepository):
         fs.list_meetings()
 
 
-def test_a_damaged_recording_pointer_is_a_repository_error_and_an_orphan_one_is_cleared(fs: FsMeetingRepository):
+@pytest.mark.parametrize("handles", [
+    '"process_handle": {"pid": 1, "out": "a"}, "mic_handle": {"pid": 2, "out": "b"}',
+    '"process_handle": null, "mic_handle": {}',   # damaged handles: still an orphan, still cleared
+    '"process_handle": {"pid": 1, "out": "a"}',     # a handle missing
+], ids=["intact", "damaged-handles", "missing-handle"])
+def test_an_orphan_recording_pointer_is_cleared_whatever_its_handles_hold(fs: FsMeetingRepository, handles: str):
+    # the daemon's start-up recovery reads the pointer outside any handler: an orphan must never raise
     pointer = fs.data_dir / Files.ACTIVE_RECORDING
     pointer.parent.mkdir(parents=True, exist_ok=True)
-    pointer.write_text('{"meeting_id": "2026-10-12_09-00-00"}')   # no handles
+    pointer.write_text('{"meeting_id": "gone", %s}' % handles)
+    assert fs.load_active() is None and not pointer.exists()
+
+
+@pytest.mark.parametrize("content", [
+    '{"meeting_id": "%s"}',                                                        # no handles
+    '{"meeting_id": "%s", "process_handle": {"pid": "x", "out": "a"}, "mic_handle": {"pid": 2, "out": "b"}}',
+    '{"process_handle": {"pid": 1, "out": "a"}}',                                 # no meeting id
+], ids=["no-handles", "bad-pid", "no-meeting-id"])
+def test_a_damaged_pointer_to_an_existing_meeting_is_a_repository_error(fs: FsMeetingRepository, content: str):
+    m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
+    pointer = fs.data_dir / Files.ACTIVE_RECORDING
+    pointer.write_text(content % m.id if "%s" in content else content)
     with pytest.raises(RepositoryError, match=Files.ACTIVE_RECORDING):
         fs.load_active()
-    pointer.write_text('{"meeting_id": "gone", "process_handle": {"pid": 1, "out": "a"}, "mic_handle": {"pid": 2, "out": "b"}}')
-    assert fs.load_active() is None and not pointer.exists()   # the meeting folder is gone: unchanged behavior
+    assert pointer.exists()   # a live recording's pointer is never deleted on a read error
