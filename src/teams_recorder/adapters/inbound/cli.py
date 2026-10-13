@@ -70,19 +70,21 @@ def version() -> None:
 def status() -> None:
     settings = _settings()
     c = build_container(settings, headless=True)
-    try:
-        _status(settings, c)
-    except TeamsRecorderError as exc:  # a damaged meta.json, open_actions.json or drafts file: say which, no traceback
-        _fail(str(exc))
-
-
-def _status(settings: Settings, c: Container) -> None:
-    meetings = c.repo.list_meetings()
+    # A damaged data file is reported on its own line (the repository's error names the file) and the rest
+    # of the status is still shown; the command then exits 1.
+    unreadable = False
+    meeting_ids = c.repo.meeting_ids()
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
-    typer.echo(Cli.MEETINGS.format(count=len(meetings)))
+    typer.echo(Cli.MEETINGS.format(count=len(meeting_ids)))
     degraded = 0
-    for m in meetings:
+    for meeting_id in meeting_ids:
+        try:
+            m = c.repo.load_meta(meeting_id)
+        except TeamsRecorderError as exc:
+            unreadable = True
+            typer.echo(Cli.MEETING_UNREADABLE.format(meeting_id=meeting_id, error=exc))
+            continue
         files = c.repo.files(m.id)
         st = derive_status(files)
         nxt = next_step(st)
@@ -99,13 +101,26 @@ def _status(settings: Settings, c: Container) -> None:
             health=marker,
         ))
     typer.echo(Cli.DEGRADED_TRANSCRIPTS.format(count=degraded))
-    active = c.repo.load_active()
-    if active:
-        typer.echo(Cli.RECORDING_IN_PROGRESS.format(meeting_id=active.meeting.id, tap_pid=active.process_handle.pid, mic_pid=active.mic_handle.pid))
-    open_actions = c.repo.load_open_actions()
-    typer.echo(Cli.OPEN_ACTIONS.format(count=len(open_actions)))
+    try:
+        active = c.repo.load_active()
+        if active:
+            typer.echo(Cli.RECORDING_IN_PROGRESS.format(meeting_id=active.meeting.id, tap_pid=active.process_handle.pid, mic_pid=active.mic_handle.pid))
+    except TeamsRecorderError as exc:
+        unreadable = True
+        typer.echo(Cli.ACTIVE_UNREADABLE.format(error=exc))
+    try:
+        typer.echo(Cli.OPEN_ACTIONS.format(count=len(c.repo.load_open_actions())))
+    except TeamsRecorderError as exc:
+        unreadable = True
+        typer.echo(Cli.OPEN_ACTIONS_UNREADABLE.format(error=exc))
     if c.story_publishers:
-        typer.echo(Cli.STORIES_WAITING.format(count=len(c.stories_waiting())))
+        try:
+            typer.echo(Cli.STORIES_WAITING.format(count=len(c.stories_waiting())))
+        except TeamsRecorderError as exc:
+            unreadable = True
+            typer.echo(Cli.STORIES_WAITING_UNREADABLE.format(error=exc))
+    if unreadable:
+        raise typer.Exit(code=1)
 
 
 def _transcript_health(repo: MeetingRepository, meeting_id: str) -> TranscriptHealth | None:
