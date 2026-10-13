@@ -73,11 +73,16 @@ def _read_json_list(path: Path) -> list[Any]:
 def _decoded(path: Path, decode: Callable[[Any], T], read: Callable[[Path], Any] = _read_json) -> T:
     """Reads a JSON file and converts it to the domain; a file of the wrong shape (a missing key, an unknown
     enum value such as a verification status, a list where an object belongs) is a RepositoryError naming
-    the file, like invalid JSON."""
-    data = read(path)
+    the file, like invalid JSON. AttributeError is deliberately not caught: the codec indexes or checks a
+    value before calling a method on it, so one would be a bug in the code, not in the file."""
+    return _decode(path, read(path), decode)
+
+
+def _decode(path: Path, data: Any, decode: Callable[[Any], T]) -> T:
+    """`decode(data)`, with a shape error reported against the file `data` was read from (see `_decoded`)."""
     try:
         return decode(data)
-    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
 
 
@@ -113,11 +118,10 @@ class FsMeetingRepository:
         return _decoded(self._require(meeting_id) / META, codec.meeting_from_dict)
 
     def list_meetings(self) -> list[Meeting]:
-        meetings: list[Meeting] = []
-        for d in sorted(self.recordings.iterdir()):
-            if d.is_dir() and (d / META).exists():
-                meetings.append(self.load_meta(d.name))
-        return meetings
+        return [self.load_meta(meeting_id) for meeting_id in self.meeting_ids()]
+
+    def meeting_ids(self) -> list[str]:
+        return [d.name for d in sorted(self.recordings.iterdir()) if d.is_dir() and (d / META).exists()]
 
     def exists(self, meeting_id: str) -> bool:
         return self._dir(meeting_id).is_dir()
@@ -165,19 +169,23 @@ class FsMeetingRepository:
     def load_active(self) -> ActiveRecording | None:
         if not self._active_path.exists():
             return None
-        meeting_id, process_handle, mic_handle = _decoded(self._active_path, self._pointer_from_dict)
+        path = self._active_path
+        # The meeting first, as before the pointer was decoded strictly: a pointer whose meeting folder is
+        # gone is cleared whatever its handles hold, so the daemon's start-up recovery never trips on it.
+        data = _read_json(path)
+        meeting_id = _decode(path, data, lambda d: str(d["meeting_id"]))
         try:
             meeting = self.load_meta(meeting_id)
         except MeetingNotFound:
             self.clear_active()  # orphan pointer: the meeting folder is gone
             return None
+        process_handle = _decode(path, data, lambda d: self._handle_from_dict(d["process_handle"]))
+        mic_handle = _decode(path, data, lambda d: self._handle_from_dict(d["mic_handle"]))
         return ActiveRecording(meeting=meeting, process_handle=process_handle, mic_handle=mic_handle)
 
     @staticmethod
-    def _pointer_from_dict(d: dict[str, Any]) -> tuple[str, CaptureHandle, CaptureHandle]:
-        def handle(h: dict[str, Any]) -> CaptureHandle:
-            return CaptureHandle(int(h["pid"]), Path(h["out"]))
-        return str(d["meeting_id"]), handle(d["process_handle"]), handle(d["mic_handle"])
+    def _handle_from_dict(d: dict[str, Any]) -> CaptureHandle:
+        return CaptureHandle(int(d["pid"]), Path(d["out"]))
 
     def clear_active(self) -> None:
         self._active_path.unlink(missing_ok=True)

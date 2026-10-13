@@ -103,12 +103,15 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
 
 # Verification (fidelity guard). Written only when a claim was verified, so files and the JSON
 # sent to the planner and the story writer stay as before for claims that were not. Read back
-# strictly: a value of the wrong type raises, and the repository reports the file.
+# strictly: absent, null or {} means "not verified"; any other value that is not an object
+# (false, 0, "", [] included) raises TypeError, and the repository reports the file.
 def _verification_to_dict(v: Verification) -> dict[str, Any]:
     return {"status": v.status.value, "reason": v.reason}
 
 
-def _verification_from_dict(d: dict[str, Any]) -> Verification:
+def _verification_from_dict(d: Any) -> Verification:
+    if not isinstance(d, dict):
+        raise TypeError(Err.BAD_VERIFICATION.format(value=d))
     reason = d.get("reason", "")
     if not isinstance(reason, str):
         raise TypeError(Err.BAD_REASON.format(value=reason))
@@ -120,9 +123,9 @@ def _verified(v: Verification | None) -> dict[str, Any]:
     return {"verification": _verification_to_dict(v)} if v else {}
 
 
-def _verification_or_none(d: dict[str, Any] | None) -> Verification | None:
+def _verification_or_none(d: Any) -> Verification | None:
     """A claim's `verification`; absent, null or {} means the claim was not verified."""
-    return _verification_from_dict(d) if d else None
+    return None if d is None or d == {} else _verification_from_dict(d)
 
 
 def _participant_checks(checks: dict[str, Verification]) -> dict[str, Any]:
@@ -131,7 +134,7 @@ def _participant_checks(checks: dict[str, Verification]) -> dict[str, Any]:
 
 
 def _participant_checks_from(d: Any) -> dict[str, Verification]:
-    if not d:
+    if d is None:
         return {}
     if not isinstance(d, dict):
         raise TypeError(Err.BAD_PARTICIPANT_CHECKS.format(value=d))
