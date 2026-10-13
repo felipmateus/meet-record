@@ -91,3 +91,20 @@ def test_a_participant_is_someone_who_speaks_or_is_addressed():
     assert _heard("Felipe", meeting)                # the recording's owner is always a participant
     assert not _heard("Felipe", meeting, user="")   # ...when the owner's name is known
     assert not _heard("de", meeting)                # nothing but particles
+
+
+def test_a_greeting_split_across_segments_still_counts():
+    # whisper often ends a segment right after "Bom dia,"
+    assert _heard("Ana", Transcript([Segment(0, 2, "Bom dia,"), Segment(2, 5, "Ana tudo bem?")]))
+
+
+def test_the_owner_counts_by_first_name_or_full_name():
+    silent = _transcript("bom dia a todos")
+    assert _heard("Felipe", silent, user="Felipe Mateus") and _heard("Felipe Mateus", silent, user="Felipe")
+    assert not _heard("Ana", silent, user="Felipe Mateus")
+
+
+def test_a_participant_listed_twice_is_one_claim():
+    from teams_recorder.domain import claims
+    analysis = Analysis(meeting_id="m", summary="s", participants=["Ana", "Ana", "Bruno"])
+    assert [c.ref.key for c in claims(analysis)] == ["Ana", "Bruno"]

@@ -1,6 +1,7 @@
 """ClaudeClaimVerifier with a fake transport: the claims and transcript it sends, and how verdicts become statuses."""
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -65,7 +66,7 @@ def test_claims_get_short_ids_and_readable_owners():
         ("c1", ClaimRef(ClaimKind.DECISION, "0")), ("c2", ClaimRef(ClaimKind.ACTION, "a1")), ("c3", ClaimRef(ClaimKind.ACTION, "a2")),
         ("c4", ClaimRef(ClaimKind.DEADLINE, "0")), ("c5", ClaimRef(ClaimKind.PARTICIPANT, "Ana")),
     ]
-    assert claims[1].owner == "Felipe (the user)" and claims[1].due == "2026-10-15" and claims[1].at == "00:00:10"
+    assert claims[1].owner == "Felipe" and claims[1].due == "2026-10-15" and claims[1].at == "00:00:10"   # named, as the prototype did
     assert claims[2].owner is None   # "indefinido": no owner to check
     assert claims_of(ANALYSIS)[1].owner == "the user"
 
@@ -80,7 +81,8 @@ def test_the_message_has_the_meeting_date_the_whole_transcript_and_every_claim()
     user = call["user"]
     assert user.startswith("User (recording owner): Felipe\nMeeting date: 2026-10-12 (Monday)")
     assert Prompt.VERIFY_TRANSCRIPT in user and "[00:00:10] Eu mando o cronograma na quarta." in user
-    assert "[c2] (action) Enviar o cronograma; owner: Felipe (the user); date: 2026-10-15; said at: 00:00:10" in user
+    assert "[c2] (action) Enviar o cronograma | owner: Felipe | date: 2026-10-15 | cited at 00:00:10" in user   # the prototype's format
+    assert "\n\n## Transcript\n[00:00:00] Bom dia, Ana." in user and "\n\n## Claims\n[c1] (decision) Usar o Mapbox | cited at 00:00:05" in user
     assert "[c5] (participant) Ana" in user
 
 
@@ -144,3 +146,19 @@ def test_the_prompt_ships_with_the_project_and_the_schema_is_strict():
     assert schema["additionalProperties"] is False and len(schema["required"]) == 7
     with pytest.raises(AnalysisError):
         ClaudeClaimVerifier(FakeTransport(VerifyOut(verdicts=[]))).verify(MEETING, ANALYSIS, TRANSCRIPT)   # no prompt configured
+
+
+def test_the_shipped_prompt_is_the_measured_prototype_prompt():
+    # The evaluation's numbers (§14.3) came from scripts/fidelity_eval.py VERIFY_SYSTEM. The product's prompt may
+    # differ only where it must: the user's name comes in the message, and the reason is written in Portuguese.
+    import ast
+    script = Path(__file__).resolve().parents[2] / "scripts" / "fidelity_eval.py"
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    measured = next(n.value.value for n in tree.body if isinstance(n, ast.Assign)
+                    and getattr(n.targets[0], "id", None) == "VERIFY_SYSTEM")
+    shipped = load_prompt(load_settings().prompts_dir / Files.VERIFY_PROMPT)
+    expected = (measured
+                .replace("The user who records the meetings is Felipe.",
+                         "The message starts with the name of the user who records the meetings, when known, and the meeting date.")
+                .replace("- reason: one short sentence.", "- reason: one short sentence, in Brazilian Portuguese."))
+    assert shipped.strip() == expected.strip()
