@@ -345,6 +345,8 @@ class Log:
     TRANSCRIPT_RETRY_RESULT = "retry of %s: %.0f%% of segments in loops, text in %s of %s min; keeping the %s pass"
     PASS_FIRST, PASS_RETRY = "first", "retry"   # names used in TRANSCRIPT_RETRY_RESULT
     TRANSCRIPT_RETRY_FAILED = "retry of %s failed; keeping the first pass: %s"
+    VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
+    VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
 
 
 class Prompt:
@@ -394,6 +396,23 @@ class Prompt:
     FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
     FIELD_SKIPPED_REASON = "Short reason why this action is not a story"
     FIELD_SKIPPED_DUPLICATE = "id of the existing story that already covers this action, or null"
+    VERIFY_TRANSCRIPT = "\n\n## Transcript\n\n"
+    VERIFY_EXCERPTS = "\n\n## Transcript (long meeting: its start and the lines around each claim's timestamp; [...] marks a gap)\n\n"
+    VERIFY_CLAIMS = "\n\n## Claims to check\n\n"
+    EXCERPT_GAP = "[...]"
+    CLAIM_LINE = "[{id}] ({kind}) {text}"
+    CLAIM_OWNER = "; owner: {owner}"
+    CLAIM_DUE = "; date: {due}"
+    CLAIM_AT = "; said at: {at}"
+    OWNER_SELF_NAMED = "{name} (the user)"
+    OWNER_SELF = "the user"
+    FIELD_VERDICT_ID = "the claim's id, exactly as given in brackets"
+    FIELD_SUPPORT = "supported, partial, unsupported or contradicted"
+    FIELD_OWNER_EVIDENT = "for claims with an owner: true when the transcript makes clear that person will do it; null when there is no owner"
+    FIELD_DATE_SAID = "for claims with a date: true when that date, or an expression resolving to it, is said; null when there is no date"
+    FIELD_TENTATIVE = "true when the transcript presents it tentatively rather than as decided"
+    FIELD_SENSITIVE = "true when the claim carries sensitive personal data or a personal judgment about someone"
+    FIELD_REASON = "one short sentence in Brazilian Portuguese explaining the verdict"
 
 
 class Minutes:
@@ -434,6 +453,10 @@ class Minutes:
     OWNER_SELF_NO_NAME = "você"
     OWNER_UNKNOWN = "⚠️ sem responsável"
     FOOTER = "---\n_Gerada automaticamente a partir da transcrição. Confira cada item no horário indicado antes de compartilhar._"
+    # Reasons stored with an unconfirmed claim and shown in these minutes (task 4.0); the verifier writes its own.
+    REASON_SENSITIVE = "contém dado pessoal sensível"
+    REASON_NOT_HEARD = "não fala nem é chamado(a) na transcrição; talvez só tenha sido mencionado(a)"
+    REASON_NO_VERDICT = "a verificação não avaliou este item"
     TYPE_LABELS = {
         "standup": "Daily",
         "client": "Reunião com cliente",
