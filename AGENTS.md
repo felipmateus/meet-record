@@ -56,7 +56,7 @@ container.py     composition root: the ONLY place that instantiates concrete ada
 config.py        config.toml + .env → frozen Settings; env overrides; data_dir = paths.data_dir (relative = inside the project; this repo uses ./data), or automatic: Application Support when the project sits in iCloud or a TCC-protected folder
 ```
 
-Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer) and `planner_claude` (planner); and `codec` (JSON ↔ domain) is used by `repository_fs`.
+Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer), `planner_claude` (planner), `stories_claude` (story writer) and `verifier_claude` (claim verifier); and `codec` (JSON ↔ domain) is used by `repository_fs`.
 
 Ports and their adapters (`application/ports.py`):
 

@@ -39,10 +39,16 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 - `transcriber_whispercpp`: optional `max_context` (`-mc`) and VAD flags; a second instance with the anti-loop settings is built in the container.
 - `verifier_claude.ClaudeClaimVerifier` over a second `StructuredTransport` built with `[verification] model/effort` (Sonnet, medium); long transcripts are cut into ±60 s windows around each claim's `at`; claims without a timestamp use the whole transcript up to a size cap.
   - As built (task 3.0):
-    - **The call:** one call per meeting, prompt `prompts/verify_system.md`. Claims get local ids (`c1`, `c2`, ...) and their owner, date and timestamp.
+    - **The call:** one call per meeting, prompt `prompts/verify_system.md`. The prompt is the prototype's `VERIFY_SYSTEM` word for word except two lines: the user's name comes in the message, and the reason is written in Brazilian Portuguese. A test pins this. The message has the prototype's shape: claims with local ids (`c1`, `c2`, ...), `| owner: | date: | cited at`, and the owner named, not "the user". The claims are not shuffled per run as the prototype did. Task 8.0 must measure this verifier, not the prototype.
     - **Transcript:** the whole transcript up to `Verify.MAX_TRANSCRIPT_CHARS` (200,000 characters, about 4 h). Beyond that, its start up to the cap plus the lines within `Verify.WINDOW_SECONDS` (60 s) of each claim's timestamp, with `[...]` marking gaps.
     - **Verdicts:** the model judges support, owner, date, tentative and sensitive per claim, and the mapping to one status is in code (the prototype's `l1_flag`). A claim the answer leaves out is unconfirmed; verdicts for unknown ids are ignored. Reasons are written in Brazilian Portuguese, for the minutes.
     - **Wiring:** not done until task 7.0, so the daemon does not verify yet and no verdict reaches the planner or story-writer prompts before task 4.0 explains them.
+    - **For 7.0:** the verifier and `VerifyAnalysis` both need `[user] name`. Without it the model sees "the user" and cannot match "Felipe, você manda...".
+    - **For 4.0 and 7.0:** a verifier outage leaves claims unverified, which looks the same as "never verified" apart from a log warning. Consider recording that verification was attempted.
+    - **Lock:** verification runs under the meeting lock before the analysis is saved, so a crash during the Sonnet call loses the analysis too. Re-verifying an old analysis needs a re-analysis until a separate command exists.
+  - **The participant check** is the prototype's rule as measured: someone named at least twice passes even when only mentioned, and a common word used as a name ("Clara") can pass. Two differences from the first version, both fixed after the review:
+    - segments are joined by spaces, so a greeting split across segments counts;
+    - the owner counts by first name or full name.
 - `prompts/stories_system.md`: the provenance rule (prototype: `CITE_RULE` in `scripts/fidelity_eval.py`).
 - `minutes_markdown`: ⚠️ marks with the reason; banner for degraded transcripts. `stories_markdown`: each criterion with its timestamp or "(sugestão)".
 - `publisher_backlogmd`: marks carried into the task description.

@@ -7,12 +7,12 @@
 
 - [x] 1.0 Transcript health: `-mc 0` by default, `transcript_health()`, a VAD retry when still degraded, `degraded` marking, notification and banner (P0; validates G1 on the real 2026-10-08 audio) — done 2026-10-11; the loop is counted within 30 consecutive segments (see requirements §10 notes); the banner in the drafts document moves to 4.0; G1 met on the real meeting retranscribed by the product (text in 86 of 86 minutes, ~1% in loops); code-review findings fixed the same day
 - [x] 2.0 Verification in the domain and persistence: `Verification`, optional fields, codec defaults for old analyses — done 2026-10-12; nothing is verified yet (3.0), and unverified claims are written exactly as before
-- [x] 3.0 Claim verifier port, Sonnet adapter with transcript windows, the two code checks, the `VerifyAnalysis` pipeline step — done 2026-10-13, not wired into the container yet (7.0), so the daemon does not verify; a verifier failure leaves its claims unverified (see the PRD notes on FR3)
+- [x] 3.0 Claim verifier port, Sonnet adapter with transcript windows, the two code checks, the `VerifyAnalysis` pipeline step — done 2026-10-13, not wired into the container yet (7.0), so the daemon does not verify; a verifier failure leaves its claims unverified (FR3); 7.0 must give the verifier and `VerifyAnalysis` the same `[user] name`
 - [ ] 4.0 Downstream use of the marks: minutes ⚠️, planner input "a confirmar", story sources limited to confirmed actions; the degraded-transcript banner in the drafts document, per source meeting (moved from 1.0; PRD decision 9)
 - [ ] 5.0 Provenance in the stories: `Criterion(text, source)`, the writer rule, timestamp validation in `to_drafts`, display in the drafts document and the Backlog.md task; tasks with ⚠️ marks are published marked into Triagem (PRD decision 10)
 - [ ] 6.0 Analysis prompt fixes (owners only when named or self-assigned, participants who speak, tentative ≠ decided, no sensitive data) — merges the two follow-up tasks filed on 2026-10-10
 - [ ] 7.0 Configuration, container wiring, `trec doctor` and `trec status` lines, usage logging
-- [ ] 8.0 Validation: gates G2 and G3 on the synthetic stories corpus, G4 with the user on a week of real drafts; documentation (PRD pages 02, 03, 08; requirements §10; README; AGENTS ports table)
+- [ ] 8.0 Validation: gates G2 and G3 on the synthetic stories corpus (G2 must run the product's `ClaudeClaimVerifier`, not the prototype's own prompt in `scripts/fidelity_eval.py defend`), G4 with the user on a week of real drafts; documentation (PRD pages 02, 03, 08; requirements §10; README; AGENTS ports table)
 
 ## Dependencies
 

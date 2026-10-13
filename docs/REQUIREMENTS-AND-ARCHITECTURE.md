@@ -423,3 +423,11 @@ teams-recorder/
 - `VerifyAnalysis` runs inside `AnalyzeMeeting`, after the analyzer and before `analysis.json` and the minutes are saved. When the verifier fails, its claims stay unverified, the code checks still apply, and the analysis is never blocked. This follows the tech spec rather than FR3's first wording ("unconfirmed"), noted in the PRD.
 - **Not switched on yet:** `[verification]` configuration and the container wiring are task 7.0, so the daemon does not verify. This also keeps verdicts out of the planner and story-writer prompts until task 4.0 explains them, the sequencing the task 2.0 review asked for.
 - **Opt-in real test:** `TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_verifier_claude_real.py` (Sonnet through Claude Code; spends the subscription).
+- **Code review** (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-13-17-51.md`). Its main finding was that the first prompt rewrote the prototype's: added rules, a different message format, and the owner shown as "the user". The shipped verifier would then not have been the one the evaluation measured. The prompt and message now follow the prototype except for the user's name and a Portuguese reason, and a test compares the two. Also fixed:
+  - a greeting split across transcript segments did not count for the participant check;
+  - the owner matched only by exact full name;
+  - a participant listed twice made two claims;
+  - the claim-keying rule was written in four places and now lives in `domain/verification.claims`;
+  - the support verdict is now an enum;
+  - a verifier exception was logged without its traceback.
+- **Recorded for task 8.0:** the G2 gate must run `ClaudeClaimVerifier`. `scripts/fidelity_eval.py defend` still measures the prototype's own prompt.
