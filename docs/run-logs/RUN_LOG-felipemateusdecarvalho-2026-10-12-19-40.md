@@ -61,8 +61,8 @@ Also noted:
 - All of the above was fixed before the first commit, with tests (the new meta, pointer and `trec status` tests fail on `main`'s code):
   - every verified bug;
   - the test gaps;
-  - the codec helpers, now one private function per direction plus `participant_checks` helpers;
+  - the codec helpers, now private (correction from the second review: they are six small helpers, not "one per direction");
   - the unused fixture;
-  - `Files.OPEN_ACTIONS` instead of the file name;
+  - `Files.OPEN_ACTIONS` instead of the file name in the repository test (correction from the second review: the CLI test still had the literal; fixed after it);
   - the comment, now English only.
 - The two notes for task 3.0 are recorded in requirements §10.
