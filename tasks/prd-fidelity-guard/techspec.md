@@ -25,6 +25,10 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 ## 3. Application
 
 - Port: `ClaimVerifier.verify(meeting, analysis, transcript) -> dict[ClaimRef, Verification]`.
+  - As built (task 3.0):
+    - **Claims:** `ClaimRef(kind, key)` names a claim: an action by its id, a decision or deadline by its position, a participant by name. `domain/verification.py` lists the claims (`claim_refs`), combines verdicts (`combine`: unconfirmed wins, reasons joined) and writes them into a copy of the analysis (`with_verifications`).
+    - **Code checks:** `sensitive_data(text, patterns)` and `participant_heard(name, transcript, user_name, particles, address)` take their Portuguese patterns from `constants.Verify` and can only lower a verdict.
+    - **The step:** `VerifyAnalysis` runs inside `AnalyzeMeeting` (an optional `verify`), between the analyzer and saving `analysis.json` and the minutes, rather than as a pipeline state of its own: a meeting is still "analyzed" when `analysis.json` exists. A verifier failure is logged and leaves its claims unverified; the code checks still apply.
 - `TranscribeMeeting`: computes health; when degraded and `[transcription] retry_on_loop`, transcribes again through the anti-loop transcriber and keeps the healthier result; saves health with the transcript; a still-degraded transcript notifies `Notify.TRANSCRIPT_DEGRADED`.
 - `AnalyzeMeeting` → new `VerifyAnalysis` step in the pipeline (after analysis, before minutes): applies the verifier and the code checks; failures leave claims unverified and are logged, never `error.txt`.
 - `BuildDailyPlan` passes verification to the planner; the plan prompt says unconfirmed actions are listed as "a confirmar".
@@ -34,6 +38,11 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 
 - `transcriber_whispercpp`: optional `max_context` (`-mc`) and VAD flags; a second instance with the anti-loop settings is built in the container.
 - `verifier_claude.ClaudeClaimVerifier` over a second `StructuredTransport` built with `[verification] model/effort` (Sonnet, medium); long transcripts are cut into ±60 s windows around each claim's `at`; claims without a timestamp use the whole transcript up to a size cap.
+  - As built (task 3.0):
+    - **The call:** one call per meeting, prompt `prompts/verify_system.md`. Claims get local ids (`c1`, `c2`, ...) and their owner, date and timestamp.
+    - **Transcript:** the whole transcript up to `Verify.MAX_TRANSCRIPT_CHARS` (200,000 characters, about 4 h). Beyond that, its start up to the cap plus the lines within `Verify.WINDOW_SECONDS` (60 s) of each claim's timestamp, with `[...]` marking gaps.
+    - **Verdicts:** the model judges support, owner, date, tentative and sensitive per claim, and the mapping to one status is in code (the prototype's `l1_flag`). A claim the answer leaves out is unconfirmed; verdicts for unknown ids are ignored. Reasons are written in Brazilian Portuguese, for the minutes.
+    - **Wiring:** not done until task 7.0, so the daemon does not verify yet and no verdict reaches the planner or story-writer prompts before task 4.0 explains them.
 - `prompts/stories_system.md`: the provenance rule (prototype: `CITE_RULE` in `scripts/fidelity_eval.py`).
 - `minutes_markdown`: ⚠️ marks with the reason; banner for degraded transcripts. `stories_markdown`: each criterion with its timestamp or "(sugestão)".
 - `publisher_backlogmd`: marks carried into the task description.

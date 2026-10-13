@@ -3,7 +3,7 @@
 > **Status:** draft for approval · **Date:** 2026-10-11 · **Slug:** `fidelity-guard`
 > **Evidence:** [evaluation of the LLM wiki and the pipeline](../prd-llm-wiki/evaluation.md) §14 (tests run on 2026-10-11 with `scripts/fidelity_eval.py` and `scripts/wiki_corpus.py`)
 > **Supersedes as the next step:** the LLM wiki implementation (tasks 2–6 of `tasks/prd-llm-wiki/`), which the evaluation did not justify for question answering.
-> **Progress:** task 1.0 (transcript health and language) implemented on 2026-10-11 and reviewed with the `code-review` skill (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-11-20-34.md`); FR1 and FR2 below record what changed while building it, and G1 is met. Task 2.0 (verification types and persistence) done on 2026-10-12; tasks 3.0–8.0 are not started.
+> **Progress:** task 1.0 (transcript health and language) implemented on 2026-10-11 and reviewed with the `code-review` skill; FR1 and FR2 below record what changed while building it, and G1 is met. Task 2.0 (verification types and persistence) done on 2026-10-12, task 3.0 (the claim verifier, the two code checks and the verification step) on 2026-10-13, not yet switched on (task 7.0). Tasks 4.0–8.0 are not started.
 
 ## 1. Problem
 
@@ -63,6 +63,7 @@ Notes on FR1 and FR7 (2026-10-11, task 1.0):
 - **FR1 originally read "segments whose text repeats 5+ times", anywhere in the meeting.** Counted that way, natural fillers ("Entendeu?", "Tá") gave a healthy real Portuguese meeting (07/10) 9.8%, just under the 10% threshold, so the count was restricted to repeats close together. Measured on 13 real and 81 synthetic healthy transcripts:
   - **30 segments:** all score 0%, the looped 2026-10-08 transcript scores 68% (text in 28 of 86 minutes), and loops cycling through up to 7 lines are caught. It is the widest window that keeps the healthy meetings at 0%; at 40 the 07/10 meeting reaches 0.8%.
   - **10 segments:** the window shipped first. It missed loops of 3 or more lines and was changed after the code review.
+- **FR3 (2026-10-13, task 3.0):** when the verifier call itself fails (no answer, an invalid one), the claims it would have judged stay *unverified*, not `unconfirmed` as FR3 first said, following the tech spec: marking every claim ⚠️ when nothing was checked would be a false mark, and false marks erode trust (§7 Risks). The two code checks still run, and a claim the verifier skipped in an answer that did arrive is `unconfirmed`. The analysis is never blocked.
 - **FR7:** the transcript part is done (`trec doctor` shows `max_context`, the threshold and the retry state; `trec status` marks and counts degraded transcripts). The verification model line comes with task 7.0.
 
 ## 6. Success criteria
