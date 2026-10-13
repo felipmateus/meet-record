@@ -209,6 +209,9 @@ class InMemoryMeetingRepository:
     def list_meetings(self) -> list[Meeting]:
         return [r.meeting for _, r in sorted(self._recs.items())]
 
+    def meeting_ids(self) -> list[str]:
+        return sorted(self._recs)
+
     def exists(self, meeting_id: str) -> bool:
         return meeting_id in self._recs
 

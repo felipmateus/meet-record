@@ -27,6 +27,8 @@ from .models import (
     Transcript,
     TranscriptHealth,
     UserStory,
+    Verification,
+    VerificationStatus,
     earliest_due,
     meeting_id_for,
     merge_open_actions,
@@ -41,7 +43,7 @@ from .status import MeetingStatus, derive_status, next_step
 __all__ = [
     "Action", "ActionKind", "ActionRoute", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
     "Segment", "Transcript", "TranscriptHealth", "loop_flags", "transcript_health", "meeting_id_for", "merge_open_actions",
-    "Publication", "SkippedAction", "StoryDrafts", "UserStory", "earliest_due", "route_of", "story_kind", "strongest_priority", "task_card",
+    "Publication", "SkippedAction", "StoryDrafts", "UserStory", "Verification", "VerificationStatus", "earliest_due", "route_of", "story_kind", "strongest_priority", "task_card",
     "MeetingStatus", "derive_status", "next_step",
     "AnalysisError", "CaptureError", "MeetingNotFound", "PublishError", "RepositoryError",
     "TeamsRecorderError", "TranscriptionError",

@@ -28,7 +28,10 @@ from teams_recorder.domain import (
     Transcript,
     TranscriptHealth,
     UserStory,
+    Verification,
+    VerificationStatus,
 )
+from teams_recorder.messages import Err
 
 
 def _dt(value: datetime | None) -> str | None:
@@ -98,6 +101,46 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
     )
 
 
+# Verification (fidelity guard). Written only when a claim was verified, so files and the JSON
+# sent to the planner and the story writer stay as before for claims that were not. Read back
+# strictly: absent, null or {} means "not verified"; any other value that is not an object
+# (false, 0, "", [] included) raises TypeError, and the repository reports the file.
+def _verification_to_dict(v: Verification) -> dict[str, Any]:
+    return {"status": v.status.value, "reason": v.reason}
+
+
+def _verification_from_dict(d: Any) -> Verification:
+    if not isinstance(d, dict):
+        raise TypeError(Err.BAD_VERIFICATION.format(value=d))
+    reason = d.get("reason", "")
+    if not isinstance(reason, str):
+        raise TypeError(Err.BAD_REASON.format(value=reason))
+    return Verification(VerificationStatus(d["status"]), reason)
+
+
+def _verified(v: Verification | None) -> dict[str, Any]:
+    """The `verification` key of a claim, or nothing when the claim was not verified."""
+    return {"verification": _verification_to_dict(v)} if v else {}
+
+
+def _verification_or_none(d: Any) -> Verification | None:
+    """A claim's `verification`; absent, null or {} means the claim was not verified."""
+    return None if d is None or d == {} else _verification_from_dict(d)
+
+
+def _participant_checks(checks: dict[str, Verification]) -> dict[str, Any]:
+    """The `participant_checks` key of an analysis, or nothing when no participant was verified."""
+    return {"participant_checks": {name: _verification_to_dict(v) for name, v in checks.items()}} if checks else {}
+
+
+def _participant_checks_from(d: Any) -> dict[str, Verification]:
+    if d is None:
+        return {}
+    if not isinstance(d, dict):
+        raise TypeError(Err.BAD_PARTICIPANT_CHECKS.format(value=d))
+    return {str(name): _verification_from_dict(v) for name, v in d.items()}
+
+
 # Action
 def action_to_dict(a: Action) -> dict[str, Any]:
     return {
@@ -110,6 +153,7 @@ def action_to_dict(a: Action) -> dict[str, Any]:
         "priority": a.priority.value if a.priority else None,
         "at": a.at,
         "kind": a.kind.value if a.kind else None,
+        **_verified(a.verification),
     }
 
 
@@ -124,6 +168,7 @@ def action_from_dict(d: dict[str, Any]) -> Action:
         priority=Priority(d["priority"]) if d.get("priority") else None,
         at=d.get("at"),
         kind=ActionKind(d["kind"]) if d.get("kind") else None,
+        verification=_verification_or_none(d.get("verification")),
     )
 
 
@@ -131,7 +176,7 @@ def _decision_from(value: Any) -> Decision:
     # analyses written before 2026-10-05 stored decisions as plain strings
     if isinstance(value, str):
         return Decision(value)
-    return Decision(value["text"], value.get("at"))
+    return Decision(value["text"], value.get("at"), _verification_or_none(value.get("verification")))
 
 
 # Analysis
@@ -144,13 +189,14 @@ def analysis_to_dict(a: Analysis) -> dict[str, Any]:
         "meeting_type": a.meeting_type.value,
         "participants": list(a.participants),
         "topics": [{"title": t.title, "points": list(t.points)} for t in a.topics],
-        "decisions": [{"text": dec.text, "at": dec.at} for dec in a.decisions],
+        "decisions": [{"text": dec.text, "at": dec.at, **_verified(dec.verification)} for dec in a.decisions],
         "my_actions": [action_to_dict(x) for x in a.my_actions],
         "others_actions": [action_to_dict(x) for x in a.others_actions],
-        "deadlines": [{"what": dl.what, "when": _d(dl.when), "who": dl.who} for dl in a.deadlines],
+        "deadlines": [{"what": dl.what, "when": _d(dl.when), "who": dl.who, **_verified(dl.verification)} for dl in a.deadlines],
         "open_questions": list(a.open_questions),
         "next_meetings": list(a.next_meetings),
         "risks": list(a.risks),
+        **_participant_checks(a.participant_checks),
     }
 
 
@@ -161,7 +207,8 @@ def analysis_from_dict(d: dict[str, Any]) -> Analysis:
         decisions=[_decision_from(x) for x in d.get("decisions", [])],
         my_actions=[action_from_dict(x) for x in d.get("my_actions", [])],
         others_actions=[action_from_dict(x) for x in d.get("others_actions", [])],
-        deadlines=[Deadline(x["what"], _parse_d(x.get("when")), x.get("who", "")) for x in d.get("deadlines", [])],
+        deadlines=[Deadline(x["what"], _parse_d(x.get("when")), x.get("who", ""), _verification_or_none(x.get("verification")))
+                   for x in d.get("deadlines", [])],
         open_questions=list(d.get("open_questions", [])),
         next_meetings=list(d.get("next_meetings", [])),
         title=d.get("title", ""),
@@ -170,6 +217,7 @@ def analysis_from_dict(d: dict[str, Any]) -> Analysis:
         participants=list(d.get("participants", [])),
         topics=[Topic(x["title"], list(x.get("points", []))) for x in d.get("topics", [])],
         risks=list(d.get("risks", [])),
+        participant_checks=_participant_checks_from(d.get("participant_checks")),
     )
 
 
