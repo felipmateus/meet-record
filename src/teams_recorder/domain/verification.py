@@ -7,17 +7,22 @@ import unicodedata
 from dataclasses import replace
 from typing import Iterable
 
-from .models import Action, Analysis, ClaimKind, ClaimRef, Transcript, Verification, VerificationStatus
+from .models import Action, Analysis, Claim, ClaimKind, ClaimRef, Transcript, Verification, VerificationStatus
+
+
+def claims(analysis: Analysis) -> list[Claim]:
+    """Every verifiable claim of an analysis, in reading order: decisions and deadlines by position, actions by id,
+    participants by name. The one place that says which claims there are and how they are keyed."""
+    return [
+        *(Claim(ClaimRef(ClaimKind.DECISION, str(i)), d.text, at=d.at) for i, d in enumerate(analysis.decisions)),
+        *(Claim(ClaimRef(ClaimKind.ACTION, a.id), a.description, a.owner, a.due, a.at) for a in analysis.all_actions),
+        *(Claim(ClaimRef(ClaimKind.DEADLINE, str(i)), d.what, d.who, d.when) for i, d in enumerate(analysis.deadlines)),
+        *(Claim(ClaimRef(ClaimKind.PARTICIPANT, name), name) for name in dict.fromkeys(analysis.participants)),
+    ]
 
 
 def claim_refs(analysis: Analysis) -> list[ClaimRef]:
-    """Every verifiable claim of an analysis, in reading order."""
-    return [
-        *(ClaimRef(ClaimKind.DECISION, str(i)) for i in range(len(analysis.decisions))),
-        *(ClaimRef(ClaimKind.ACTION, a.id) for a in analysis.all_actions),
-        *(ClaimRef(ClaimKind.DEADLINE, str(i)) for i in range(len(analysis.deadlines))),
-        *(ClaimRef(ClaimKind.PARTICIPANT, name) for name in analysis.participants),
-    ]
+    return [c.ref for c in claims(analysis)]
 
 
 def combine(first: Verification | None, second: Verification | None) -> Verification | None:
@@ -68,15 +73,23 @@ def sensitive_data(text: str, patterns: Iterable[str]) -> bool:
 
 
 def participant_heard(name: str, transcript: Transcript, user_name: str, particles: Iterable[str], address: Iterable[str]) -> bool:
-    """Whether a participant is a person in the meeting, not someone only mentioned: the recording's owner, a name
-    said at least twice, or a name someone addresses (`address` templates with `{name}`, e.g. a greeting)."""
-    if user_name and normalized(name.strip()) == normalized(user_name.strip()):
-        return True
+    """Whether a participant is a person in the meeting rather than someone mentioned once: the recording's owner,
+    a name said at least twice, or a name someone addresses (`address` templates with `{name}`, e.g. a greeting).
+
+    The prototype's rule, measured in the evaluation; a person named twice passes even if only mentioned.
+    """
     skip = set(particles)
-    names = [t for t in re.split(r"[\s()]+", normalized(name)) if len(t) >= 2 and t not in skip]
+
+    def tokens(text: str) -> list[str]:
+        return [t for t in re.split(r"[\s()]+", normalized(text)) if len(t) >= 2 and t not in skip]
+
+    names, user = tokens(name), set(tokens(user_name))
     if not names:
         return False
-    text = normalized(transcript.text)
+    if user and (user <= set(names) or set(names) <= user):   # "Felipe" and "Felipe Mateus" are the owner
+        return True
+    # segments joined by spaces, as the prototype did: whisper often splits right after "Bom dia,"
+    text = " ".join(normalized(s.text.strip()) for s in transcript.segments)
     plain = " " + " ".join(re.findall(r"\w+", text)) + " "
     if max(plain.count(f" {n} ") for n in names) >= 2:
         return True

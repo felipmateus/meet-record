@@ -66,7 +66,7 @@ class TranscriptHealth:
 
     def uncovered_ranges(self) -> list[str]:
         """The minutes without text as transcript times, e.g. ["00:00:00–00:59:00"]."""
-        return [f"{_fmt(start * 60)}–{_fmt(end * 60)}" for start, end in self.uncovered]
+        return [f"{clock_time(start * 60)}–{clock_time(end * 60)}" for start, end in self.uncovered]
 
 
 @dataclass
@@ -84,10 +84,11 @@ class Transcript:
         return self.segments[-1].end if self.segments else 0.0
 
     def as_timestamped_text(self) -> str:
-        return "\n".join(f"[{_fmt(s.start)}] {s.text.strip()}" for s in self.segments)
+        return "\n".join(f"[{clock_time(s.start)}] {s.text.strip()}" for s in self.segments)
 
 
-def _fmt(seconds: float) -> str:
+def clock_time(seconds: float) -> str:
+    """A transcript time as HH:MM:SS, the format of transcript.txt and of every `at` in an analysis."""
     total = int(seconds)
     h, rem = divmod(total, 3600)
     m, s = divmod(rem, 60)
@@ -173,6 +174,17 @@ class ClaimRef:
 
     kind: ClaimKind
     key: str
+
+
+@dataclass(frozen=True)
+class Claim:
+    """A verifiable statement of an analysis, with the fields a reader would trust (see verification.claims)."""
+
+    ref: ClaimRef
+    text: str
+    owner: str | None = None   # as written in the analysis, including Llm's "usuário" / "indefinido" markers
+    due: date | None = None
+    at: str | None = None      # HH:MM:SS where it was said, when the analysis gave it
 
 
 class MeetingType(StrEnum):
