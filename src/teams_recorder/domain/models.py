@@ -157,6 +157,24 @@ class Verification:
     reason: str = ""
 
 
+class ClaimKind(StrEnum):
+    """The claims of an analysis that are verified against the transcript."""
+
+    DECISION = "decision"
+    ACTION = "action"
+    DEADLINE = "deadline"
+    PARTICIPANT = "participant"
+
+
+@dataclass(frozen=True)
+class ClaimRef:
+    """Which claim of an analysis a verification belongs to: an action by its id, a decision or deadline by its
+    position in the analysis, a participant by name."""
+
+    kind: ClaimKind
+    key: str
+
+
 class MeetingType(StrEnum):
     STANDUP = "standup"
     CLIENT = "client"

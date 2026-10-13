@@ -13,6 +13,8 @@ from .models import (
     ActionRoute,
     ActionStatus,
     Analysis,
+    ClaimKind,
+    ClaimRef,
     DailyPlan,
     Deadline,
     Decision,
@@ -38,9 +40,11 @@ from .models import (
     task_card,
 )
 from .health import loop_flags, transcript_health
+from .verification import claim_refs, combine, normalized, participant_heard, sensitive_data, with_verifications
 from .status import MeetingStatus, derive_status, next_step
 
 __all__ = [
+    "ClaimKind", "ClaimRef", "claim_refs", "combine", "normalized", "participant_heard", "sensitive_data", "with_verifications",
     "Action", "ActionKind", "ActionRoute", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
     "Segment", "Transcript", "TranscriptHealth", "loop_flags", "transcript_health", "meeting_id_for", "merge_open_actions",
     "Publication", "SkippedAction", "StoryDrafts", "UserStory", "Verification", "VerificationStatus", "earliest_due", "route_of", "story_kind", "strongest_priority", "task_card",
