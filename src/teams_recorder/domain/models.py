@@ -296,7 +296,7 @@ class Publication:
     published_at: datetime
 
 
-SUGGESTION = "sugestao"   # Criterion.source of a criterion nobody said in the meetings: the writer proposes it
+SUGGESTION = "suggestion"   # Criterion.source of a criterion nobody said in the meetings: the writer proposes it
 
 
 @dataclass(frozen=True)
