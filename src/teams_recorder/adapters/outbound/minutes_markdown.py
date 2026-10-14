@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from teams_recorder.constants import Llm
-from teams_recorder.domain import Action, Analysis, Meeting, TranscriptHealth, Verification, unconfirmed
+from teams_recorder.domain import Action, Analysis, Meeting, TranscriptHealth, Verification, unconfirmed, unconfirmed_reason, verifications
 from teams_recorder.messages import Minutes
 
 
@@ -23,10 +23,13 @@ def _br(day: date) -> str:
 
 def _mark(v: Verification | None, table: bool = False) -> str:
     """The ⚠️ mark of an unconfirmed claim, or nothing (confirmed, or never verified)."""
-    if v is None or not unconfirmed(v):
+    reason = unconfirmed_reason(v)
+    if reason is None:
         return ""
-    reason = v.reason.replace("|", "/") if table else v.reason   # a pipe would break the action table
-    return Minutes.MARK.format(reason=reason) if reason else Minutes.MARK_NO_REASON
+    if not reason:
+        return Minutes.MARK_NO_REASON
+    reason = reason.replace("_", "\\_").replace("*", "\\*")   # the mark is in italics
+    return Minutes.MARK.format(reason=reason.replace("|", "/") if table else reason)   # a pipe would split a table cell
 
 
 @dataclass
@@ -50,18 +53,12 @@ class MarkdownMinutesRenderer:
             at=a.at or Minutes.DASH,
         )
 
-    @staticmethod
-    def _verifications(analysis: Analysis) -> list[Verification | None]:
-        found: list[Verification | None] = [d.verification for d in analysis.decisions]
-        found += [a.verification for a in analysis.all_actions] + [d.verification for d in analysis.deadlines]
-        return found + list(analysis.participant_checks.values())
-
     def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
         out: list[str] = [Minutes.TITLE.format(title=analysis.title or meeting.title or meeting.id), ""]
         if health is not None and health.degraded:
             gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""
             out += [Minutes.DEGRADED.format(loop=health.loop_share, gaps=gaps), ""]
-        if any(unconfirmed(v) for v in self._verifications(analysis)):
+        if any(unconfirmed(v) for v in verifications(analysis)):
             out += [Minutes.UNCONFIRMED_LEGEND, ""]
 
         start = meeting.started_at

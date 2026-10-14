@@ -125,7 +125,7 @@ def to_verification(claim: Claim, verdict: VerdictOut | None) -> Verification:
         or verdict.sensitive
     )
     status = VerificationStatus.UNCONFIRMED if doubtful else VerificationStatus.CONFIRMED
-    return Verification(status, verdict.reason.strip())
+    return Verification(status, " ".join(verdict.reason.split()))   # one line: it is shown in tables and lists
 
 
 @dataclass

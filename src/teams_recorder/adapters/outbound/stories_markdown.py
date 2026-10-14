@@ -14,8 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from teams_recorder.application.use_cases import gaps_text
-from teams_recorder.domain import Action, StoryDrafts, TranscriptHealth, UserStory, unconfirmed
+from teams_recorder.domain import Action, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
 from teams_recorder.messages import Minutes, StoryDoc
 
 
@@ -32,7 +31,7 @@ class MarkdownStoryRenderer:
         day = _br(drafts.day)
         out: list[str] = [StoryDoc.TITLE.format(date=day), "", StoryDoc.INTRO.format(date=day)]
         for meeting_id, health in (degraded or {}).items():
-            gaps = StoryDoc.DEGRADED_GAPS.format(ranges=gaps_text(health)) if health.uncovered else ""
+            gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""   # as in the minutes
             out += ["", StoryDoc.DEGRADED.format(meeting=meeting_id, loop=health.loop_share, gaps=gaps)]
         if not actions:
             out += ["", StoryDoc.NO_ACTIONS]
@@ -71,8 +70,9 @@ class MarkdownStoryRenderer:
         if meta:
             out.append(StoryDoc.META_SEPARATOR.join(meta))
         out += [StoryDoc.PUBLISHED.format(destination=p.destination, ref=p.ref) for p in story.publications]
-        if story.verification is not None and unconfirmed(story.verification):
-            out.append(StoryDoc.UNCONFIRMED.format(reason=story.verification.reason or StoryDoc.NOT_CONFIRMED_NO_REASON))
+        reason = unconfirmed_reason(story.verification)
+        if reason is not None:
+            out.append(StoryDoc.UNCONFIRMED.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_NO_REASON)
         out += ["", story.narrative]
         if story.acceptance_criteria:
             out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c) for c in story.acceptance_criteria)]
