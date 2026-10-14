@@ -140,7 +140,7 @@ def test_the_drafts_document_shows_the_banner_and_the_card_mark():
     drafts = StoryDrafts(date(2026, 10, 14), [card])
     md = MarkdownStoryRenderer().render(drafts, [], [], {"2026-10-08_10-30-52": DEGRADED})
     assert StoryDoc.DEGRADED.format(meeting="2026-10-08_10-30-52", loop=0.668,
-                                    gaps=StoryDoc.DEGRADED_GAPS.format(ranges="00:00:00–00:14:00, 00:15:00–00:59:00")) in md
+                                    gaps=Minutes.DEGRADED_GAPS.format(ranges="00:00:00–00:14:00, 00:15:00–00:59:00")) in md
     assert StoryDoc.UNCONFIRMED.format(reason="a transcrição não diz quem fará") in md
     plain = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [task_card(Action("Estimar", "usuário", "m0", id="t2"))]), [], [])
     assert "⚠️" not in plain
@@ -158,3 +158,50 @@ def test_a_card_mark_survives_saving_and_unmarked_stories_are_written_as_before(
     card = task_card(Action("Estimar o mapa", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL, verification=NO))
     assert codec.story_from_dict(json.loads(json.dumps(codec.story_to_dict(card)))) == card
     assert "verification" not in codec.story_to_dict(UserStory("s", "n"))
+
+
+
+# --- review fixes -----------------------------------------------------------------------------
+def test_a_reason_with_line_breaks_or_markdown_stays_on_one_line_and_in_italics():
+    a = Analysis(meeting_id="m", summary="s", my_actions=[
+        Action("Enviar", "Ana", "m", verification=Verification(VerificationStatus.UNCONFIRMED, "dono errado:\nquem disse foi a_ana *x*")),
+        Action("Outra", "Bruno", "m"),
+    ])
+    rows = [line for line in MarkdownMinutesRenderer().render(_meeting(), a).splitlines() if line.startswith("| ")]
+    assert rows[1] == "| 1 | Enviar ⚠️ _a confirmar: dono errado: quem disse foi a\\_ana \\*x\\*_ | Ana | — | — | — |"
+    assert rows[2].startswith("| 2 | Outra |") and len(rows) == 3   # the table is intact
+
+
+def test_the_verifier_hands_back_one_line_reasons():
+    from teams_recorder.adapters.outbound.verifier_claude import Claim, VerdictOut, to_verification
+    from teams_recorder.domain import ClaimKind, ClaimRef
+    claim = Claim("c1", ClaimRef(ClaimKind.DECISION, "0"), "Usar o Mapbox")
+    verdict = VerdictOut(id="c1", support="unsupported", owner_evident=None, date_said=None, tentative=False, sensitive=False,
+                         reason="  ninguém disse\n  isso  ")
+    assert to_verification(claim, verdict).reason == "ninguém disse isso"
+
+
+def test_without_a_reason_the_card_mark_does_not_repeat_itself(tmp_path: Path):
+    bare = task_card(Action("Estimar", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL,
+                            verification=Verification(VerificationStatus.UNCONFIRMED)))
+    body = BacklogMdPublisher(tmp_path, "Triagem", ()).body(bare, date(2026, 10, 14))
+    assert body.startswith(StoryDoc.UNCONFIRMED_NO_REASON)
+    assert StoryDoc.UNCONFIRMED_NO_REASON in MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [bare]), [], [])
+
+
+def test_the_drafts_banner_lists_every_gap_like_the_minutes():
+    health = TranscriptHealth(0.5, 10, 30, True, ((0, 2), (4, 6), (8, 10), (12, 14), (20, 25)))
+    md = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14)), [], [], {"m": health})
+    assert "00:20:00–00:25:00. O que veio dela" in md and " and " not in md   # no English, no cut-off list
+
+
+def test_an_unconfirmed_plan_only_action_is_marked_in_the_drafts(repo, notifier, clock):
+    day = clock.now().date()
+    email = Action("Mandar o e-mail", "usuário", "m0", id="c1", kind=ActionKind.COMMUNICATION, verification=NO)
+    report = Action("Atualizar o relatório", "usuário", "m0", id="g1", kind=ActionKind.MANAGEMENT)
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[email, report]))
+    drafts = DraftUserStories(repo, FakeStoryWriter(), FakeStoryRenderer(), notifier).execute(day)
+    reasons = {k.action_id: k.reason for k in drafts.skipped}
+    assert reasons["c1"] == (StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["communication"])
+                             + StoryDoc.UNCONFIRMED_SUFFIX.format(reason="a transcrição não diz quem fará"))
+    assert reasons["g1"] == StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["management"])   # unverified: as before
