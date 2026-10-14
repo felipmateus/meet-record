@@ -24,7 +24,7 @@ from teams_recorder.application.use_cases import gaps_text, stories_waiting
 from teams_recorder.config import Settings, find_tool, load_settings
 from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
 from teams_recorder.container import Container, build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
-from teams_recorder.domain import MeetingStatus, TeamsRecorderError, TranscriptHealth, derive_status, next_step
+from teams_recorder.domain import MeetingStatus, TeamsRecorderError, TranscriptHealth, derive_status, next_step, unconfirmed, verifications
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Cli, Err, Notify, Step
 
@@ -77,7 +77,7 @@ def status() -> None:
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
     typer.echo(Cli.MEETINGS.format(count=len(meeting_ids)))
-    degraded = rate_mismatched = 0
+    degraded = rate_mismatched = unconfirmed_claims = unconfirmed_meetings = 0
     for meeting_id in meeting_ids:
         try:
             m = c.repo.load_meta(meeting_id)
@@ -96,6 +96,11 @@ def status() -> None:
         if health is not None and health.rate_mismatch:
             rate_mismatched += 1
             marker += Cli.MEETING_RATE_MISMATCH.format(share=health.short_padding_share)
+        flagged = _unconfirmed_count(c.repo, m.id) if ANALYSIS in files else 0
+        if flagged:
+            unconfirmed_claims += flagged
+            unconfirmed_meetings += 1
+            marker += Cli.MEETING_UNCONFIRMED.format(count=flagged)
         typer.echo(Cli.MEETING_LINE.format(
             meeting_id=m.id,
             title=Cli.MEETING_TITLE.format(title=m.title) if m.title else "",
@@ -106,6 +111,7 @@ def status() -> None:
     typer.echo(Cli.DEGRADED_TRANSCRIPTS.format(count=degraded))
     if rate_mismatched:   # only meetings recorded since 2026-10-14 can be flagged, so the line stays out until one is
         typer.echo(Cli.RATE_MISMATCH_TRANSCRIPTS.format(count=rate_mismatched))
+    typer.echo(Cli.UNCONFIRMED_CLAIMS.format(claims=unconfirmed_claims, meetings=unconfirmed_meetings))
     try:
         active = c.repo.load_active()
         if active:
@@ -134,6 +140,15 @@ def _transcript_health(repo: MeetingRepository, meeting_id: str) -> TranscriptHe
         return repo.load_transcript(meeting_id).health
     except TeamsRecorderError:
         return None
+
+
+def _unconfirmed_count(repo: MeetingRepository, meeting_id: str) -> int:
+    """How many claims of a meeting's analysis are marked unconfirmed (⚠️ in its minutes); 0 for analyses never
+    verified, or unreadable ones."""
+    try:
+        return sum(unconfirmed(v) for v in verifications(repo.load_analysis(meeting_id)))
+    except TeamsRecorderError:
+        return 0
 
 
 @app.command(help=Cli.DOCTOR_CMD_HELP)
@@ -168,6 +183,7 @@ def doctor() -> None:
             hint="" if vad_ok else Cli.VAD_MODEL_HINT.format(script=Files.DOWNLOAD_MODEL_SCRIPT, model=Audio.DEFAULT_VAD_MODEL),
         ))
     _check_transcript_health(settings)
+    _check_verification(settings)
     key_needed = settings.llm_provider == LlmProvider.API
     typer.echo(Cli.API_KEY_LINE.format(mark=_mark(settings.has_api_key, key_needed), hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
     env_file = settings.project_dir / Files.DOTENV
@@ -208,6 +224,21 @@ def _check_transcript_health(settings: Settings) -> None:
         state = Cli.RETRY_ON_VAD.format(path=retry.vad_model_path) if retry.vad_model_path else Cli.RETRY_ON
         mark = Cli.WARNING if hint else Cli.OK
     typer.echo(Cli.RETRY_LINE.format(mark=mark, state=state, hint=hint))
+
+
+def _check_verification(settings: Settings) -> None:
+    """Doctor line for the claim verifier: off, or its model, provider and effort. Never fails the doctor: without
+    its prompt each verification fails and leaves the claims unverified, and the analysis goes on."""
+    if not settings.verify_enabled:
+        typer.echo(Cli.VERIFICATION_LINE.format(mark=Cli.INFO, state=Cli.VERIFICATION_OFF))
+        return
+    model = settings.verify_cli_model if settings.llm_provider is LlmProvider.CLAUDE_CODE else settings.verify_model
+    state = Cli.VERIFICATION_ON.format(model=model, provider=settings.llm_provider, effort=settings.verify_effort)
+    prompt = settings.prompts_dir / Files.VERIFY_PROMPT
+    if prompt.is_file():
+        typer.echo(Cli.VERIFICATION_LINE.format(mark=Cli.OK, state=state))
+    else:
+        typer.echo(Cli.VERIFICATION_LINE.format(mark=Cli.WARNING, state=Cli.VERIFICATION_NO_PROMPT.format(state=state, path=prompt)))
 
 
 def _mark(found: bool, required: bool) -> str:
