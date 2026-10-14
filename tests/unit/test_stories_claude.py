@@ -11,7 +11,7 @@ from teams_recorder.adapters.outbound.stories_claude import (
     StoryOut,
     build_user_message,
 )
-from teams_recorder.domain import Criterion, Action, ActionKind, Analysis, AnalysisError, Decision, Priority, UserStory
+from teams_recorder.domain import SUGGESTION, Criterion, Action, ActionKind, Analysis, AnalysisError, Decision, Priority, UserStory
 from teams_recorder.messages import Prompt, StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -72,7 +72,7 @@ def test_draft_keeps_traceability_honest(guide: Path):
     assert story.priority == Priority.HIGH                  # strongest of the sources
     assert story.due == date(2026, 10, 12)                  # earliest of the sources
     assert story.acceptance_criteria == [Criterion("Dado x, quando y, então z", "00:03:10"),   # brackets dropped, blank removed
-                                         Criterion("Exportar também em PDF", "sugestao")]      # anything but a time: a suggestion
+                                         Criterion("Exportar também em PDF", SUGGESTION)]      # anything but a time: a suggestion
     skipped = {k.action_id: k.reason for k in drafts.skipped}
     assert skipped == {"a3": "não é trabalho de produto", "a4": StoryDoc.NOT_ADDRESSED}
 

@@ -86,7 +86,7 @@ def test_old_drafts_load_and_are_written_back_as_they_were():
     assert story.acceptance_criteria == [Criterion("Dado x, então y")]
     assert codec.story_to_dict(story)["acceptance_criteria"] == ["Dado x, então y"]
     cited = UserStory("t", "n", acceptance_criteria=[Criterion("a", "00:00:05"), Criterion("b", SUGGESTION)])
-    assert codec.story_to_dict(cited)["acceptance_criteria"] == [{"text": "a", "source": "00:00:05"}, {"text": "b", "source": "sugestao"}]
+    assert codec.story_to_dict(cited)["acceptance_criteria"] == [{"text": "a", "source": "00:00:05"}, {"text": "b", "source": "suggestion"}]
     assert codec.story_from_dict(json.loads(json.dumps(codec.story_to_dict(cited)))) == cited
 
 
@@ -94,6 +94,15 @@ def test_the_writer_must_give_every_criterion_a_source_and_is_told_how():
     criterion = strict_schema(StoriesOut)["$defs"]["CriterionOut"]
     assert sorted(criterion["required"]) == ["source", "text"] and criterion["additionalProperties"] is False
     prompt = (load_settings().prompts_dir / Files.STORIES_PROMPT).read_text(encoding="utf-8")
-    assert "Never present a proposal of yours without `sugestao`" in prompt   # the measured rule (fidelity_eval CITE_RULE)
+    assert "Never present a proposal of yours without `suggestion`" in prompt   # the measured rule (fidelity_eval CITE_RULE)
     assert "`verification.status` is `unconfirmed`" in prompt and "never cite them as the source" in prompt
 
+
+
+
+def test_a_damaged_criterion_is_an_error_not_a_citation():
+    import pytest
+    for bad in ({"text": "x", "source": "garbage"}, {"text": "x", "source": 5}, {"text": 5, "source": "00:00:05"}):
+        with pytest.raises((TypeError, ValueError)):
+            codec.criterion_from_value(bad)
+    assert codec.criterion_from_value({"text": "x"}) == Criterion("x")   # no source: as before provenance
