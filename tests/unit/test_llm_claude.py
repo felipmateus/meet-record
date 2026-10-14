@@ -1,4 +1,5 @@
 """ClaudeAnalyzer with a fake transport: message building, trivial cases and domain mapping."""
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -6,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.adapters.outbound.llm_claude import AnalysisOut, ClaudeAnalyzer, build_user_message, strict_schema, to_domain
+from teams_recorder.config import load_settings
+from teams_recorder.constants import Files, Llm
 from teams_recorder.domain import ActionKind, AnalysisError, Meeting, Segment, Transcript
+from teams_recorder.messages import Prompt
 
 SAMPLE_OUT = AnalysisOut.model_validate({
     "summary": "Revisão da sprint e definição de entregas.",  # Portuguese: model output is data
@@ -140,3 +144,21 @@ def test_schema_exposes_enums_and_timestamps():
 def test_actions_keep_the_kind_the_model_gave_them():
     analysis = to_domain(SAMPLE_OUT, Meeting.start(datetime(2026, 10, 6, 10, 0)))
     assert analysis.my_actions[0].kind == ActionKind.COMMUNICATION and analysis.others_actions[0].kind == ActionKind.MANAGEMENT
+
+
+def test_the_analysis_prompt_carries_the_fidelity_rules():
+    """Fidelity guard task 6.0: the four rules the evaluation's analysis errors called for (evaluation §14.2)."""
+    prompt = (load_settings().prompts_dir / Files.ANALYZE_PROMPT).read_text(encoding="utf-8")
+    assert "Never infer the owner from who usually does that kind of work" in prompt                            # owners
+    assert "the user speaks in the first person taking on a commitment" in prompt   # kept: the verifier marks the doubt
+    assert "A person only talked about" in prompt and "is not a participant" in prompt                          # participants
+    assert "A statement with doubt" in prompt and '"preciso confirmar"' in prompt                               # tentative
+    assert "No sensitive personal data in any field" in prompt and "without the reason" in prompt               # sensitive
+    assert "names of people mentioned or addressed" not in prompt   # the old participant rule is gone
+
+
+def test_the_schema_descriptions_repeat_the_owner_and_participant_rules():
+    schema = json.dumps(strict_schema(AnalysisOut), ensure_ascii=False)
+    for description in (Prompt.FIELD_PARTICIPANTS, Prompt.FIELD_ACTION_OWNER, Prompt.FIELD_DEADLINE_WHO):
+        assert description.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN) in schema
+    assert "not people only talked about" in Prompt.FIELD_PARTICIPANTS and "only when the transcript makes it evident" in Prompt.FIELD_DEADLINE_WHO
