@@ -304,7 +304,7 @@ The model returns a schema-validated record:
 | Field | Content |
 |---|---|
 | `title`, `purpose`, `meeting_type` | Inferred title (names untitled automatic recordings), why the meeting happened, and its type (`standup`, `client`, `project_review`, `one_on_one`, `other`) |
-| `participants`, `summary`, `topics` | Names mentioned, 3–6 sentence summary, topics with key points |
+| `participants`, `summary`, `topics` | People who speak or are addressed (not people only talked about), 3–6 sentence summary, topics with key points |
 | `decisions` | Only what was actually decided, with timestamp |
 | `my_actions`, `others_actions` | Description, owner, ISO due date, priority (only when urgency was stated), timestamp, and **kind** |
 | `deadlines`, `open_questions`, `next_meetings`, `risks` | Relative dates are resolved against the meeting date |
@@ -317,7 +317,7 @@ Safeguards:
 
 - Transcripts under 20 words are not sent to the model, because whisper hallucinates on silence. They get a local "transcript too short" analysis instead.
 - Refusals, truncated responses and schema violations are errors. A partial analysis is never saved.
-- The model is told not to invent tasks, deadlines or decisions.
+- The model is told not to invent tasks, deadlines or decisions, to name another person as owner only when the transcript makes it evident (else `indefinido`), not to record tentative statements as decisions, and to keep sensitive personal data (health and private life, for example; the list is in `prompts/analyze_system.md`) out of every field.
 - **Claim verification** (`[verification]`, on by default): one more call, Sonnet at medium effort on the same provider, checks every decision, action, deadline and participant against the transcript. What it cannot confirm is kept and marked "⚠️ _a confirmar: <motivo>_" in `minutes.md`, listed "a confirmar" in the daily plan, and never becomes a user story source. Two checks in code also mark claims with sensitive personal data and participants who neither speak nor are addressed. A failed call leaves the claims unverified and never blocks the analysis. A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not checked: the verifier would confirm the hallucinations the analysis took from it. Its banners in `minutes.md` and the story drafts say so. `enabled = false` turns off the call; the two code checks still run.
 - Every call logs tokens (and cost, or its equivalent) to `data/log/llm_usage.jsonl`; verifier calls are tagged `verify:<meeting>`.
 

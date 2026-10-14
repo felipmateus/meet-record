@@ -502,3 +502,15 @@ teams-recorder/
 - Task 7.0 of `tasks/prd-fidelity-guard/`. `[verification]` (`enabled`, `model` for the API, `cli_model` for Claude Code, `effort`; on, `sonnet`, medium by default) and `container.build_verifier`: the verifier gets its own transport on the `[llm]` provider and writes to the same `llm_usage.jsonl` (tag `verify:<meeting>`). `AnalyzeMeeting` now gets a `VerifyAnalysis` with the verifier and `[user] name`, so the daemon and `trec analyze` verify every new analysis once the agent is restarted. `enabled = false` builds no verifier; the two code checks still run (PRD decision 11).
 - **Untrusted transcripts:** `TranscriptHealth.untrusted` covers a transcript still degraded or one with `rate_mismatch`. `VerifyAnalysis` skips the verifier for it, so the verifier never confirms text the analysis took from a hallucination (PRD decision 4). The claims stay unverified, not all unconfirmed, so the meeting still yields stories under the drafts banner (decisions 9 and 12). The minutes and the drafts document add a line under the transcript banners: no item was confirmed from that transcript. `untrusted_sources` in the drafts uses the same property.
 - `trec doctor`: a claim-verification line (off, or model, provider and effort; a warning, not a failure, when `prompts/verify_system.md` is missing, since each verification would then fail and leave its claims unverified). `trec status`: the number of unconfirmed claims on each meeting's line, and a total.
+
+### Analysis prompt fidelity rules (2026-10-14)
+
+- Task 6.0 of `tasks/prd-fidelity-guard/`, from the analysis errors measured in evaluation §14.2: of 57 wrong claims, 22 had the wrong owner and 14 listed as a participant someone who was only mentioned. A sensitive remark and a tentative statement recorded as decided appeared once each.
+- `prompts/analyze_system.md` now says:
+  - **Owners:** another person is named as an owner of a task or a deadline only when the transcript makes it evident; otherwise the owner is `indefinido`. A first-person commitment still belongs to the user: the review found that narrowing it would send the user's spontaneous commitments to `others_actions`, out of the plan's tracked actions, and the user chose to keep it and let the verifier mark the doubt.
+  - **Participants:** people who speak or are addressed directly, not people only talked about, nor someone given a task in the third person. The participant code check is looser: it also passes a name said twice.
+  - **Decisions:** tentative statements are not decisions.
+  - **Sensitive data:** none in any field; an absence is written without its reason.
+- The schema's descriptions of `participants`, the action owner and the deadline's `who` say the same.
+- Unit tests pin the four rules in the shipped prompt and the descriptions in the schema. Their effect on real claims is measured in task 8.0: the synthetic corpus is analyzed through the product's own prompt (`scripts/wiki_corpus.py process`).
+- The verifier and the code checks still catch what the prompt misses. The prompt reduces errors at the source; the marks remain the safeguard.

@@ -10,8 +10,9 @@
 > - **Task 4.0** (the marks in the minutes, the plan, the stories and the board): done on 2026-10-14. The marks appear once task 7.0 switches verification on; the degraded-transcript banner in the drafts document works already.
 > - **Task 5.0** (provenance of every story criterion): done on 2026-10-14. It is live once merged: every new criterion shows `[hh:mm:ss]` or "(sugestão)".
 > - **Task 1.1** (the retry choice and broken audio, after the wrong-sample-rate incident): done on 2026-10-14.
+> - **Task 6.0** (the analysis prompt's fidelity rules): done on 2026-10-14; measured with the rest in task 8.0.
 > - **Task 7.0** (verification switched on): done on 2026-10-14. `[verification]` runs Sonnet at medium effort after every analysis, live once the daemon is restarted; a degraded transcript, or one from a track at the wrong rate, is not verified (decision 12).
-> - **Tasks 6.0 and 8.0:** not started.
+> - **Task 8.0:** not started.
 
 ## 1. Problem
 
@@ -47,6 +48,7 @@ Every fact that reaches the plan, the stories or the board is either confirmed b
 - **Use of verification downstream (P1):** the minutes mark unconfirmed items with ⚠️; the planner receives unconfirmed actions labelled "a confirmar" and does not treat them as facts; the story writer receives only confirmed actions as story sources and unconfirmed ones as open questions.
 - **Provenance in the stories (P2):** the writer ends every acceptance criterion and detail line with the transcript timestamp it comes from or with "(sugestão)" when nobody said it; the drafts document and the Backlog.md task show both, so the reviewer sees at once what was proposed by the model. (A verifier run on finished stories was tested and rejected: see §3.)
 - **Analysis prompt fixes (P2):** owners only when named, addressed or clearly self-assigned (else `indefinido`), participants only people who speak, tentative statements never as decisions, no sensitive personal data (two follow-up tasks already filed).
+  - As built (task 6.0): "participants who speak" became "who speak or are addressed directly", the rule the participant code check applies; without speaker labels, being greeted or asked something is the evidence that someone was there. The participant code check is looser: it also passes a name said twice. A first-person commitment still belongs to the user (decided by the user on 2026-10-14, at the review): narrowing it to commitments that answer a request made to the user would have sent the user's spontaneous commitments ("deixa que o relatório eu faço") to `indefinido` in `others_actions`, out of the plan's tracked actions. The doubt is the verifier's to mark ("a confirmar" when the owner is not evident), as decision 2 asks. The owner rule applies to other people's tasks and to deadlines.
 - **Regression gate (P3):** `scripts/fidelity_eval.py gate` run on the synthetic corpus whenever a prompt or the verifier changes.
 
 **Out of scope**
