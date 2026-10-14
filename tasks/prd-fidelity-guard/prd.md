@@ -9,7 +9,9 @@
 > - **Task 3.0** (the claim verifier, the two code checks and the verification step): done on 2026-10-13 and reviewed (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-13-17-51.md`). Not switched on yet: that is task 7.0.
 > - **Task 4.0** (the marks in the minutes, the plan, the stories and the board): done on 2026-10-14. The marks appear once task 7.0 switches verification on; the degraded-transcript banner in the drafts document works already.
 > - **Task 5.0** (provenance of every story criterion): done on 2026-10-14. It is live once merged: every new criterion shows `[hh:mm:ss]` or "(sugestão)".
-> - **Tasks 6.0–8.0:** not started.
+> - **Task 1.1** (the retry choice and broken audio, after the wrong-sample-rate incident): done on 2026-10-14.
+> - **Task 7.0** (verification switched on): done on 2026-10-14. `[verification]` runs Sonnet at medium effort after every analysis, live once the daemon is restarted; a degraded transcript, or one from a track at the wrong rate, is not verified (decision 12).
+> - **Tasks 6.0 and 8.0:** not started.
 
 ## 1. Problem
 
@@ -71,7 +73,8 @@ Notes on FR1 and FR7 (2026-10-11, task 1.0):
   - **10 segments:** the window shipped first. It missed loops of 3 or more lines and was changed after the code review.
 - **FR3 (2026-10-13, task 3.0):** FR3 first said a verifier failure leaves everything `unconfirmed`; it now leaves those claims *unverified*, following the tech spec: marking every claim ⚠️ when nothing was checked would be a false mark, and false marks erode trust (§7 Risks). The two code checks still run, and a claim the verifier skipped in an answer that did arrive is `unconfirmed`. The analysis is never blocked.
 - **FR6 (2026-10-14, task 5.0):** the code checks the criteria's sources (each has one; a cited time must be a line of the story's source meetings). Detail lines get the writer's rule only, as in the measured prototype, with no check in code.
-- **FR7:** the transcript part is done (`trec doctor` shows `max_context`, the threshold and the retry state; `trec status` marks and counts degraded transcripts). The verification model line comes with task 7.0.
+- **FR7:** the transcript part is done (`trec doctor` shows `max_context`, the threshold and the retry state; `trec status` marks and counts degraded transcripts). Task 7.0 added the verifier line to `trec doctor` (off, or model, provider and effort) and the unconfirmed claims to `trec status`, per meeting and in total.
+- **FR8 (2026-10-14, task 7.0):** the verifier's calls go to the same `llm_usage.jsonl` through their own transport, tagged `verify:<meeting>`.
 
 ## 6. Success criteria
 
@@ -99,4 +102,7 @@ Decisions taken while building task 1.0 (from measurements on the real and synth
 Decided by the user on 2026-10-12 (the three questions this PRD left open):
 9. **A degraded transcript still produces stories, marked.** Its meeting's actions go through planning and drafting like any other, and the drafts document shows the degraded-transcript banner for that meeting (task 4.0), or the wrong-sample-rate banner when its Teams track was recorded at the wrong rate (task 1.1). Nothing waits for a confirmation, because publishing to the board is already a manual step (`[stories] publish = false`), so the user reviews before anything leaves the drafts.
 10. **Tasks with ⚠️ marks are published marked**, into the board's Triagem column, with the marks and their reasons in the task description (tasks 4.0–5.0). They are not held back in the drafts: Triagem is already where the user reviews them, and holding them would make a second place to review.
-11. **The extra verifier call is accepted** (one Sonnet call at medium effort per meeting, and per drafted day, on the same subscription window as the daemon's analyses). Its cost and calls are measured in `llm_usage.jsonl` during the G4 week (FR8). If it crowds the window, `[verification] enabled = false` turns it off without touching the rest of the guard.
+11. **The extra verifier call is accepted** (one Sonnet call at medium effort per meeting, and per drafted day, on the same subscription window as the daemon's analyses). Its cost and calls are measured in `llm_usage.jsonl` during the G4 week (FR8). If it crowds the window, `[verification] enabled = false` turns it off without touching the rest of the guard. (As built, task 7.0: one call per meeting only; the story verifier the prototype had was not carried over, so there is no call per drafted day.)
+
+Decided while building task 7.0 (2026-10-14):
+12. **An untrusted transcript is not verified.** That means a transcript still degraded after the retry, or one from a Teams track recorded at the wrong sample rate. The verifier is not called, and the claims stay unverified, as on a verifier outage; they are not all marked unconfirmed. The minutes and the drafts document add, under the transcript banners, that no item was confirmed from that transcript. Marking every claim ⚠️ would have kept all of the meeting's features and bugs out of the stories, against decision 9. It would also have put marks on claims nothing judged (the false-mark risk). Either way no claim of such a transcript is ever confirmed (decision 4).
