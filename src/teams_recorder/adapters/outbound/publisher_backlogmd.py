@@ -53,13 +53,13 @@ def git_ignore_state(path: Path, runner: Callable[..., Any] = subprocess.run) ->
     return GitIgnore.UNKNOWN
 
 
-
 def criterion_text(criterion: Criterion) -> str:
     """A criterion as the board shows it, with its source: "<text> [hh:mm:ss]" or "<text> (sugestão)" (FR6), so the
     reviewer sees on the board itself what the model proposed."""
     if criterion.suggested:
         return criterion.text + StoryDoc.BOARD_SUGGESTION
     return criterion.text + (StoryDoc.BOARD_CRITERION_AT.format(at=criterion.source) if criterion.source else "")
+
 
 @dataclass
 class BacklogMdPublisher:

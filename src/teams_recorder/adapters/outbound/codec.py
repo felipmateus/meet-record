@@ -8,13 +8,16 @@ from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any
 
-from teams_recorder.constants import Audio
+import re
+
+from teams_recorder.constants import Audio, Parse
 from teams_recorder.domain import (
     Action,
     ActionKind,
     ActionStatus,
     Analysis,
     CaptureStats,
+    Criterion,
     DailyPlan,
     Deadline,
     Decision,
@@ -28,10 +31,10 @@ from teams_recorder.domain import (
     Topic,
     Transcript,
     TranscriptHealth,
+    SUGGESTION,
     UserStory,
     Verification,
     VerificationStatus,
-    Criterion,
 )
 from teams_recorder.messages import Err
 
@@ -262,16 +265,22 @@ def plan_from_dict(d: dict[str, Any]) -> DailyPlan:
 
 
 # User story drafts
-def _criterion_to(c: Criterion) -> Any:
+def criterion_to_value(c: Criterion) -> Any:
     """A criterion with a source as {text, source}; one without (drafted before provenance) as the plain text it was."""
     return {"text": c.text, "source": c.source} if c.source is not None else c.text
 
 
-def _criterion_from(value: Any) -> Criterion:
-    # drafts written before 2026-10-14 stored criteria as plain strings
-    if isinstance(value, str):
+def criterion_from_value(value: Any) -> Criterion:
+    """Strict, like the verification reader: a source must be HH:MM:SS or SUGGESTION, so a damaged file cannot
+    show an invented citation as confirmed."""
+    if isinstance(value, str):   # drafts written before 2026-10-14 stored criteria as plain strings
         return Criterion(value)
-    return Criterion(str(value["text"]), value.get("source"))
+    text, source = value["text"], value.get("source")
+    if not isinstance(text, str):
+        raise TypeError(Err.BAD_CRITERION.format(value=value))
+    if source is not None and source != SUGGESTION and not (isinstance(source, str) and re.fullmatch(Parse.CLOCK, source)):
+        raise ValueError(Err.BAD_CRITERION.format(value=value))
+    return Criterion(text, source)
 
 
 def story_to_dict(s: UserStory) -> dict[str, Any]:
@@ -279,7 +288,7 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
         "id": s.id,
         "title": s.title,
         "narrative": s.narrative,
-        "acceptance_criteria": [_criterion_to(c) for c in s.acceptance_criteria],
+        "acceptance_criteria": [criterion_to_value(c) for c in s.acceptance_criteria],
         "details": s.details,
         "open_questions": list(s.open_questions),
         "source_action_ids": list(s.source_action_ids),
@@ -299,7 +308,7 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         id=d["id"],
         title=d["title"],
         narrative=d.get("narrative", ""),
-        acceptance_criteria=[_criterion_from(c) for c in d.get("acceptance_criteria", [])],
+        acceptance_criteria=[criterion_from_value(c) for c in d.get("acceptance_criteria", [])],
         details=d.get("details", ""),
         open_questions=list(d.get("open_questions", [])),
         source_action_ids=list(d.get("source_action_ids", [])),

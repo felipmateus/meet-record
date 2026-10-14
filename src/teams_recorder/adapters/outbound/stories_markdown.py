@@ -22,7 +22,7 @@ def _br(day: date) -> str:
     return day.strftime("%d/%m/%Y")
 
 
-def _source(criterion: Criterion) -> str:
+def _source_label(criterion: Criterion) -> str:
     """Where a criterion comes from: the transcript time, "(sugestão)", or nothing for drafts made before provenance."""
     if criterion.suggested:
         return StoryDoc.CRITERION_SUGGESTION
@@ -82,7 +82,7 @@ class MarkdownStoryRenderer:
             out.append(StoryDoc.UNCONFIRMED.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_NO_REASON)
         out += ["", story.narrative]
         if story.acceptance_criteria:
-            out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c.text) + _source(c) for c in story.acceptance_criteria)]
+            out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c.text) + _source_label(c) for c in story.acceptance_criteria)]
         if story.details:
             out += ["", story.details]
         if story.open_questions:
