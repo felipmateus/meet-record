@@ -288,6 +288,7 @@ The M4A is converted to 16 kHz mono WAV and passed to `whisper-cli` with the lan
 - Above `transcription.max_loop_share` (10%), the transcript is **degraded** and is transcribed once more with `-mc 0` and Silero VAD (about 30% slower). The result with more minutes of text is kept, so an empty retry never replaces a usable first pass.
 - If it is still degraded, it is saved anyway and the analysis runs on it. You get a "Degraded transcript" notification with the time ranges that have no text, `minutes.md` opens with a warning banner, and `trec status` marks the meeting.
 - `trec transcribe` prints a health line for each meeting, and `trec doctor` shows whether the retry is on.
+- If the Teams track itself was recorded at the wrong sample rate (more than 5% of it padded with short silences; it happened with a Bluetooth headset in a call before 2026-10-14), the transcript is flagged instead: a "Teams audio recorded at the wrong rate" notification, a banner in `minutes.md`, and a mark in `trec status`. `scripts/recover-rate-mismatch.sh <meeting folder>` writes an `audio.recovered.m4a` with the remote speech back at its normal speed (see the script for its limits).
 
 Voice activity detection (Silero) is off on the first pass. In a test with short sentences it cut off speech, and the noise reduction in the mix is what improved the text. The installer downloads the VAD model for the retry; to use VAD on every pass, set `transcription.vad = true`.
 
@@ -490,6 +491,7 @@ data/                                   # paths.data_dir (git-ignored)
 ├── recordings/<YYYY-MM-DD_HH-MM-SS>/   # one folder per meeting
 │   ├── meta.json                       # id, start, end, PID, title
 │   ├── tap.wav, mic.wav                # raw tracks, only until mixed
+│   ├── tap.stats.json                  # teams-tap's counters for the Teams track (padding, device rates)
 │   ├── audio.m4a                       # mono AAC 48 kHz mix
 │   ├── transcript.json, transcript.txt
 │   ├── analysis.json, minutes.md

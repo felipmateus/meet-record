@@ -107,7 +107,7 @@ Every port has a fake adapter in `tests/fakes/` so tests run without hardware or
 
 - `StartRecording`: creates the folder, writes `meta.json`, starts the tap and the microphone, notifies.
 - `StopRecording`: stops the captures, mixes, writes `audio.m4a`, removes the raw tracks, notifies, enqueues transcription.
-- `TranscribeMeeting`: reads `audio.m4a`, produces `transcript.txt` and `transcript.json`; computes the transcript's health (`domain/health.py`), retranscribes a degraded one once with the anti-loop transcriber, keeps the healthier result and notifies when it is still degraded.
+- `TranscribeMeeting`: reads `audio.m4a`, produces `transcript.txt` and `transcript.json`; computes the transcript's health (`domain/health.py`), retranscribes a degraded one once with the anti-loop transcriber, keeps the healthier result and notifies when it is still degraded. It also reads the Teams track's capture counters (`tap.stats.json`, `MeetingRepository.load_capture_stats`), marks the health `rate_mismatch` and notifies when they show the track was recorded at the wrong sample rate; counters it cannot read skip that check and never fail the transcription.
 - `AnalyzeMeeting`: reads the transcript, calls the analyzer, writes `analysis.json`.
 - `BuildDailyPlan`: reads the day's analyses, the previous plan and the open actions; writes `plans/AAAA-MM-DD.md` and updates `open_actions.json`.
 - `PurgeOldAudio`: deletes `audio.m4a` older than 30 days when a transcript is present.
@@ -122,7 +122,7 @@ Every port has a fake adapter in `tests/fakes/` so tests run without hardware or
 ### 5.5 Outbound adapters (`adapters/outbound/`)
 
 **`CoreAudioTapCapture`** runs the `native/teams-tap` binary (Swift) as a subprocess:
-`teams-tap --pid <pid> --out tap.wav`; captures via `AudioHardwareCreateProcessTap` + aggregate device, 48 kHz, shuts down cleanly on SIGTERM.
+`teams-tap --pid <pid> --out tap.wav --stats tap.stats.json`; captures via `AudioHardwareCreateProcessTap` + aggregate device, reads the buffers at the aggregate's real rate and resamples them to 48 kHz, shuts down cleanly on SIGTERM.
 
 **`FfmpegMicCapture`**: `ffmpeg -f avfoundation -i ":<idx>" mic.wav`, configurable device.
 
@@ -155,6 +155,7 @@ The only place that instantiates concrete adapters from `config.py`. Tests swap 
 │   └── 2026-10-06_14-00-12/
 │       ├── meta.json          # start, end, pid, pipeline version
 │       ├── tap.wav            # temporary, deleted after mixing
+│       ├── tap.stats.json     # teams-tap's counters for the Teams track (padding, device rates); kept
 │       ├── mic.wav            # temporary, deleted after mixing
 │       ├── audio.m4a          # deleted after 30 days
 │       ├── transcript.txt
@@ -448,3 +449,25 @@ teams-recorder/
   - PRD pages 03 and 06 did not describe the marks.
 
   The stories renderer no longer imports a use case.
+
+### Teams track at the wrong sample rate (2026-10-14)
+- **Symptom:** three meetings (2026-10-13_09-18-44, 2026-10-14_15-00-56, 2026-10-14_15-38-49) had transcripts full of hallucinations. The cause was the audio, not whisper: the Teams track was 3x fast and chopped (~0.1 s of speech, 0.2 s of silence).
+- **Cause:** `ProcessTapRecorder` read the format once from `kAudioTapPropertyFormat` (48 kHz) and wrote the WAV at that rate, but the aggregate device runs at its main sub-device's rate, the default output. A Bluetooth headset in a call (HFP) runs at 16 kHz, so the IOProc got 16 kHz buffers labeled 48 kHz. `TimelineWriter` then fell behind the host-time clock by 2/3 of every second and padded the gap with silence 0.2 s at a time, under the 0.5 s threshold that logs a gap. `capture.log` showed it: 902 of 1353 s, 1454 of 2185 s and 475 of 710 s padded (67%, which is 1 − 16/48), with "0 gap(s)". Healthy tracks pad under 3%.
+- **Fix (native):** the input format now takes the tap's layout and the aggregate's nominal rate. A `kAudioDevicePropertyNominalSampleRate` listener follows rate changes mid-call, and `TapConverter` resamples to 48 kHz with `AVAudioConverter`, as the microphone path does. As a safety net, `RateMeter` measures the device's rate from its sample clock against host time (frame counts when the sample time is invalid), skipping intervals over 0.5 s (delivery pauses) and intervals implying an impossible rate (clock jumps). When two 2 s windows in a row disagree with the assumed rate by more than 5% and sit within 1.5% of a standard rate, it switches to that rate. If the output device also has an input (a headset microphone in call mode) and its stream comes along, the tap's stream is picked by its channel layout.
+- **Detection (pipeline):** `TimelineWriter` counts padding in short pads (under 0.5 s) apart, adds a WARNING to the stop line when it exceeds 5% of a track of 60 s or more, and `--stats` writes the counters and device rates to `tap.stats.json`. `TranscribeMeeting` reads them through `MeetingRepository.load_capture_stats`; `domain/health.rate_mismatch` (short padding over `Audio.MAX_SHORT_PAD_SHARE` = 5% on tracks of at least 60 s) sets `TranscriptHealth.rate_mismatch` and `short_padding_share`. The user gets a "Teams audio recorded at the wrong rate" notification, `minutes.md` opens with its own banner, and `trec status` and `trec transcribe` mark the meeting. Unreadable counters skip the check; meetings recorded before 2026-10-14 (or on Windows) have no counters and are never flagged.
+- **Verification:** the real tap was not exercised from the development session: processes started there lack the system-audio-recording permission, so the old and the new binary both recorded digital silence from `afplay`. The installed binary ran end to end (tap, aggregate, timeline, stats, clean exit when the target exits). The conversion was driven by a scratch harness that fed `TapConverter` + `TimelineWriter` synthetic 10 ms buffers of a 1 kHz tone. At 16, 44.1 and 48 kHz the output was 1 kHz at the right length with no padding. With the rate property wrong (48 kHz claimed, 16 kHz delivered), the meter switched to 16 kHz after about 4 s, and 2.6 s of 10 s were padded before that. With an extra mono stream ahead of the tap's, the tap's stream was picked. The harness also caught a crash in that path: `bufferListNoCopy`'s deallocator gets AVAudioPCMBuffer's copy of the list, not the caller's.
+- **Recovery of the affected meetings:** only the mixed `audio.m4a` was kept. `scripts/recover-rate-mismatch.sh <meeting>` writes `audio.recovered.m4a`: it strips silence (silenceremove with peak detection over 5 ms windows, `THRESHOLD`, default -70 dB, 0.01 s) and replays at device/file speed (`asetrate`). It never touches `audio.m4a` and writes through a temporary file, so a failed run leaves nothing behind. In the mix the microphone runs through the pads, so on 2026-10-14_15-38-49 it strips 273 of the 475 padded seconds. The result (1311 s for a 710 s meeting) carries the remote speech at the right pitch and pace in ~0.1 s bursts separated by quiet, and the microphone half is slowed down.
+- **Code review (2026-10-14, `code-review` skill, run log `RUN_LOG-felipemateusdecarvalho-2026-10-14-17-10.md`), fixed:**
+  - The stats check, though advisory, let an `OSError` reading `tap.stats.json` escape and discard the finished transcription. The repository now reads it through `retry_io` and turns any I/O failure into `RepositoryError`; `TranscribeMeeting` also catches `OSError`.
+  - The recovery script's default RMS detection kept most pads even of digital zeros: a 10 s tone gated 0.1 s on / 0.2 s off kept 5.2 s, against 4.0 s with peak detection over 5 ms and 0.01 s, and 3.3 s ideal.
+  - `RateMeter` read IO cycles the process missed under load as a slower device. 6% of cycles missed measured ~45 kHz, which snapped to 44.1 kHz and switched a healthy 48 kHz stream. It now prefers the device sample time and requires the measurement to sit near a standard rate. The harness case with 6% of cycles dropped keeps 48 kHz with and without sample time, and a 10 s sample-clock jump is ignored.
+  - `stop()` drained the IO queue only after destroying the aggregate device and the tap. It now drains right after the IOProc is destroyed, and a queue-confined `capturing` flag replaces the cross-thread read of `stopped`.
+  - Also fixed: the stats counters the check does not use (`padded_seconds`, `gaps`) are optional, `trec status` counts rate-mismatched transcripts, the listener address is defined once, and the docs (`AGENTS.md`, §5.3) mention the second banner.
+- **Left to the user's decision:**
+  - P3: the tap's layout and stream are taken from the tap format, not from the aggregate's stream formats.
+  - P4: about 4 s at a stale rate are never flagged.
+  - P5: `gaps` is not used for "no logged gaps".
+  - P7: meetings without counters are never flagged, and the microphone's stats are not requested.
+  - S4: the 5% / 60 s rule is defined in both Swift and Python.
+  - S6: the thresholds are not configurable.
+  - S7: the predicate and the field share the name `rate_mismatch`.

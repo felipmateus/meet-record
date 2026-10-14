@@ -40,10 +40,12 @@ Lets the user record a Teams call under their own control, without relying on th
 ## Aligned tracks
 Both recorders receive the meeting start as a shared epoch (`--epoch`). Each audio buffer is written at its Core Audio host-time position; missing time (recorder start-up, or delivery pausing during the call) is filled with silence and logged as `gap of X s at Y s`, so the Teams and microphone tracks keep the real call duration and stay in sync.
 
+The Teams track is read at the rate the output device really runs at (16 kHz for a Bluetooth headset in a call, which can change mid-call) and resampled to 48 kHz. Until 2026-10-14 it was written at the tap's nominal 48 kHz, so with a headset in a call it came out 3x fast and chopped. When recording stops, `teams-tap` writes its counters to `tap.stats.json` (seconds written, silence padded, padding in short pads, logged gaps, device rates). The transcription step reads them to flag a track recorded at the wrong rate (see Transcription).
+
 ## Integrations
 | Integration | Use | Notes |
 |---|---|---|
-| `teams-tap --pid` (Core Audio Process Tap) | Audio emitted by Teams | Captures the process and its audio-client descendants; 32-bit float WAV, 48 kHz stereo |
+| `teams-tap --pid` (Core Audio Process Tap) | Audio emitted by Teams | Captures the process and its audio-client descendants; WAV (16-bit by default, `--bits 32` for float), 48 kHz stereo resampled from the output device's rate; counters in `tap.stats.json` (`--stats`) |
 | `teams-tap --mic` (AVAudioEngine) | Microphone | 32-bit float WAV, 48 kHz mono; alternative `ffmpeg` backend available through configuration |
 | ffmpeg | Mixing and encoding | See the integrations appendix for the filter chain |
 
