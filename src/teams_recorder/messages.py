@@ -390,7 +390,8 @@ class Prompt:
     TRUNCATED = "\n…(truncated)"
     # JSON Schema field descriptions (part of the contract with the model)
     FIELD_ACTION_DESCRIPTION = "Task, starting with a verb in the infinitive"
-    FIELD_ACTION_OWNER = "Owner; '{self_owner}' for the recording owner; '{unknown}' when unknown"
+    FIELD_DEADLINE_WHO = "Who delivers it; '{self_owner}' for the recording owner; another person only when the transcript makes it evident; '{unknown}' otherwise"
+    FIELD_ACTION_OWNER = "Owner; '{self_owner}' for the recording owner; another person only when the transcript makes it evident; '{unknown}' otherwise"
     FIELD_DUE = "Due date in ISO format (YYYY-MM-DD) or null"
     FIELD_ISO_DATE = "ISO date or null"
     FIELD_AT = "Transcript timestamp (HH:MM:SS) of the line where it was said, or null"
@@ -399,7 +400,7 @@ class Prompt:
     FIELD_TITLE = "Short meeting title (max 8 words), inferred from the content"
     FIELD_PURPOSE = "One sentence: why the meeting happened"
     FIELD_MEETING_TYPE = "standup, client, project_review, one_on_one or other"
-    FIELD_PARTICIPANTS = "Names of people mentioned or addressed in the meeting (no guessing)"
+    FIELD_PARTICIPANTS = "Names of people who speak or are addressed directly in the meeting, not people only talked about (no guessing)"
     FIELD_TOPICS = "Main discussion topics in order, each with its key points"
     FIELD_RISKS = "Risks, blockers or issues raised"
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"

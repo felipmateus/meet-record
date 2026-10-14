@@ -287,7 +287,7 @@ class Analysis:
     title: str = ""
     purpose: str = ""
     meeting_type: MeetingType = MeetingType.OTHER
-    participants: list[str] = field(default_factory=list)  # names mentioned (no diarization yet)
+    participants: list[str] = field(default_factory=list)  # people who speak or are addressed (no diarization yet)
     topics: list[Topic] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     participant_checks: dict[str, Verification] = field(default_factory=dict)  # by name, as in `participants`; absent: not verified
