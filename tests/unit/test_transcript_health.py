@@ -1,5 +1,7 @@
 """Transcript health: repetition loops (whisper hallucination) and minutes without text."""
-from teams_recorder.domain import Segment, Transcript, TranscriptHealth, loop_flags, transcript_health
+import pytest
+
+from teams_recorder.domain import CaptureStats, Segment, Transcript, TranscriptHealth, loop_flags, rate_mismatch, transcript_health
 from tests.fakes import looped_transcript, speech_transcript
 
 
@@ -109,3 +111,28 @@ def test_an_empty_or_cut_short_retry_never_replaces_a_pass_with_text():
     first = TranscriptHealth(0.92, 27, 86, True, ((0, 59),))
     assert not TranscriptHealth(0.0, 0, 86, False, ((0, 86),)).is_healthier_than(first)   # VAD dropped everything
     assert not TranscriptHealth(0.0, 3, 86, False).is_healthier_than(first)                # only 3 minutes came back
+
+
+# --- sample-rate mismatch in the Teams track ----------------------------------------------------
+
+def _stats(written: float, short: float, gaps: int = 0) -> CaptureStats:
+    return CaptureStats(written_seconds=written, padded_seconds=short, short_padded_seconds=short, gaps=gaps)
+
+
+def test_a_16_khz_device_written_as_48_khz_is_a_rate_mismatch():
+    # counters of 2026-10-14_15-38-49: 709.9 s written, 474.9 s padded in 0.2 s pads, 0 gaps
+    assert rate_mismatch(_stats(709.9, 474.9), 0.05, 60) is True
+    assert _stats(709.9, 474.9).short_padding_share == pytest.approx(0.669, abs=0.001)
+
+
+def test_healthy_tracks_and_logged_gaps_are_not_a_rate_mismatch():
+    assert rate_mismatch(_stats(986.4, 7.4), 0.05, 60) is False   # 2026-10-14_09-31-39: jitter only
+    long_gaps = CaptureStats(written_seconds=1621.4, padded_seconds=147.8, short_padded_seconds=0.0, gaps=1)
+    assert rate_mismatch(long_gaps, 0.05, 60) is False           # delivery pauses are logged gaps, not short pads
+
+
+def test_short_tracks_are_not_judged_and_the_threshold_is_exclusive():
+    assert rate_mismatch(_stats(23.6, 11.3), 0.05, 60) is False   # start-up weighs too much on a few seconds
+    assert rate_mismatch(_stats(100.0, 5.0), 0.05, 60) is False
+    assert rate_mismatch(_stats(100.0, 5.1), 0.05, 60) is True
+    assert _stats(0.0, 0.0).short_padding_share == 0.0

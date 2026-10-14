@@ -10,6 +10,7 @@ from teams_recorder.constants import Files
 from teams_recorder.domain import (
     Action,
     ActionKind,
+    CaptureStats,
     DailyPlan,
     Meeting,
     MeetingNotFound,
@@ -25,7 +26,7 @@ from teams_recorder.domain import (
     UserStory,
     derive_status,
 )
-from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, LOCK, META, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, LOCK, META, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -245,7 +246,7 @@ def test_action_kind_round_trip_and_actions_from_before_classification(fs: FsMee
 
 def test_transcript_health_roundtrip_and_old_files_without_it(fs: FsMeetingRepository):
     m = Meeting.start(datetime(2026, 10, 8, 10, 30, 52)); fs.create(m)
-    health = TranscriptHealth(0.668, 28, 86, True, ((0, 14), (15, 59)), retried=True)
+    health = TranscriptHealth(0.668, 28, 86, True, ((0, 14), (15, 59)), retried=True, rate_mismatch=True, short_padding_share=0.669)
     transcript = Transcript([Segment(0.0, 5.0, "A CIDADE NO BRASIL")], "pt", health)
 
     fs.save_transcript(m.id, transcript)
@@ -386,3 +387,36 @@ def test_a_damaged_pointer_to_an_existing_meeting_is_a_repository_error(fs: FsMe
     with pytest.raises(RepositoryError, match=Files.ACTIVE_RECORDING):
         fs.load_active()
     assert pointer.exists()   # a live recording's pointer is never deleted on a read error
+
+
+def test_capture_stats_as_teams_tap_writes_them(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 14, 15, 38, 49)); fs.create(m)
+    assert fs.load_capture_stats(m.id) is None                       # Windows, or recorded before 2026-10-14
+    fs.path(m.id, TAP_STATS).write_text(json.dumps({
+        "written_seconds": 709.9, "padded_seconds": 474.9, "short_padded_seconds": 474.9, "gaps": 0,
+        "file_rate": 48000, "device_rates": [48000, 16000], "rate_changes": 1,
+    }))
+    assert fs.load_capture_stats(m.id) == CaptureStats(709.9, 474.9, 474.9, 0, (48000.0, 16000.0))
+    assert derive_status(fs.files(m.id)) is MeetingStatus.RECORDING   # not a status file
+    fs.path(m.id, TAP_STATS).write_text(json.dumps({"written_seconds": 60.0, "short_padded_seconds": 1.0}))
+    assert fs.load_capture_stats(m.id) == CaptureStats(60.0, 0.0, 1.0, 0)   # the counters the check does not use are optional
+    for bad, match in (({"written_seconds": 1.0}, "short_padded_seconds"), ([1, 2], "invalid JSON")):
+        fs.path(m.id, TAP_STATS).write_text(json.dumps(bad))
+        with pytest.raises(RepositoryError, match=match):
+            fs.load_capture_stats(m.id)
+    fs.path(m.id, TAP_STATS).write_text("{")
+    with pytest.raises(RepositoryError, match="invalid JSON"):
+        fs.load_capture_stats(m.id)
+
+
+def test_capture_stats_that_cannot_be_read_are_a_repository_error(fs: FsMeetingRepository):
+    m = Meeting.start(datetime(2026, 10, 14, 15, 38, 49)); fs.create(m)
+    fs.path(m.id, TAP_STATS).mkdir()   # IsADirectoryError, an OSError that is not "missing"
+    with pytest.raises(RepositoryError, match="cannot read"):
+        fs.load_capture_stats(m.id)
+
+
+def test_health_from_before_the_rate_check_loads_unflagged():
+    old = {"loop_share": 0.0, "covered_minutes": 3, "total_minutes": 3, "degraded": False, "uncovered": []}
+    health = codec.health_from_dict(old)
+    assert not health.rate_mismatch and health.short_padding_share == 0.0

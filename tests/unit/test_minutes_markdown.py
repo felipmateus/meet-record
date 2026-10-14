@@ -80,3 +80,13 @@ def test_degraded_without_gaps_and_healthy_transcripts():
     healthy = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.0, 45, 45, False))
     assert "Transcrição degradada" not in healthy
     assert healthy == MarkdownMinutesRenderer().render(_meeting(), _analysis())   # same as before the check existed
+
+
+def test_a_track_recorded_at_the_wrong_rate_puts_its_own_banner_under_the_title():
+    from teams_recorder.domain import TranscriptHealth
+    health = TranscriptHealth(0.0, 12, 12, False, rate_mismatch=True, short_padding_share=0.669)
+    lines = MarkdownMinutesRenderer().render(_meeting(), _analysis(), health).splitlines()
+    assert lines[2].startswith("> ⚠️ **Áudio do Teams gravado com a taxa errada:** 67% da faixa do Teams")
+    assert lines[3] == "" and lines[4].startswith("📅 **Data:**")
+    both = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.3, 5, 12, True, rate_mismatch=True, short_padding_share=0.5))
+    assert both.index("Transcrição degradada") < both.index("taxa errada")
