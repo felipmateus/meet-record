@@ -77,7 +77,7 @@ def status() -> None:
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
     typer.echo(Cli.MEETINGS.format(count=len(meeting_ids)))
-    degraded = 0
+    degraded = rate_mismatched = 0
     for meeting_id in meeting_ids:
         try:
             m = c.repo.load_meta(meeting_id)
@@ -93,6 +93,9 @@ def status() -> None:
         if health is not None and health.degraded:
             degraded += 1
             marker = Cli.MEETING_DEGRADED.format(loop=health.loop_share)
+        if health is not None and health.rate_mismatch:
+            rate_mismatched += 1
+            marker += Cli.MEETING_RATE_MISMATCH.format(share=health.short_padding_share)
         typer.echo(Cli.MEETING_LINE.format(
             meeting_id=m.id,
             title=Cli.MEETING_TITLE.format(title=m.title) if m.title else "",
@@ -101,6 +104,8 @@ def status() -> None:
             health=marker,
         ))
     typer.echo(Cli.DEGRADED_TRANSCRIPTS.format(count=degraded))
+    if rate_mismatched:   # only meetings recorded since 2026-10-14 can be flagged, so the line stays out until one is
+        typer.echo(Cli.RATE_MISMATCH_TRANSCRIPTS.format(count=rate_mismatched))
     try:
         active = c.repo.load_active()
         if active:
@@ -292,6 +297,8 @@ def transcribe(
                                                     retried=Cli.RETRIED if health.retried else ""))
             if health.degraded:
                 typer.echo(Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""))
+            if health.rate_mismatch:
+                typer.echo(Cli.TRANSCRIPT_RATE_MISMATCH.format(share=health.short_padding_share))
         typer.echo(Cli.TEXT_PATH.format(path=c.repo.path(mid, TRANSCRIPT_TXT)))
     if failures:
         raise typer.Exit(code=1)
