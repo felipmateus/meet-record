@@ -25,6 +25,7 @@ Once a day, consolidates the analyses of the day's meetings, the previous day's 
 - Does not invent actions: every new action comes from one of the day's analyses; completed/overdue must match an id in the open list.
 - Marks an action completed only on a clear indication in some analysis; overdue when the deadline has passed as of the plan date.
 - Brazilian Portuguese, direct.
+- Once claim verification is switched on (fidelity-guard task 7.0), an action, decision or deadline the verifier did not confirm stays in the plan marked "(a confirmar)" with the reason. It is never presented as a fact or made a priority unless overdue or due on the plan date, and the user's unconfirmed actions are also listed under "Conflitos e alertas". Unverified items are treated as before.
 
 ## Interactions
 - `trec plan` without a date: today. With `--date`: rebuilds that day's plan (replaces that day's files). `--purge` applies audio retention afterwards.

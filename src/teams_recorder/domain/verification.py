@@ -25,6 +25,38 @@ def claim_refs(analysis: Analysis) -> list[ClaimRef]:
     return [c.ref for c in claims(analysis)]
 
 
+def unconfirmed(v: Verification | None) -> bool:
+    """Checked and not confirmed. A claim never checked (None) is not unconfirmed: it is shown as before."""
+    return v is not None and v.status is VerificationStatus.UNCONFIRMED
+
+
+def unconfirmed_reason(v: Verification | None) -> str | None:
+    """The reason to show next to an unconfirmed claim, on one line ("" when there is none); None when the claim is
+    not unconfirmed. A reason written by the model may hold line breaks, which would break a Markdown table or list."""
+    if v is None or not unconfirmed(v):
+        return None
+    return " ".join(v.reason.split())
+
+
+def verifications(analysis: Analysis) -> list[Verification | None]:
+    """The verification of every claim of an analysis (see `claims`), None where a claim was not verified."""
+    found: list[Verification | None] = []
+    for claim in claims(analysis):
+        if claim.ref.kind is ClaimKind.PARTICIPANT:
+            found.append(analysis.participant_checks.get(claim.text))
+        else:
+            found.append(_claim_verification(analysis, claim.ref))
+    return found
+
+
+def _claim_verification(analysis: Analysis, ref: ClaimRef) -> Verification | None:
+    if ref.kind is ClaimKind.DECISION:
+        return analysis.decisions[int(ref.key)].verification
+    if ref.kind is ClaimKind.DEADLINE:
+        return analysis.deadlines[int(ref.key)].verification
+    return next((a.verification for a in analysis.all_actions if a.id == ref.key), None)
+
+
 def combine(first: Verification | None, second: Verification | None) -> Verification | None:
     """Two verdicts on one claim: unconfirmed if either is, with both reasons; None only if neither checked it."""
     if first is None or second is None:

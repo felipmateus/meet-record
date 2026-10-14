@@ -7,7 +7,8 @@
 > - **Task 1.0** (transcript health and language): implemented on 2026-10-11 and reviewed with the `code-review` skill (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-11-20-34.md`). FR1 and FR2 below record what changed while building it, and G1 is met.
 > - **Task 2.0** (verification types and persistence): done on 2026-10-12.
 > - **Task 3.0** (the claim verifier, the two code checks and the verification step): done on 2026-10-13 and reviewed (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-13-17-51.md`). Not switched on yet: that is task 7.0.
-> - **Tasks 4.0–8.0:** not started.
+> - **Task 4.0** (the marks in the minutes, the plan, the stories and the board): done on 2026-10-14. The marks appear once task 7.0 switches verification on; the degraded-transcript banner in the drafts document works already.
+> - **Tasks 5.0–8.0:** not started.
 
 ## 1. Problem
 

@@ -32,7 +32,14 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 - `TranscribeMeeting`: computes health; when degraded and `[transcription] retry_on_loop`, transcribes again through the anti-loop transcriber and keeps the healthier result; saves health with the transcript; a still-degraded transcript notifies `Notify.TRANSCRIPT_DEGRADED`.
 - `AnalyzeMeeting` → new `VerifyAnalysis` step in the pipeline (after analysis, before minutes): applies the verifier and the code checks; failures leave claims unverified and are logged, never `error.txt`.
 - `BuildDailyPlan` passes verification to the planner; the plan prompt says unconfirmed actions are listed as "a confirmar".
-- `DraftUserStories`: candidate actions with `unconfirmed` status go to the writer marked "a confirmar" (owner unknown when the owner was the doubt); the writer's output schema gains `source` per criterion; `to_drafts` keeps a cited timestamp only if it exists in a source meeting's transcript, else turns it into `sugestao`.
+- ~~`DraftUserStories`: candidate actions with `unconfirmed` status go to the writer marked "a confirmar" (owner unknown when the owner was the doubt); the writer's output schema gains `source` per criterion; `to_drafts` keeps a cited timestamp only if it exists in a source meeting's transcript, else turns it into `sugestao`.~~ (superseded by the task 4.0 note below)
+  - As built (task 4.0):
+    - **Plan:** the planner already receives the marks, because the codec writes `verification` on the analyses and actions it sends. `prompts/plan_system.md` says what they mean: keep unconfirmed items, write "(a confirmar)" with the reason, never present them as facts or priorities, and put the user's unconfirmed actions under "Conflitos e alertas".
+    - **Stories (FR5):** `DraftUserStories` never gives the writer an unconfirmed feature or bug as a source. It lists it as left out with "não confirmada na transcrição: <reason>". A technical or operation action still becomes a task card that carries the action's verification (`UserStory.verification`, PRD decision 10). An action never verified (None) is handled as before.
+    - **Plan-only actions:** an unconfirmed management or communication action keeps its "fica só no plano" reason in the drafts, with "(⚠️ não confirmada na transcrição: <reason>)" added (FR4).
+    - **Reasons:** shown everywhere through `domain.unconfirmed_reason`, on one line (the verifier also flattens them), with Markdown's `_` and `*` escaped in the minutes, so a reason cannot break a table or a list.
+    - **For task 5.0:** the story writer still sees unconfirmed decisions and other people's actions in its meeting context, and `prompts/stories_system.md` says nothing about the marks.
+    - **Drafts banner:** `degraded_sources()` finds the source meetings whose transcript is degraded, both when drafting and when publishing re-renders the document, and the renderer shows a banner for each (PRD decision 9).
 
 ## 4. Adapters
 
@@ -52,6 +59,7 @@ audio → Transcriber ─▶ transcript_health() ─(degraded)─▶ Transcriber
 - `prompts/stories_system.md`: the provenance rule (prototype: `CITE_RULE` in `scripts/fidelity_eval.py`).
 - `minutes_markdown`: ⚠️ marks with the reason; banner for degraded transcripts. `stories_markdown`: each criterion with its timestamp or "(sugestão)".
 - `publisher_backlogmd`: marks carried into the task description.
+  - As built (task 4.0): `minutes_markdown` marks each unconfirmed decision, action, deadline and participant with " ⚠️ _a confirmar: <reason>_" (a pipe in a reason is replaced inside the action table) and adds a legend under the title; minutes without unconfirmed claims are unchanged. A marked task card starts its board description with "⚠️ **A confirmar na transcrição:** <reason>" and shows the same line in the drafts document.
 - `codec`: new optional fields, defaults for old files.
 
 ## 5. Configuration

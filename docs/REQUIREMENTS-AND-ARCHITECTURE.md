@@ -431,3 +431,20 @@ teams-recorder/
   - the support verdict is now an enum;
   - a verifier exception was logged without its traceback.
 - **Recorded for task 8.0:** the G2 gate must run `ClaudeClaimVerifier`. `scripts/fidelity_eval.py defend` still measures the prototype's own prompt.
+
+### Verification marks downstream (2026-10-14)
+
+- Task 4.0 of `tasks/prd-fidelity-guard/`: what the user sees once claim verification is on (task 7.0). Nothing is deleted (PRD decision 2), and a claim never verified looks as before.
+  - **Minutes:** an unconfirmed decision, action, deadline or participant is marked "⚠️ _a confirmar: <reason>_", with a legend under the title.
+  - **Plan:** the planner receives the marks with the analyses and is told to keep unconfirmed items as "(a confirmar)" with the reason. It must never treat them as facts or priorities, and it lists the user's unconfirmed actions under "Conflitos e alertas" (`prompts/plan_system.md`).
+  - **Stories (FR5):** an unconfirmed feature or bug never reaches the story writer as a source. It is listed as left out with "não confirmada na transcrição".
+  - **Task cards (decision 10):** a technical or operation action still becomes a task card that keeps the mark, in the drafts document and at the top of the board task's description.
+- Live already: the drafts document opens with a banner for each source meeting whose transcript is degraded (decision 9), also when publishing re-renders it. `StoryRenderer.render` gained an optional `degraded` argument.
+- **Code review** (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-14-11-22.md`): with nothing verified, every output was compared byte for byte with `main` and is identical. Fixed:
+  - a line break in a verifier reason split a row of the minutes' action table, and `_` or `*` broke its italics;
+  - the drafts banner cut its gap list after three ranges, with "and 2 more" in English;
+  - the card mark repeated itself when there was no reason;
+  - an unconfirmed plan-only action was not marked in the drafts (FR4);
+  - PRD pages 03 and 06 did not describe the marks.
+
+  The stories renderer no longer imports a use case.

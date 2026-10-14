@@ -261,6 +261,7 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
             {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
         ],
         "kind": s.kind.value if s.kind else None,
+        **_verified(s.verification),
     }
 
 
@@ -280,6 +281,7 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
             Publication(x["destination"], x["ref"], datetime.fromisoformat(x["published_at"])) for x in d.get("publications", [])
         ],
         kind=ActionKind(d["kind"]) if d.get("kind") else None,
+        verification=_verification_or_none(d.get("verification")),
     )
 
 

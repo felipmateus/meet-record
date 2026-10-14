@@ -5,14 +5,16 @@ published; the story sentence; acceptance criteria as a checklist; the other sec
 guide asked for; open questions; and the source actions with the transcript timestamp where
 each was said. Then the actions
 that did not become stories, with the reason and, for duplicates, the title of the existing
-story that covers them. Labels come from messages.StoryDoc.
+story that covers them. A source meeting whose transcript is degraded gets a warning banner under
+the intro, and a task card from an action the verifier did not confirm shows the mark and its
+reason. Labels come from messages.StoryDoc.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
 
-from teams_recorder.domain import Action, StoryDrafts, UserStory
+from teams_recorder.domain import Action, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
 from teams_recorder.messages import Minutes, StoryDoc
 
 
@@ -22,11 +24,15 @@ def _br(day: date) -> str:
 
 @dataclass
 class MarkdownStoryRenderer:
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
+               degraded: dict[str, TranscriptHealth] | None = None) -> str:
         by_id = {a.id: a for a in actions}
         titles = {s.id: s.title for s in existing}
         day = _br(drafts.day)
         out: list[str] = [StoryDoc.TITLE.format(date=day), "", StoryDoc.INTRO.format(date=day)]
+        for meeting_id, health in (degraded or {}).items():
+            gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""   # as in the minutes
+            out += ["", StoryDoc.DEGRADED.format(meeting=meeting_id, loop=health.loop_share, gaps=gaps)]
         if not actions:
             out += ["", StoryDoc.NO_ACTIONS]
         elif not drafts.stories:
@@ -64,6 +70,9 @@ class MarkdownStoryRenderer:
         if meta:
             out.append(StoryDoc.META_SEPARATOR.join(meta))
         out += [StoryDoc.PUBLISHED.format(destination=p.destination, ref=p.ref) for p in story.publications]
+        reason = unconfirmed_reason(story.verification)
+        if reason is not None:
+            out.append(StoryDoc.UNCONFIRMED.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_NO_REASON)
         out += ["", story.narrative]
         if story.acceptance_criteria:
             out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c) for c in story.acceptance_criteria)]
