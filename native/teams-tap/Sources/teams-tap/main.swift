@@ -2,7 +2,7 @@
 // Core Audio Process Tap (macOS 14.2+) and records it to WAV until it receives
 // SIGINT/SIGTERM or until the target process exits.
 //
-// Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--verbose]
+// Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stats <file.json>] [--verbose]
 // Output: exit code 0 on success; error messages on stderr.
 
 import AVFoundation
@@ -36,6 +36,7 @@ struct Arguments {
     var mic: String?                    // microphone mode: "default" (follows the default input) or a device name
     var epoch: Double?                  // shared start instant (Unix seconds): both tracks are aligned to it
     var bits = 16                       // WAV sample format: 16 (integer PCM) or 32 (float)
+    var stats: URL?                     // JSON written at stop: seconds written, padding, gaps, device rates
 
     static func parse(_ argv: [String]) -> Arguments {
         var args = Arguments()
@@ -66,10 +67,15 @@ struct Arguments {
             case "--bits":
                 guard let v = it.next(), let b = Int(v), b == 16 || b == 32 else { fail("--bits requires 16 or 32") }
                 args.bits = b
+            case "--stats":
+                guard let v = it.next() else { fail("--stats requires a path") }
+                args.stats = URL(fileURLWithPath: v)
             case "--help", "-h":
-                print("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--wait-audio <s>] [--no-descendants] [--verbose]")
-                print("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
+                print("Usage: teams-tap --pid <pid> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stats <file.json>] [--wait-audio <s>] [--no-descendants] [--verbose]")
+                print("       records the process at 48 kHz, resampling from whatever rate the output device runs at (16 kHz for a Bluetooth headset in a call)")
+                print("       teams-tap --mic <default|name> --out <file.wav> [--epoch <unix s>] [--bits 16|32] [--stats <file.json>] [--verbose]   records the microphone (48 kHz mono), surviving format/device changes")
                 print("       --bits: WAV sample format, 16-bit integer (default) or 32-bit float")
+                print("       --stats: writes seconds written, silence padded and device rates as JSON when recording stops")
                 print("       --epoch aligns the file to a shared start instant; time without audio is written as silence")
                 print("       teams-tap --list        lists the processes that are audio clients (pid, parent, bundle, emitting?)")
                 exit(0)
@@ -173,6 +179,12 @@ func listAudioProcesses() {
 /// tracks drift apart. Here every buffer is placed at its timestamp: missing time is filled
 /// with silence and logged. With `epoch`, the timeline starts at that shared instant, so both
 /// recorders produce tracks aligned to the same origin.
+///
+/// Padding below `logGapSeconds` is counted apart (`shortPaddedSeconds`): it is normally jitter, a
+/// fraction of a percent of the track. When buffers carry fewer frames per second than `format`
+/// says (the device runs at 16 kHz and the file at 48 kHz), the writer falls behind the clock by
+/// 2/3 of every second and pads it 0.2 s at a time, never logging a gap: speech comes out sped up
+/// and chopped. A large short-padding share is the signature of that rate mismatch.
 final class TimelineWriter {
     let file: AVAudioFile
     let format: AVAudioFormat
@@ -181,9 +193,12 @@ final class TimelineWriter {
     private let lock = NSLock()
     private(set) var framesWritten: Int64 = 0
     private(set) var paddedSeconds: Double = 0
+    private(set) var shortPaddedSeconds = 0.0 // the part of paddedSeconds in pads under logGapSeconds
     private(set) var gaps = 0
     static let minPadSeconds = 0.2           // jitter below this is ignored
     static let logGapSeconds = 0.5           // gaps from this size up are logged
+    static let rateWarningShare = 0.05       // short padding above this share of the track: the rate is likely wrong
+    static let rateWarningMinSeconds = 60.0  // ...on tracks at least this long
 
     init(file: AVAudioFile, format: AVAudioFormat, epoch: Double?) {
         self.file = file
@@ -239,17 +254,224 @@ final class TimelineWriter {
             framesWritten += Int64(n)
             remaining -= Int64(n)
         }
-        if framesWritten > 0 && seconds >= Self.minPadSeconds && at > 0 { paddedSeconds += seconds }
+        if framesWritten > 0 && seconds >= Self.minPadSeconds && at > 0 {
+            paddedSeconds += seconds
+            if seconds < Self.logGapSeconds { shortPaddedSeconds += seconds }
+        }
     }
 
+    var writtenSeconds: Double { Double(framesWritten) / format.sampleRate }
+
     var summary: String {
-        String(format: "%.1f s written, %d gap(s), %.1f s of silence padded", Double(framesWritten) / format.sampleRate, gaps, paddedSeconds)
+        var text = String(format: "%.1f s written, %d gap(s), %.1f s of silence padded (%.1f s in short pads)", writtenSeconds, gaps, paddedSeconds, shortPaddedSeconds)
+        if writtenSeconds >= Self.rateWarningMinSeconds && shortPaddedSeconds / writtenSeconds > Self.rateWarningShare {
+            text += String(format: "; WARNING: %.0f%% of the track is short padding with no logged gap, the device likely delivered fewer frames per second than %.0f Hz", 100 * shortPaddedSeconds / writtenSeconds, format.sampleRate)
+        }
+        return text
+    }
+
+    /// Writes the counters, plus `extra`, as JSON (call after `finish`). The pipeline reads it to flag a
+    /// transcript made from a track with a rate mismatch.
+    func writeStats(to url: URL, extra: [String: Any] = [:]) {
+        var stats: [String: Any] = [
+            "written_seconds": writtenSeconds,
+            "padded_seconds": paddedSeconds,
+            "short_padded_seconds": shortPaddedSeconds,
+            "gaps": gaps,
+            "file_rate": format.sampleRate,
+        ]
+        stats.merge(extra) { _, new in new }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: stats, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url, options: .atomic)
+        } catch {
+            log("teams-tap: could not write \(url.path): \(error)")
+        }
+    }
+}
+
+/// Measures the rate the device really runs at, from its sample clock (or buffer sizes) against host time.
+///
+/// The format properties are not always right: the tap reported 48 kHz while the aggregate device
+/// delivered 16 kHz (2026-10-13/14, Bluetooth headset in a call), and the track came out 3x fast.
+/// The device's sample time is preferred to counting frames: it keeps advancing through IO cycles the
+/// process misses under load, which counting frames would read as a slower device. Intervals longer
+/// than `maxInterval` are delivery pauses, and intervals implying an impossible rate are clock
+/// discontinuities; neither is a rate sample. Two windows in a row away from the assumed rate by more
+/// than `tolerance` give a corrected rate, but only when the measurement sits within `snapTolerance`
+/// of a standard rate: anything in between is a disturbed window, not a device rate.
+struct RateMeter {
+    static let window = 2.0
+    static let maxInterval = 0.5
+    static let tolerance = 0.05
+    static let snapTolerance = 0.015
+    static let windowsToSwitch = 2
+    static let plausibleRates = 4000.0...400_000.0
+    static let standardRates: [Double] = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000, 176400, 192000]
+
+    private var lastHost: UInt64?
+    private var lastSample: Double?
+    private var frames = 0.0
+    private var seconds = 0.0
+    private var strikes = 0
+    private var loggedIgnored = false        // under sustained load every window can be disturbed: say so once
+
+    mutating func reset() {
+        lastHost = nil
+        lastSample = nil
+        frames = 0
+        seconds = 0
+        strikes = 0
+    }
+
+    /// The standard rate within `snapTolerance` of `measured`, if any.
+    static func standardRate(near measured: Double) -> Double? {
+        guard let nearest = standardRates.min(by: { abs($0 - measured) < abs($1 - measured) }) else { return nil }
+        return abs(measured / nearest - 1) <= snapTolerance ? nearest : nil
+    }
+
+    /// Feeds one buffer: its size, the host time of its first frame and, when valid, the device sample
+    /// time of that frame. Returns the rate to switch to when the device is clearly not at `assumed`.
+    mutating func add(frames n: AVAudioFrameCount, hostTime: UInt64, sampleTime: Double?, assumed: Double) -> Double? {
+        let previousSample = lastSample
+        defer { lastHost = hostTime; lastSample = sampleTime }
+        guard let last = lastHost, hostTime > last else { return nil }
+        let dt = Double(AudioConvertHostTimeToNanos(hostTime - last)) / 1e9
+        guard dt < Self.maxInterval else { return nil }
+        // Frames since the previous buffer: from the sample clock, or else the previous buffer's size (this
+        // buffer's own size is the best stand-in, as buffers keep one size).
+        let advanced = sampleTime.flatMap { now in previousSample.map { now - $0 } } ?? Double(n)
+        guard Self.plausibleRates.contains(advanced / dt) else { return nil }
+        frames += advanced
+        seconds += dt
+        guard seconds >= Self.window else { return nil }
+        let measured = frames / seconds
+        frames = 0
+        seconds = 0
+        guard abs(measured / assumed - 1) > Self.tolerance else { strikes = 0; return nil }
+        guard let snapped = Self.standardRate(near: measured) else {
+            if !loggedIgnored {
+                loggedIgnored = true
+                log(String(format: "teams-tap: device ran at ~%.0f Hz for %.0f s, not %.0f Hz; no standard rate near it, ignored (logged once)", measured, Self.window, assumed))
+            }
+            strikes = 0
+            return nil
+        }
+        strikes += 1
+        guard strikes >= Self.windowsToSwitch else { return nil }
+        strikes = 0
+        log(String(format: "teams-tap: device runs at ~%.0f Hz, not %.0f Hz", measured, assumed))
+        return snapped == assumed ? nil : snapped
+    }
+}
+
+// MARK: - Tap converter
+
+/// Turns what the aggregate device delivers into file-format buffers: picks the tap's streams, reads
+/// them at the device's real rate, and resamples them to the file rate.
+///
+/// The rate is whatever `setRate` was last given (the device's nominal rate), corrected by `RateMeter`
+/// when the frames really delivered disagree. Not thread-safe: use it from one queue.
+final class TapConverter {
+    let tapASBD: AudioStreamBasicDescription
+    let outFormat: AVAudioFormat
+    private(set) var inFormat: AVAudioFormat
+    private(set) var rates: [Double] = []      // every rate used, in order
+    private var converter: AVAudioConverter
+    private var meter = RateMeter()
+    private var loggedBufferLayout = false
+
+    /// `tap`: the layout the tap reports (its sample rate is not trusted); `deviceRate`: the rate buffers arrive at.
+    init?(tap: AudioStreamBasicDescription, deviceRate: Double, fileRate: Double) {
+        let channels = AVAudioChannelCount(max(1, tap.mChannelsPerFrame))
+        var asbd = tap
+        asbd.mSampleRate = deviceRate
+        guard let out = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: fileRate, channels: channels, interleaved: false),
+              let fmt = AVAudioFormat(streamDescription: &asbd),
+              let conv = AVAudioConverter(from: fmt, to: out) else { return nil }
+        tapASBD = tap
+        outFormat = out
+        inFormat = fmt
+        converter = conv
+        rates = [deviceRate]
+    }
+
+    /// Reads buffers at `rate` from now on. False (and the previous rate kept) when no converter can be built for it.
+    @discardableResult
+    func setRate(_ rate: Double) -> Bool {
+        guard rate != inFormat.sampleRate else { return true }
+        var asbd = tapASBD
+        asbd.mSampleRate = rate
+        guard let fmt = AVAudioFormat(streamDescription: &asbd), let conv = AVAudioConverter(from: fmt, to: outFormat) else {
+            log(String(format: "teams-tap: no converter from %.0f Hz; keeping %.0f Hz", rate, inFormat.sampleRate))
+            return false
+        }
+        inFormat = fmt
+        converter = conv
+        meter.reset()
+        rates.append(rate)
+        log(String(format: "teams-tap: device rate is now %.0f Hz; resampling to %.0f Hz", rate, outFormat.sampleRate))
+        return true
+    }
+
+    /// One device buffer in the file format; nil when there is nothing to write (no tap stream, a rate switch).
+    func convert(_ input: UnsafePointer<AudioBufferList>, hostTime: UInt64?, sampleTime: Double? = nil) -> AVAudioPCMBuffer? {
+        guard let buffer = tapBuffer(input) else { return nil }
+        if let hostTime, let rate = meter.add(frames: buffer.frameLength, hostTime: hostTime, sampleTime: sampleTime, assumed: inFormat.sampleRate) {
+            setRate(rate)
+            return nil  // this one buffer (~10 ms) is dropped; the writer pads it
+        }
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * outFormat.sampleRate / inFormat.sampleRate) + 32
+        guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return nil }
+        var consumed = false
+        var error: NSError?
+        let status = converter.convert(to: out, error: &error) { _, outStatus in
+            if consumed { outStatus.pointee = .noDataNow; return nil }
+            consumed = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        return status != .error && out.frameLength > 0 ? out : nil
+    }
+
+    /// The tap's buffers within what the aggregate delivers. Normally that is all of it; if the output
+    /// device also has an input (a headset microphone in call mode), its streams come along and the
+    /// tap's are the last ones with the tap's layout.
+    private func tapBuffer(_ input: UnsafePointer<AudioBufferList>) -> AVAudioPCMBuffer? {
+        let all = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        let needed = inFormat.isInterleaved ? 1 : Int(inFormat.channelCount)
+        let perBuffer = inFormat.isInterleaved ? inFormat.channelCount : 1
+        if all.count == needed {
+            return AVAudioPCMBuffer(pcmFormat: inFormat, bufferListNoCopy: input, deallocator: nil)
+        }
+        let matching = all.filter { $0.mNumberChannels == perBuffer }
+        if !loggedBufferLayout {
+            loggedBufferLayout = true
+            log("teams-tap: the device delivers \(all.count) buffer(s) with " + all.map { "\($0.mNumberChannels)" }.joined(separator: "/") + " channel(s); using the last \(needed) with \(perBuffer)")
+        }
+        guard matching.count >= needed else { return nil }
+        let list = AudioBufferList.allocate(maximumBuffers: needed)
+        for (i, b) in matching.suffix(needed).enumerated() { list[i] = b }
+        // The deallocator is handed AVAudioPCMBuffer's own copy of the list, not ours: free ours by capture.
+        return AVAudioPCMBuffer(pcmFormat: inFormat, bufferListNoCopy: list.unsafePointer) { _ in free(list.unsafeMutablePointer) }
     }
 }
 
 // MARK: - Recorder
 
+/// Records the audio of a process through a Core Audio tap, at 48 kHz whatever the output device runs at.
+///
+/// The tap sits in a private aggregate device whose clock is the default output, and the aggregate
+/// delivers buffers at that device's rate, not at the rate the tap format reports: with a Bluetooth
+/// headset in a call (HFP) the output runs at 16 kHz while kAudioTapPropertyFormat still says 48 kHz.
+/// Writing those buffers as 48 kHz made the Teams track 3x fast and chopped (three meetings,
+/// 2026-10-13/14). So the input format takes the tap's layout and the aggregate's nominal rate, follows
+/// rate changes (kAudioDevicePropertyNominalSampleRate listener, e.g. the headset switching to call
+/// mode mid-call), is checked against the frames really delivered (`RateMeter`), and is resampled to
+/// the file rate with AVAudioConverter, as the microphone path does.
 final class ProcessTapRecorder {
+    static let fileRate: Double = 48000
+
     let pid: pid_t
     let url: URL
     let verbose: Bool
@@ -257,16 +479,21 @@ final class ProcessTapRecorder {
     let includeDescendants: Bool
     let epoch: Double?
     let bits: Int
+    let statsURL: URL?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
     private var writer: TimelineWriter?
-    private var format: AVAudioFormat?
+    private var converter: TapConverter?      // used on `queue` once capture runs (the IOProc and the rate listener both run there)
+    private var rateListener: AudioObjectPropertyListenerBlock?
     private let queue = DispatchQueue(label: "local.teams-recorder.teams-tap.io")
-    private var stopped = false
+    private var stopped = false               // main thread: stop() ran
+    private var capturing = true              // `queue`: false once stop() has drained it, so late callbacks do nothing
+    private static var rateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
 
-    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool, epoch: Double?, bits: Int) {
+    init(pid: pid_t, url: URL, verbose: Bool, waitAudioSeconds: Double, includeDescendants: Bool, epoch: Double?, bits: Int, statsURL: URL?) {
         self.bits = bits
         self.pid = pid
         self.url = url
@@ -274,6 +501,7 @@ final class ProcessTapRecorder {
         self.waitAudioSeconds = waitAudioSeconds
         self.includeDescendants = includeDescendants
         self.epoch = epoch
+        self.statsURL = statsURL
     }
 
     func start() {
@@ -305,24 +533,29 @@ final class ProcessTapRecorder {
         check(AudioHardwareCreateAggregateDevice(description as CFDictionary, &aggregateID), "create aggregate device")
         if verbose { log("aggregate device created: \(aggregateID)") }
 
-        var asbd = tapStreamFormat()
-        guard let fmt = AVAudioFormat(streamDescription: &asbd) else { fail("invalid tap format") }
-        format = fmt
-        if verbose { log("format: \(fmt.sampleRate) Hz, \(fmt.channelCount) channels, \(fmt.commonFormat.rawValue)") }
-
-        let settings = wavSettings(sampleRate: fmt.sampleRate, channels: fmt.channelCount, bits: bits)
+        let tapASBD = tapStreamFormat()
+        let deviceRate = aggregateNominalRate() ?? tapASBD.mSampleRate
+        log(String(format: "teams-tap: tap format %.0f Hz, %d channel(s); output device %@ runs at %.0f Hz; file %.0f Hz", tapASBD.mSampleRate, Int(tapASBD.mChannelsPerFrame), outputUID, deviceRate, Self.fileRate))
+        guard let conv = TapConverter(tap: tapASBD, deviceRate: deviceRate, fileRate: Self.fileRate) else { fail("could not create audio converter") }
+        converter = conv
+        let out = conv.outFormat
+        let settings = wavSettings(sampleRate: out.sampleRate, channels: out.channelCount, bits: bits)
         do {
-            let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: fmt.commonFormat, interleaved: fmt.isInterleaved)
-            writer = TimelineWriter(file: file, format: fmt, epoch: epoch)
+            let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            writer = TimelineWriter(file: file, format: out, epoch: epoch)
         } catch {
             fail("could not create \(url.path): \(error)")
         }
 
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.nominalRateChanged() }
+        if AudioObjectAddPropertyListenerBlock(aggregateID, &Self.rateAddress, queue, listener) == noErr {
+            rateListener = listener
+        } else {
+            log("teams-tap: could not watch the device's sample rate; relying on the measured rate")
+        }
+
         let status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, queue) { [weak self] _, inInputData, inInputTime, _, _ in
-            guard let self, let writer = self.writer, let fmt = self.format else { return }
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: fmt, bufferListNoCopy: inInputData, deallocator: nil) else { return }
-            let ts = inInputTime.pointee
-            writer.write(buffer, hostTime: ts.mFlags.contains(.hostTimeValid) ? ts.mHostTime : nil)
+            self?.process(inInputData, inInputTime.pointee)
         }
         check(status, "create IOProc")
         check(AudioDeviceStart(aggregateID, ioProcID), "start capture")
@@ -336,11 +569,39 @@ final class ProcessTapRecorder {
             AudioDeviceStop(aggregateID, ioProcID)
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
         }
+        if let rateListener {
+            AudioObjectRemovePropertyListenerBlock(aggregateID, &Self.rateAddress, queue, rateListener)
+        }
+        // Drain `queue` before the device and the tap go away: a callback still in flight reads their buffers,
+        // and one queued behind it finds `capturing` false.
+        let rates = queue.sync { () -> [Double] in
+            capturing = false
+            return converter?.rates ?? []
+        }
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         writer?.finish()                        // pad the tail up to the stop instant
-        log("teams-tap: stopped, " + (writer?.summary ?? "nothing written"))
+        let rateList: String = rates.map { String(format: "%.0f", $0) }.joined(separator: " → ")
+        let summary: String = writer?.summary ?? "nothing written"
+        log("teams-tap: stopped, \(summary), device rate(s) \(rateList) Hz")
+        if let statsURL, let writer {
+            writer.writeStats(to: statsURL, extra: ["device_rates": rates, "rate_changes": max(0, rates.count - 1)])
+        }
         writer = nil
+    }
+
+    // MARK: Capture (on `queue`)
+
+    private func nominalRateChanged() {
+        guard capturing, let rate = aggregateNominalRate() else { return }
+        converter?.setRate(rate)
+    }
+
+    private func process(_ input: UnsafePointer<AudioBufferList>, _ time: AudioTimeStamp) {
+        let hostTime = time.mFlags.contains(.hostTimeValid) ? time.mHostTime : nil
+        let sampleTime = time.mFlags.contains(.sampleTimeValid) ? time.mSampleTime : nil
+        guard capturing, let writer, let out = converter?.convert(input, hostTime: hostTime, sampleTime: sampleTime) else { return }
+        writer.write(out, hostTime: hostTime)
     }
 
     // MARK: Core Audio helpers
@@ -389,6 +650,11 @@ final class ProcessTapRecorder {
         return uid as String
     }
 
+    private func aggregateNominalRate() -> Double? {
+        guard let rate: Float64 = getProperty(aggregateID, kAudioDevicePropertyNominalSampleRate, Float64(0)), rate > 0 else { return nil }
+        return rate
+    }
+
     private func tapStreamFormat() -> AudioStreamBasicDescription {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioTapPropertyFormat,
@@ -414,6 +680,7 @@ final class MicRecorder {
     let verbose: Bool
     let epoch: Double?
     let bits: Int
+    let statsURL: URL?
     private let engine = AVAudioEngine()
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
     private var writer: TimelineWriter?
@@ -422,8 +689,9 @@ final class MicRecorder {
     private var restarts = 0
     private var stopped = false
 
-    init(url: URL, deviceName: String, verbose: Bool, epoch: Double?, bits: Int) {
+    init(url: URL, deviceName: String, verbose: Bool, epoch: Double?, bits: Int, statsURL: URL?) {
         self.bits = bits
+        self.statsURL = statsURL
         self.url = url
         self.deviceName = deviceName
         self.verbose = verbose
@@ -536,6 +804,7 @@ final class MicRecorder {
         engine.stop()
         writer?.finish()                        // pad the tail up to the stop instant
         log("teams-tap: microphone stopped, " + (writer?.summary ?? "nothing written") + ", \(restarts) restart(s)")
+        if let statsURL { writer?.writeStats(to: statsURL, extra: ["restarts": restarts]) }
         writer = nil
     }
 }
@@ -552,11 +821,11 @@ if args.list {
 var stopAll: () -> Void = {}
 
 if let micName = args.mic {
-    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose, epoch: args.epoch, bits: args.bits)
+    let mic = MicRecorder(url: args.out!, deviceName: micName, verbose: args.verbose, epoch: args.epoch, bits: args.bits, statsURL: args.stats)
     mic.start()
     stopAll = { mic.stop() }
 } else {
-    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants, epoch: args.epoch, bits: args.bits)
+    let recorder = ProcessTapRecorder(pid: args.pid, url: args.out!, verbose: args.verbose, waitAudioSeconds: args.waitAudioSeconds, includeDescendants: args.includeDescendants, epoch: args.epoch, bits: args.bits, statsURL: args.stats)
     recorder.start()
     stopAll = { recorder.stop() }
 }

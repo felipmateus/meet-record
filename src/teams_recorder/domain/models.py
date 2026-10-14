@@ -48,6 +48,21 @@ class Segment:
 
 
 @dataclass(frozen=True)
+class CaptureStats:
+    """What teams-tap counted while recording a track (tap.stats.json)."""
+
+    written_seconds: float
+    padded_seconds: float          # silence written where no audio arrived
+    short_padded_seconds: float    # the part of it in pads too short to be logged as gaps (under 0.5 s)
+    gaps: int                      # pads logged as gaps
+    device_rates: tuple[float, ...] = ()   # rates the device ran at, in order (empty: written before 2026-10-14)
+
+    @property
+    def short_padding_share(self) -> float:
+        return self.short_padded_seconds / self.written_seconds if self.written_seconds > 0 else 0.0
+
+
+@dataclass(frozen=True)
 class TranscriptHealth:
     """How usable a transcript is (see domain/health.py, which computes it)."""
 
@@ -57,6 +72,8 @@ class TranscriptHealth:
     degraded: bool           # loop_share above the configured maximum
     uncovered: tuple[tuple[int, int], ...] = ()  # minutes without text, as half-open [start, end) runs
     retried: bool = False    # a second pass with the anti-loop settings ran (the healthier of the two was kept)
+    rate_mismatch: bool = False        # the Teams track was recorded at the wrong sample rate (see domain/health.py)
+    short_padding_share: float = 0.0   # share of the Teams track padded in short pads, the evidence for rate_mismatch
 
     def is_healthier_than(self, other: "TranscriptHealth") -> bool:
         """More minutes with text beats everything, so an empty or cut-short pass never replaces one with

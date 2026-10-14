@@ -471,6 +471,7 @@ def test_status_marks_and_counts_degraded_transcripts(tmp_path: Path, monkeypatc
     assert "2026-10-08_10-00-00  [transcribed] → next: analyze" + Cli.MEETING_DEGRADED.format(loop=0.668) in result.output
     assert "2026-10-08_10-10-00  [transcribed] → next: analyze\n" in result.output   # healthy, and old (no health): no marker
     assert Cli.DEGRADED_TRANSCRIPTS.format(count=1) in result.output
+    assert "wrong sample rate" not in result.output   # no rate-mismatch line while none is flagged
 
 
 def test_doctor_shows_the_loop_guard(tmp_path: Path, monkeypatch):
@@ -534,3 +535,25 @@ def test_status_shows_a_damaged_meeting_on_its_own_line(tmp_path: Path, monkeypa
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
     assert f"  {broken.id}  [unreadable: invalid JSON in" in result.output
     assert f"{fine.id} Daily  [recording]" in result.output and "Open actions: 0" in result.output
+
+
+def test_transcribe_and_status_mark_a_teams_track_recorded_at_the_wrong_rate(tmp_path: Path, monkeypatch):
+    import json
+    from teams_recorder.domain.status import TAP_STATS
+    from tests.fakes import FakeTranscriber, speech_transcript
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 14, 15, 38, 49)); repo.create(m)
+    repo.path(m.id, AUDIO).write_bytes(b"\x00")
+    repo.path(m.id, TAP_STATS).write_text(json.dumps({"written_seconds": 709.9, "padded_seconds": 474.9, "short_padded_seconds": 474.9, "gaps": 0}))
+    _with_transcribers(monkeypatch, FakeTranscriber(speech_transcript(minutes=12)))
+
+    result = runner.invoke(app, ["transcribe", m.id])
+
+    assert result.exit_code == 0, result.output
+    health = repo.load_transcript(m.id).health
+    assert health is not None and health.rate_mismatch and not health.degraded
+    assert Cli.TRANSCRIPT_RATE_MISMATCH.format(share=health.short_padding_share) in result.output
+    status = runner.invoke(app, ["status"])
+    assert "2026-10-14_15-38-49  [transcribed] → next: analyze" + Cli.MEETING_RATE_MISMATCH.format(share=health.short_padding_share) in status.output
+    assert Cli.RATE_MISMATCH_TRANSCRIPTS.format(count=1) in status.output and Cli.DEGRADED_TRANSCRIPTS.format(count=0) in status.output

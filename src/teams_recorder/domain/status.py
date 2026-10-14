@@ -11,6 +11,7 @@ from typing import Iterable
 META = "meta.json"
 TAP_TRACK = "tap.wav"
 MIC_TRACK = "mic.wav"
+TAP_STATS = "tap.stats.json"  # teams-tap's counters for the Teams track (padding, device rates); not part of status
 AUDIO = "audio.m4a"
 TRANSCRIPT_TXT = "transcript.txt"
 TRANSCRIPT_JSON = "transcript.json"

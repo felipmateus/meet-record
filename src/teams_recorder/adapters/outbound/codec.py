@@ -14,6 +14,7 @@ from teams_recorder.domain import (
     ActionKind,
     ActionStatus,
     Analysis,
+    CaptureStats,
     DailyPlan,
     Deadline,
     Decision,
@@ -74,6 +75,8 @@ def health_to_dict(h: TranscriptHealth) -> dict[str, Any]:
         "degraded": h.degraded,
         "uncovered": [list(span) for span in h.uncovered],
         "retried": h.retried,
+        "rate_mismatch": h.rate_mismatch,
+        "short_padding_share": h.short_padding_share,
     }
 
 
@@ -85,6 +88,19 @@ def health_from_dict(d: dict[str, Any]) -> TranscriptHealth:
         degraded=bool(d["degraded"]),
         uncovered=tuple((int(start), int(end)) for start, end in d.get("uncovered", [])),
         retried=bool(d.get("retried", False)),
+        rate_mismatch=bool(d.get("rate_mismatch", False)),
+        short_padding_share=float(d.get("short_padding_share", 0.0)),
+    )
+
+
+def capture_stats_from_dict(d: dict[str, Any]) -> CaptureStats:
+    """tap.stats.json, as teams-tap writes it (`--stats`)."""
+    return CaptureStats(
+        written_seconds=float(d["written_seconds"]),
+        padded_seconds=float(d.get("padded_seconds", 0.0)),   # informative: the rate check reads only the two above and below
+        short_padded_seconds=float(d["short_padded_seconds"]),
+        gaps=int(d.get("gaps", 0)),
+        device_rates=tuple(float(r) for r in d.get("device_rates", [])),
     )
 
 

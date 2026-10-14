@@ -8,7 +8,7 @@ from pathlib import Path
 from teams_recorder.application.ports import MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
 from teams_recorder.application.use_cases.verification import VerifyAnalysis
 from teams_recorder.constants import Audio, Transcription
-from teams_recorder.domain import Analysis, Transcript, TranscriptHealth, TranscriptionError, transcript_health
+from teams_recorder.domain import Analysis, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, rate_mismatch, transcript_health
 from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Log, Notify
 
@@ -31,6 +31,10 @@ class TranscribeMeeting:
     against the meeting's length, so a retry that comes back empty or cut short never wins. A retry that
     fails, for any reason, keeps the first pass. One still degraded is saved anyway, marked in its health,
     so the analysis runs on what there is, and the user is notified.
+
+    The Teams track's capture counters are checked too: one recorded at the wrong sample rate (see
+    domain/health.rate_mismatch) is garbled before whisper sees it, so its transcript is flagged in the
+    health and the user is notified, instead of the minutes silently resting on hallucinations.
     """
 
     repo: MeetingRepository
@@ -39,6 +43,8 @@ class TranscribeMeeting:
     max_loop_share: float = Transcription.MAX_LOOP_SHARE
     retry: Transcriber | None = None   # None: no second pass ([transcription] retry_on_loop off, or it would repeat the first)
     notifier: Notifier | None = None
+    max_short_pad_share: float = Audio.MAX_SHORT_PAD_SHARE
+    rate_check_min_seconds: float = Audio.RATE_CHECK_MIN_SECONDS
 
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
@@ -46,13 +52,31 @@ class TranscribeMeeting:
         duration = self.repo.load_meta(meeting_id).duration_seconds
         with self.repo.lock(meeting_id):
             transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration)
+            if transcript.health is not None:
+                transcript.health = self._check_capture(meeting_id, transcript.health)
             self.repo.save_transcript(meeting_id, transcript)
         health = transcript.health
         if health is not None and health.degraded and self.notifier is not None:
             gaps = Notify.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""
             self.notifier.notify(Notify.TRANSCRIPT_DEGRADED,
                                  Notify.TRANSCRIPT_DEGRADED_BODY.format(meeting_id=meeting_id, loop=health.loop_share, gaps=gaps))
+        if health is not None and health.rate_mismatch and self.notifier is not None:
+            self.notifier.notify(Notify.RATE_MISMATCH, Notify.RATE_MISMATCH_BODY.format(meeting_id=meeting_id, share=health.short_padding_share))
         return transcript
+
+    def _check_capture(self, meeting_id: str, health: TranscriptHealth) -> TranscriptHealth:
+        """Marks the health when the Teams track's counters show a sample-rate mismatch. Advisory: unreadable
+        counters skip the check rather than fail the transcription, which has already run by now."""
+        try:
+            stats = self.repo.load_capture_stats(meeting_id)
+        except (RepositoryError, OSError) as exc:   # OSError: a repository that does not translate its I/O errors
+            log.warning(Log.CAPTURE_STATS_UNREADABLE, meeting_id, exc)
+            return health
+        if stats is None or not rate_mismatch(stats, self.max_short_pad_share, self.rate_check_min_seconds):
+            return health
+        rates = ", ".join(f"{r:.0f}" for r in stats.device_rates) or "?"   # literal-ok: list separator and unknown marker in a log argument
+        log.warning(Log.RATE_MISMATCH, meeting_id, 100 * stats.short_padding_share, stats.short_padded_seconds, stats.written_seconds, rates)
+        return replace(health, rate_mismatch=True, short_padding_share=stats.short_padding_share)
 
     def _checked(self, transcriber: Transcriber, audio: Path, duration: float | None) -> tuple[Transcript, TranscriptHealth]:
         transcript = transcriber.transcribe(audio, self.language)

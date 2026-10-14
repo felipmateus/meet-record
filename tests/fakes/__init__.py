@@ -13,6 +13,7 @@ from teams_recorder.domain import (
     Analysis,
     AnalysisError,
     ClaimRef,
+    CaptureStats,
     DailyPlan,
     Decision,
     Meeting,
@@ -174,6 +175,7 @@ class _Rec:
     files: set[str] = field(default_factory=set)
     transcript: Transcript | None = None
     analysis: Analysis | None = None
+    capture_stats: CaptureStats | None = None
 
 
 class InMemoryMeetingRepository:
@@ -194,8 +196,9 @@ class InMemoryMeetingRepository:
             raise MeetingNotFound(meeting_id) from None
 
     # helper for tests to seed state
-    def seed(self, meeting: Meeting, files: set[str] | None = None, transcript: Transcript | None = None, analysis: Analysis | None = None) -> None:
-        self._recs[meeting.id] = _Rec(meeting, {META, *(files or set())}, transcript, analysis)
+    def seed(self, meeting: Meeting, files: set[str] | None = None, transcript: Transcript | None = None, analysis: Analysis | None = None,
+             capture_stats: CaptureStats | None = None) -> None:
+        self._recs[meeting.id] = _Rec(meeting, {META, *(files or set())}, transcript, analysis, capture_stats)
 
     def create(self, meeting: Meeting) -> None:
         if meeting.id in self._recs:
@@ -254,6 +257,9 @@ class InMemoryMeetingRepository:
 
     def clear_active(self) -> None:
         self.active = None
+
+    def load_capture_stats(self, meeting_id: str) -> CaptureStats | None:
+        return self._get(meeting_id).capture_stats
 
     def save_transcript(self, meeting_id: str, transcript: Transcript) -> None:
         rec = self._get(meeting_id)

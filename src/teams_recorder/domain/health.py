@@ -7,13 +7,19 @@ segments, which also catches loops cycling through several lines (up to 7 with t
 Counting repeats over the whole meeting instead would also count natural fillers ("Entendeu?", "Tá"):
 they reached 9.8% of the segments of a healthy real meeting, against 0% with the window
 (tasks/prd-fidelity-guard, task 1.0).
+
+A track recorded at the wrong sample rate is broken before whisper sees it: when the output device ran at
+16 kHz (a Bluetooth headset in a call) and teams-tap wrote its buffers as 48 kHz, the writer fell behind the
+clock by 2/3 of every second and padded it with silence 0.2 s at a time, so the Teams speech came out 3x fast
+and chopped, and whisper hallucinated over it (three meetings, 2026-10-13/14). The signature is in teams-tap's
+counters: padding in pads too short to be logged as gaps, 66% of the track then, under 3% on healthy tracks.
 """
 from __future__ import annotations
 
 import re
 from collections import defaultdict
 
-from .models import Segment, Transcript, TranscriptHealth
+from .models import CaptureStats, Segment, Transcript, TranscriptHealth
 
 LOOP_REPEATS = 5   # copies of the same text that make a loop...
 LOOP_WINDOW = 30   # ...within this many consecutive segments
@@ -67,6 +73,12 @@ def _ranges(minutes: list[int]) -> tuple[tuple[int, int], ...]:
         else:
             runs.append((minute, minute + 1))
     return tuple(runs)
+
+
+def rate_mismatch(stats: CaptureStats, max_short_pad_share: float, min_seconds: float) -> bool:
+    """Whether a track looks recorded at the wrong sample rate: more than `max_short_pad_share` of it padded in
+    short pads, on a track of at least `min_seconds` (on a few seconds, start-up jitter weighs too much)."""
+    return stats.written_seconds >= min_seconds and stats.short_padding_share > max_short_pad_share
 
 
 def transcript_health(

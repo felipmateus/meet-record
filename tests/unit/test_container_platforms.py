@@ -13,6 +13,7 @@ from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Platform, Stories, StoryDestination
 from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
+from teams_recorder.domain.status import TAP_STATS
 from tests.fakes import FakeStoryPublisher
 
 
@@ -123,3 +124,9 @@ def test_no_retry_when_it_would_repeat_the_first_pass(tmp_path: Path):
 def test_retry_without_vad_when_the_first_pass_keeps_text_context(tmp_path: Path):
     retry = build_retry_transcriber(_models(tmp_path, "max_context = -1\nretry_vad = false\n"))
     assert retry is not None and retry.max_context == 0 and retry.vad_model_path is None
+
+
+def test_the_macos_tap_writes_its_counters_next_to_the_track(tmp_path: Path):
+    c = build_container(load_settings(tmp_path, platform=Platform.MACOS))
+    tap = c.process_capture.command(1, tmp_path / "m" / "tap.wav")
+    assert tap[tap.index("--stats") + 1] == str(tmp_path / "m" / TAP_STATS)

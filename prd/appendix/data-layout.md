@@ -20,6 +20,12 @@
 {"id": "2026-10-05_12-29-37", "started_at": "2026-10-05T12:29:37", "ended_at": "2026-10-05T12:30:50", "pid": 32663, "title": null}
 ```
 
+## `tap.stats.json`
+Written by `teams-tap --stats` when the Teams recorder stops (macOS only); read by the transcription step to flag a track recorded at the wrong sample rate. Kept after mixing.
+```json
+{"written_seconds": 709.9, "padded_seconds": 474.9, "short_padded_seconds": 474.9, "gaps": 0, "file_rate": 48000, "device_rates": [16000], "rate_changes": 0}
+```
+
 ## `current_recording.json`
 ```json
 {"meeting_id": "…", "process_handle": {"pid": 123, "out": "…/tap.wav"}, "mic_handle": {"pid": 124, "out": "…/mic.wav"}}

@@ -35,6 +35,9 @@ class Notify:
     TRANSCRIPT_DEGRADED_BODY = "Meeting {meeting_id}: {loop:.0%} of the transcript is one line repeated by whisper{gaps}. The minutes may be incomplete."
     NO_TEXT_IN = "; no text in {ranges}"
     RANGES_MORE = "{shown} and {more} more"
+    RATE_MISMATCH = "Teams audio recorded at the wrong rate"
+    RATE_MISMATCH_BODY = ("Meeting {meeting_id}: {share:.0%} of the Teams track is silence padding, so the other participants' speech "
+                          "is garbled and their part of the transcript is unreliable.")
 
 
 class Ask:
@@ -124,6 +127,7 @@ class Err:
     BAD_VERIFICATION = "a verification must be an object, not {value!r}"         # detail inside BAD_JSON
     BAD_REASON = "verification reason must be text, not {value!r}"               # detail inside BAD_JSON
     BAD_PARTICIPANT_CHECKS = "participant_checks must be an object, not {value!r}"  # detail inside BAD_JSON
+    FILE_UNREADABLE = "cannot read {path}: {error}"
     MEETING_EXISTS = "meeting already exists: {meeting_id}"
     MEETING_LOCKED = "meeting {meeting_id} is already being processed"
     STEP_ERROR = "{step}: {error}"                      # content of error.txt
@@ -180,6 +184,8 @@ class Cli:
     OPEN_ACTIONS_UNREADABLE = "Open actions: unreadable ({error})"
     STORIES_WAITING_UNREADABLE = "Stories waiting to be published: unreadable ({error})"
     DEGRADED_TRANSCRIPTS = "Degraded transcripts: {count}"
+    MEETING_RATE_MISMATCH = "  ⚠ Teams audio recorded at the wrong sample rate ({share:.0%} short padding)"
+    RATE_MISMATCH_TRANSCRIPTS = "Teams tracks recorded at the wrong sample rate: {count}"
     MEETING_TITLE = " {title}"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
@@ -233,6 +239,8 @@ class Cli:
     TRANSCRIPT_HEALTH = "  Health: {loop:.0%} of segments in repetition loops, text in {covered} of {total} min{retried}"
     RETRIED = " (after a second pass with the anti-loop settings)"
     TRANSCRIPT_DEGRADED = "  WARNING: degraded transcript{gaps}. The analysis still runs on it and the minutes will say so."
+    TRANSCRIPT_RATE_MISMATCH = ("  WARNING: the Teams track was recorded at the wrong sample rate ({share:.0%} of it is short silence padding): "
+                                "the other participants' speech is sped up and chopped, and their part of the transcript is unreliable.")
     NO_TEXT_IN = "; no text in {ranges}"
     TEXT_PATH = "  Text: {path}"
     ANALYZE_HINT = "Analyze with `trec analyze`."
@@ -347,6 +355,9 @@ class Log:
     TRANSCRIPT_RETRY_FAILED = "retry of %s failed; keeping the first pass: %s"
     VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
     VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
+    RATE_MISMATCH = ("Teams track of %s was likely recorded at the wrong sample rate: %.0f%% of it padded in short pads "
+                     "(%.0f of %.0f s, device rate(s) %s); its transcript is unreliable")
+    CAPTURE_STATS_UNREADABLE = "capture stats of %s unreadable; skipping the sample-rate check: %s"
 
 
 class Prompt:
@@ -427,6 +438,9 @@ class Minutes:
     UNCONFIRMED_LEGEND = "> ⚠️ Os itens marcados com ⚠️ não foram confirmados na transcrição; o motivo vem ao lado. Confira-os no áudio antes de usar."
     MARK = " ⚠️ _a confirmar: {reason}_"   # reason: one line, with Markdown's _ and * escaped
     MARK_NO_REASON = " ⚠️ _a confirmar_"
+    RATE_MISMATCH = ("> ⚠️ **Áudio do Teams gravado com a taxa errada:** {share:.0%} da faixa do Teams é silêncio de preenchimento, "
+                     "e a fala dos outros participantes saiu acelerada e picotada. A transcrição dessa parte não é confiável: "
+                     "confirme com os participantes antes de usar esta ata.")
     DATE = "📅 **Data:** {date}, {start}–{end} ({minutes} min)"
     DATE_NO_END = "📅 **Data:** {date}, {start}"
     UNDER_A_MINUTE = "<1"

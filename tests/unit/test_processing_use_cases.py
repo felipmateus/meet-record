@@ -1,7 +1,7 @@
 import pytest
 
 from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
-from teams_recorder.domain import MeetingStatus, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, derive_status
+from teams_recorder.domain import CaptureStats, MeetingStatus, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, derive_status
 from teams_recorder.domain.status import AUDIO, LOCK
 from teams_recorder.messages import Notify
 from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript
@@ -208,3 +208,51 @@ def test_health_is_measured_against_the_meeting_length(repo, clock):
 
     assert result.health is not None and (result.health.covered_minutes, result.health.total_minutes) == (20, 30)
     assert result.health.uncovered == ((20, 30),)   # the silent end of the meeting is reported, not hidden
+
+
+# --- Teams track recorded at the wrong sample rate ---------------------------------------------
+
+_BROKEN_TAP = CaptureStats(written_seconds=709.9, padded_seconds=474.9, short_padded_seconds=474.9, gaps=0, device_rates=(48000.0,))
+_HEALTHY_TAP = CaptureStats(written_seconds=986.4, padded_seconds=7.4, short_padded_seconds=7.4, gaps=0, device_rates=(16000.0,))
+
+
+def test_a_track_recorded_at_the_wrong_rate_flags_the_transcript_and_notifies(repo, meeting):
+    notifier = FakeNotifier()
+    repo.seed(meeting, {AUDIO}, capture_stats=_BROKEN_TAP)
+
+    result = TranscribeMeeting(repo, FakeTranscriber(speech_transcript(minutes=12)), "pt", notifier=notifier).execute(meeting.id)
+
+    assert result.health is not None and result.health.rate_mismatch
+    assert result.health.short_padding_share == pytest.approx(0.669, abs=0.001)
+    assert not result.health.degraded                      # the loop check is a separate verdict
+    assert repo.load_transcript(meeting.id).health == result.health
+    assert [title for title, _ in notifier.messages] == [Notify.RATE_MISMATCH]
+    assert "67%" in notifier.messages[0][1] and meeting.id in notifier.messages[0][1]
+
+
+def test_a_healthy_track_or_no_counters_leave_the_transcript_unflagged(repo, meeting):
+    for stats in (_HEALTHY_TAP, None):
+        notifier = FakeNotifier()
+        repo.seed(meeting, {AUDIO}, capture_stats=stats)
+        result = TranscribeMeeting(repo, FakeTranscriber(speech_transcript()), "pt", notifier=notifier).execute(meeting.id)
+        assert result.health is not None and not result.health.rate_mismatch and result.health.short_padding_share == 0.0
+        assert notifier.messages == []
+
+
+@pytest.mark.parametrize("error", [RepositoryError("bad json"), PermissionError(1, "Operation not permitted")])
+def test_unreadable_counters_skip_the_rate_check_and_keep_the_transcript(repo, meeting, error):
+    class BrokenStatsRepo(type(repo)):
+        def load_capture_stats(self, meeting_id):
+            raise error
+
+    broken = BrokenStatsRepo()
+    broken.seed(meeting, {AUDIO})
+    result = TranscribeMeeting(broken, FakeTranscriber(speech_transcript()), "pt").execute(meeting.id)
+    assert result.health is not None and not result.health.rate_mismatch
+    assert broken.load_transcript(meeting.id) is result      # the finished transcription is saved, not lost
+
+
+def test_rate_check_thresholds_come_from_the_use_case(repo, meeting):
+    repo.seed(meeting, {AUDIO}, capture_stats=_HEALTHY_TAP)   # 0.75% short padding
+    result = TranscribeMeeting(repo, FakeTranscriber(speech_transcript()), "pt", max_short_pad_share=0.005).execute(meeting.id)
+    assert result.health is not None and result.health.rate_mismatch

@@ -188,6 +188,10 @@ class Audio:
     WAV_CODECS = {16: "pcm_s16le", 32: "pcm_f32le"}   # ffmpeg microphone backend
     LOW_DISK_HOURS = 2.0            # warn at recording start when less than this much recording fits
     CRITICAL_DISK_BYTES = 1_000_000_000  # warn once during a call below this
+    # Rate-mismatch check on teams-tap's counters (domain/health.rate_mismatch): healthy Teams tracks pad under
+    # 3% of their length in short pads; a 16 kHz device written as 48 kHz pads 67%, a 44.1 kHz one 8%.
+    MAX_SHORT_PAD_SHARE = 0.05
+    RATE_CHECK_MIN_SECONDS = 60.0
 
 
 class VerdictSupport(StrEnum):
