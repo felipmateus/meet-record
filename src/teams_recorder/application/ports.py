@@ -123,7 +123,8 @@ class StoryRenderer(Protocol):
     def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
                degraded: dict[str, TranscriptHealth] | None = None) -> str:
         """The review document; `existing` names the stories that left-out duplicates point to; `degraded`, by
-        meeting id, the source meetings whose transcript is degraded, each shown with a warning banner."""
+        meeting id, the source meetings whose transcript cannot be trusted (degraded, or made from a Teams track
+        recorded at the wrong sample rate), each shown with its warning banner."""
         ...
 
 

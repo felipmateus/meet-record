@@ -114,7 +114,7 @@ class DraftUserStories:
             SkippedAction(a.id, StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS[a.kind.value]) + _unconfirmed_suffix(a))
             for a in by_route[ActionRoute.PLAN] if a.kind is not None
         ]
-        self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions, existing, degraded_sources(self.repo, actions)))
+        self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions, existing, untrusted_sources(self.repo, actions)))
         if drafts.stories:
             tasks = sum(1 for s in drafts.stories if s.is_task_card)
             self.notifier.notify(
@@ -206,7 +206,7 @@ class PublishUserStories:
             raise RepositoryError(Err.PLAN_MISSING.format(day=day.isoformat()))
         selected = self._select(drafts, only)
         existing = recent_stories(self.repo, day, self.dedup_days)
-        degraded = degraded_sources(self.repo, plan.new_actions)
+        degraded = untrusted_sources(self.repo, plan.new_actions)
         report = PublishReport()
         for story in selected:
             for publisher in self.publishers:
@@ -253,10 +253,11 @@ def _unconfirmed_suffix(action: Action) -> str:
     return StoryDoc.UNCONFIRMED_SUFFIX.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_SUFFIX_NO_REASON
 
 
-def degraded_sources(repo: MeetingRepository, actions: list[Action]) -> dict[str, TranscriptHealth]:
-    """The actions' source meetings whose transcript is degraded (a whisper loop survived the retry), by meeting id,
-    so the drafts document warns that what came from them may be incomplete (PRD decision 9). A meeting whose
-    transcript is gone or unreadable is left out: the warning is advice, never a reason to fail."""
+def untrusted_sources(repo: MeetingRepository, actions: list[Action]) -> dict[str, TranscriptHealth]:
+    """The actions' source meetings whose transcript cannot be trusted, by meeting id: degraded (a whisper loop
+    survived the retry) or made from a Teams track recorded at the wrong sample rate. The drafts document warns
+    that what came from them may be incomplete or invented (PRD decision 9). A meeting whose transcript is gone or
+    unreadable is left out: the warning is advice, never a reason to fail."""
     found: dict[str, TranscriptHealth] = {}
     for meeting_id in dict.fromkeys(a.source_meeting for a in actions):
         try:
@@ -265,7 +266,7 @@ def degraded_sources(repo: MeetingRepository, actions: list[Action]) -> dict[str
             health = repo.load_transcript(meeting_id).health
         except TeamsRecorderError:
             continue
-        if health is not None and health.degraded:
+        if health is not None and (health.degraded or health.rate_mismatch):
             found[meeting_id] = health
     return found
 
