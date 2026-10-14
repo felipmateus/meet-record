@@ -25,7 +25,7 @@ from typing import Any
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.constants import BacklogMd, Bin, Files, Parse, Stories, StoryDestination
-from teams_recorder.domain import PublishError, UserStory, unconfirmed_reason
+from teams_recorder.domain import Criterion, PublishError, UserStory, unconfirmed_reason
 from teams_recorder.messages import Err, StoryDoc
 
 
@@ -53,6 +53,14 @@ def git_ignore_state(path: Path, runner: Callable[..., Any] = subprocess.run) ->
     return GitIgnore.UNKNOWN
 
 
+
+def criterion_text(criterion: Criterion) -> str:
+    """A criterion as the board shows it, with its source: "<text> [hh:mm:ss]" or "<text> (sugestão)" (FR6), so the
+    reviewer sees on the board itself what the model proposed."""
+    if criterion.suggested:
+        return criterion.text + StoryDoc.BOARD_SUGGESTION
+    return criterion.text + (StoryDoc.BOARD_CRITERION_AT.format(at=criterion.source) if criterion.source else "")
+
 @dataclass
 class BacklogMdPublisher:
     project_dir: Path | None
@@ -72,7 +80,7 @@ class BacklogMdPublisher:
         if story.priority is not None:
             cmd += [BacklogMd.PRIORITY, story.priority.value]
         for criterion in story.acceptance_criteria:  # one --ac each: criteria keep their commas
-            cmd += [BacklogMd.AC, criterion]
+            cmd += [BacklogMd.AC, criterion_text(criterion)]
         return [*cmd, BacklogMd.PLAIN, BacklogMd.END_OF_OPTIONS, story.title]
 
     def body(self, story: UserStory, day: date) -> str:

@@ -402,6 +402,8 @@ class Prompt:
     FIELD_STORY_TITLE = "Short story title, as the guide asks"
     FIELD_STORY_NARRATIVE = "The story sentence in the guide's format (persona, capability, benefit)"
     FIELD_STORY_CRITERIA = "Acceptance criteria, one per item, checkable by someone who was not in the meeting"
+    FIELD_CRITERION_TEXT = "The criterion, without its source"
+    FIELD_CRITERION_SOURCE = "hh:mm:ss of the action or decision it comes from (an `at` you received), or sugestao when nobody said it"
     FIELD_STORY_DETAILS = "Other sections the guide asks for, in Markdown without top-level headings; empty if none"
     FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
     FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
@@ -501,6 +503,10 @@ class StoryDoc:
     META_SEPARATOR = " · "
     CRITERIA = "**Critérios de aceite**"
     CRITERION = "- [ ] {text}"
+    CRITERION_AT = " `[{at}]`"              # a criterion said in a meeting, at this transcript time
+    CRITERION_SUGGESTION = " _(sugestão)_"  # a criterion the writer proposes
+    BOARD_CRITERION_AT = " [{at}]"          # the same on the board, where criteria are plain text
+    BOARD_SUGGESTION = " (sugestão)"
     QUESTIONS = "**Perguntas em aberto**"
     SOURCES = "**Ações de origem**"
     SOURCE_LINE = "- `{id}` {description}{at}"

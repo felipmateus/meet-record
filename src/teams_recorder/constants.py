@@ -249,6 +249,7 @@ class Parse:
         'default button "{keep}" giving up after {timeout} with icon note'
     )
     STORY_NUMBER = r"\s*[0-9]+\s*"              # one `--only` item (ASCII digits only)
+    TIMESTAMP = r"\[?\s*(\d{2}:\d{2}:\d{2})\s*\]?"   # a criterion's cited source, with or without brackets
     BACKLOG_TASK_ID = r"^Task (\S+) - "            # `backlog task create --plain`: "Task TASK-7 - <title>"
     BACKLOG_STATUS = r"^statuses:.*[\[,]\s*[\"']?{status}[\"']?\s*[,\]]"   # status: re.escape'd column name
     BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")

@@ -31,6 +31,7 @@ from teams_recorder.domain import (
     UserStory,
     Verification,
     VerificationStatus,
+    Criterion,
 )
 from teams_recorder.messages import Err
 
@@ -261,12 +262,24 @@ def plan_from_dict(d: dict[str, Any]) -> DailyPlan:
 
 
 # User story drafts
+def _criterion_to(c: Criterion) -> Any:
+    """A criterion with a source as {text, source}; one without (drafted before provenance) as the plain text it was."""
+    return {"text": c.text, "source": c.source} if c.source is not None else c.text
+
+
+def _criterion_from(value: Any) -> Criterion:
+    # drafts written before 2026-10-14 stored criteria as plain strings
+    if isinstance(value, str):
+        return Criterion(value)
+    return Criterion(str(value["text"]), value.get("source"))
+
+
 def story_to_dict(s: UserStory) -> dict[str, Any]:
     return {
         "id": s.id,
         "title": s.title,
         "narrative": s.narrative,
-        "acceptance_criteria": list(s.acceptance_criteria),
+        "acceptance_criteria": [_criterion_to(c) for c in s.acceptance_criteria],
         "details": s.details,
         "open_questions": list(s.open_questions),
         "source_action_ids": list(s.source_action_ids),
@@ -286,7 +299,7 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         id=d["id"],
         title=d["title"],
         narrative=d.get("narrative", ""),
-        acceptance_criteria=list(d.get("acceptance_criteria", [])),
+        acceptance_criteria=[_criterion_from(c) for c in d.get("acceptance_criteria", [])],
         details=d.get("details", ""),
         open_questions=list(d.get("open_questions", [])),
         source_action_ids=list(d.get("source_action_ids", [])),

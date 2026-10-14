@@ -14,12 +14,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from teams_recorder.domain import Action, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
+from teams_recorder.domain import Action, Criterion, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
 from teams_recorder.messages import Minutes, StoryDoc
 
 
 def _br(day: date) -> str:
     return day.strftime("%d/%m/%Y")
+
+
+def _source(criterion: Criterion) -> str:
+    """Where a criterion comes from: the transcript time, "(sugestão)", or nothing for drafts made before provenance."""
+    if criterion.suggested:
+        return StoryDoc.CRITERION_SUGGESTION
+    return StoryDoc.CRITERION_AT.format(at=criterion.source) if criterion.source else ""
 
 
 @dataclass
@@ -75,7 +82,7 @@ class MarkdownStoryRenderer:
             out.append(StoryDoc.UNCONFIRMED.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_NO_REASON)
         out += ["", story.narrative]
         if story.acceptance_criteria:
-            out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c) for c in story.acceptance_criteria)]
+            out += ["", StoryDoc.CRITERIA, *(StoryDoc.CRITERION.format(text=c.text) + _source(c) for c in story.acceptance_criteria)]
         if story.details:
             out += ["", story.details]
         if story.open_questions:
