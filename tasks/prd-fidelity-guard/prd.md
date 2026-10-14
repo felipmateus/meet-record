@@ -8,7 +8,8 @@
 > - **Task 2.0** (verification types and persistence): done on 2026-10-12.
 > - **Task 3.0** (the claim verifier, the two code checks and the verification step): done on 2026-10-13 and reviewed (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-13-17-51.md`). Not switched on yet: that is task 7.0.
 > - **Task 4.0** (the marks in the minutes, the plan, the stories and the board): done on 2026-10-14. The marks appear once task 7.0 switches verification on; the degraded-transcript banner in the drafts document works already.
-> - **Tasks 5.0–8.0:** not started.
+> - **Task 5.0** (provenance of every story criterion): done on 2026-10-14. It is live once merged: every new criterion shows `[hh:mm:ss]` or "(sugestão)".
+> - **Tasks 6.0–8.0:** not started.
 
 ## 1. Problem
 

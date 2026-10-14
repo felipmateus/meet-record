@@ -471,3 +471,15 @@ teams-recorder/
   - S4: the 5% / 60 s rule is defined in both Swift and Python.
   - S6: the thresholds are not configurable.
   - S7: the predicate and the field share the name `rate_mismatch`.
+
+### Provenance in the stories (2026-10-14)
+
+- Task 5.0 of `tasks/prd-fidelity-guard/` (FR6). The evaluation found that about 10% of story claims were unsupported, 7 in 10 of them added by the writer; making the writer cite each criterion's source or mark it "(sugestão)" cut the silent errors from 8.2% to 3.8% (§14.5).
+- **Criteria:** a story's acceptance criteria are now `Criterion(text, source)`, where the source is the transcript time (`HH:MM:SS`) of the action or decision behind it, or `sugestao`.
+  - **The writer:** its output schema requires the source, and its prompt carries the prototype's citation rule. A source that is not a time becomes a suggestion in code.
+  - **The check:** `DraftUserStories` turns a cited time that is not a line of the story's source meetings' transcripts into a suggestion, so a citation nobody can find never looks confirmed.
+  - **Display:** the drafts show `` `[hh:mm:ss]` `` or "_(sugestão)_", and the board's criteria end with " [hh:mm:ss]" or " (sugestão)".
+  - **Old drafts:** criteria stored as plain strings load and are written back unchanged.
+- **Prompt rule:** the writer's prompt also forbids citing a claim the verifier did not confirm (it may become an open question), closing the note left by task 4.0.
+- **Evaluation:** `scripts/fidelity_eval.py` reads the new criteria with their source, so gate G3 (task 8.0) measures the product's output.
+- Live once merged: the next drafts carry the sources. No daemon restart is needed; drafting runs in `trec plan` / `trec stories`.
