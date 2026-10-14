@@ -9,6 +9,7 @@ from teams_recorder.adapters.outbound import process_control
 from teams_recorder.application.ports import CaptureHandle
 from teams_recorder.constants import Audio, Files, Proc
 from teams_recorder.domain import CaptureError
+from teams_recorder.domain.status import TAP_STATS
 from teams_recorder.messages import Err
 
 
@@ -31,7 +32,8 @@ class CoreAudioTapCapture:
         self._procs: dict[int, subprocess.Popen[bytes]] = {}
 
     def command(self, pid: int, out: Path, epoch: float | None = None) -> list[str]:
-        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio)), "--bits", str(self.bit_depth)]
+        cmd = [str(self.binary), "--pid", str(pid), "--out", str(out), "--wait-audio", str(int(self.wait_audio)), "--bits", str(self.bit_depth),
+               "--stats", str(out.with_name(TAP_STATS))]
         return cmd + (["--epoch", f"{epoch:.3f}"] if epoch is not None else [])
 
     def warmup(self) -> bool:

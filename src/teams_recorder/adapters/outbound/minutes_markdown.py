@@ -58,6 +58,8 @@ class MarkdownMinutesRenderer:
         if health is not None and health.degraded:
             gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""
             out += [Minutes.DEGRADED.format(loop=health.loop_share, gaps=gaps), ""]
+        if health is not None and health.rate_mismatch:
+            out += [Minutes.RATE_MISMATCH.format(share=health.short_padding_share), ""]
         if any(unconfirmed(v) for v in verifications(analysis)):
             out += [Minutes.UNCONFIRMED_LEGEND, ""]
 

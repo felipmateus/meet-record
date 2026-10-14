@@ -23,6 +23,7 @@ from teams_recorder.constants import Files
 from teams_recorder.domain import (
     Action,
     Analysis,
+    CaptureStats,
     DailyPlan,
     Meeting,
     MeetingNotFound,
@@ -30,7 +31,7 @@ from teams_recorder.domain import (
     StoryDrafts,
     Transcript,
 )
-from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Err
 
 T = TypeVar("T")
@@ -195,6 +196,20 @@ class FsMeetingRepository:
         d = self._require(meeting_id)
         _write_json(d / TRANSCRIPT_JSON, codec.transcript_to_dict(transcript))
         _write_atomic(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
+
+    def load_capture_stats(self, meeting_id: str) -> CaptureStats | None:
+        """None when there is no stats file; any other failure to read or parse it is a RepositoryError."""
+        path = self._require(meeting_id) / TAP_STATS
+        try:
+            text = retry_io(lambda: path.read_text(encoding="utf-8"), str(path))
+        except FileNotFoundError:
+            return None
+        except OSError as exc:   # permission, a directory in its place, a transient errno that outlasted the retries
+            raise RepositoryError(Err.FILE_UNREADABLE.format(path=path, error=exc)) from exc
+        try:
+            return codec.capture_stats_from_dict(json.loads(text))
+        except (KeyError, TypeError, ValueError) as exc:   # ValueError covers JSONDecodeError
+            raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
 
     def load_transcript(self, meeting_id: str) -> Transcript:
         return _decoded(self._require(meeting_id) / TRANSCRIPT_JSON, codec.transcript_from_dict)
