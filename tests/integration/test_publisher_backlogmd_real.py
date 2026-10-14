@@ -8,7 +8,7 @@ import pytest
 
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher, GitIgnore
 from teams_recorder.constants import Stories
-from teams_recorder.domain import Priority, UserStory
+from teams_recorder.domain import Criterion, Priority, UserStory
 from tests.integration.conftest import board_tasks
 
 ready = os.environ.get("TREC_REAL_BACKLOG") == "1" and shutil.which("backlog")
@@ -18,8 +18,7 @@ pytestmark = [pytest.mark.slow, pytest.mark.skipif(not ready, reason="set TREC_R
 
 def test_real_backlog_takes_a_story_in_triagem(throwaway_board: Path):
     story = UserStory("-x Exportar horas por projeto", "Como gestor, quero exportar horas, para fechar o mês.",
-                      acceptance_criteria=["Dado um projeto, quando exporto, então recebo um CSV",
-                                           "Dado um mês vazio, quando exporto, então vejo um aviso"],
+                      acceptance_criteria=[Criterion("Dado um projeto, quando exporto, então recebo um CSV"), Criterion("Dado um mês vazio, quando exporto, então vejo um aviso")],
                       source_action_ids=["a1"], source_meetings=["2026-10-09_10-00-00"], priority=Priority.HIGH)
     publisher = BacklogMdPublisher(throwaway_board, ignore_state=lambda p: GitIgnore.OUTSIDE_GIT)
 

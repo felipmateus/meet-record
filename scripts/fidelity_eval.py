@@ -724,6 +724,10 @@ def story_claims(drafts: dict[str, Any]) -> list[dict[str, Any]]:
         add("title", s["title"])
         add("narrative", s.get("narrative", ""))
         for ac in s.get("acceptance_criteria", []):
+            # the product stores {text, source} since task 5.0: judge it as the reviewer sees it, with its source
+            if isinstance(ac, dict):
+                source = ac.get("source")
+                ac = ac["text"] + (" (sugestão)" if source == "sugestao" else f" [{source}]" if source else "")
             add("criterion", ac)
         for line in (s.get("details") or "").splitlines():
             if len(line.strip("-* ").strip()) > 12:

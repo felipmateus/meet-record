@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
-from teams_recorder.domain import Action, ActionKind, Priority, Publication, SkippedAction, StoryDrafts, UserStory
+from teams_recorder.domain import Criterion, Action, ActionKind, Priority, Publication, SkippedAction, StoryDrafts, UserStory
 from teams_recorder.messages import StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -14,7 +14,7 @@ def test_renders_stories_sources_and_skipped_actions():
     ]
     story = UserStory(
         "Exportar horas por projeto", "Como gestor, quero exportar, para fechar o mês.",
-        acceptance_criteria=["Dado x, quando y, então z"], details="**Contexto:** fechamento",
+        acceptance_criteria=[Criterion("Dado x, quando y, então z")], details="**Contexto:** fechamento",
         open_questions=["Qual formato?"], source_action_ids=["a1"], source_meetings=["2026-10-09_10-00-00"],
         priority=Priority.HIGH, due=date(2026, 10, 12),
     )

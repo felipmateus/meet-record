@@ -8,6 +8,7 @@ from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.constants import Files
 from teams_recorder.domain import (
+    Criterion,
     Action,
     ActionKind,
     CaptureStats,
@@ -171,7 +172,7 @@ def test_save_minutes(fs: FsMeetingRepository):
 
 def test_story_drafts_round_trip_next_to_the_plan(fs: FsMeetingRepository):
     day = date(2026, 10, 6)
-    story = UserStory("Exportar horas", "Como gestor, quero exportar", acceptance_criteria=["Dado x"], details="**Contexto:** y",
+    story = UserStory("Exportar horas", "Como gestor, quero exportar", acceptance_criteria=[Criterion("Dado x")], details="**Contexto:** y",
                       open_questions=["Qual formato?"], source_action_ids=["a1"], source_meetings=["m1"],
                       priority=Priority.HIGH, due=date(2026, 10, 9), id="s1")
     drafts = StoryDrafts(day, [story], [SkippedAction("a2", "e-mail")])
