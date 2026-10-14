@@ -424,6 +424,9 @@ class Minutes:
     DEGRADED = ("> ⚠️ **Transcrição degradada:** {loop:.0%} dos trechos são uma mesma frase repetida pelo reconhecimento de voz{gaps}. "
                 "Esta ata pode estar incompleta: ouça o áudio desses trechos antes de usá-la.")
     DEGRADED_GAPS = ", e não há texto em {ranges}"
+    UNCONFIRMED_LEGEND = "> ⚠️ Os itens marcados com ⚠️ não foram confirmados na transcrição; o motivo vem ao lado. Confira-os no áudio antes de usar."
+    MARK = " ⚠️ _a confirmar: {reason}_"
+    MARK_NO_REASON = " ⚠️ _a confirmar_"
     DATE = "📅 **Data:** {date}, {start}–{end} ({minutes} min)"
     DATE_NO_END = "📅 **Data:** {date}, {start}"
     UNDER_A_MINUTE = "<1"
@@ -499,6 +502,12 @@ class StoryDoc:
     NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
     PLAN_ONLY = "{kind}: fica só no plano do dia"                           # stored as the skip reason
     SAME_TASK = "mesma tarefa de um card recente"                            # stored as the skip reason
+    NOT_CONFIRMED = "não confirmada na transcrição: {reason}"                # stored as the skip reason
+    NOT_CONFIRMED_NO_REASON = "não confirmada na transcrição"                # stored as the skip reason
+    UNCONFIRMED = "⚠️ **A confirmar na transcrição:** {reason}"
+    DEGRADED = ("> ⚠️ **Transcrição degradada** na reunião {meeting}: {loop:.0%} dos trechos são uma mesma frase repetida "
+                "pelo reconhecimento de voz{gaps}. O que veio dela pode estar incompleto.")
+    DEGRADED_GAPS = ", e não há texto em {ranges}"
     KIND = "**Tipo:** {label}"
     KIND_LABELS = {
         "feature": "Feature", "bug": "Bug", "technical": "Tarefa técnica",

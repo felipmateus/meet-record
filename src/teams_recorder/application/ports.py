@@ -120,8 +120,10 @@ class StoryWriter(Protocol):
 
 @runtime_checkable
 class StoryRenderer(Protocol):
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
-        """The review document; `existing` names the stories that left-out duplicates point to."""
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
+               degraded: dict[str, TranscriptHealth] | None = None) -> str:
+        """The review document; `existing` names the stories that left-out duplicates point to; `degraded`, by
+        meeting id, the source meetings whose transcript is degraded, each shown with a warning banner."""
         ...
 
 
