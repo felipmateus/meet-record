@@ -43,6 +43,8 @@ class MarkdownStoryRenderer:
                 out += ["", StoryDoc.DEGRADED.format(meeting=meeting_id, loop=health.loop_share, gaps=gaps)]
             if health.rate_mismatch:
                 out += ["", StoryDoc.RATE_MISMATCH.format(meeting=meeting_id, share=health.short_padding_share)]
+            if health.untrusted:
+                out += ["", StoryDoc.NOT_VERIFIED.format(meeting=meeting_id)]
         if not actions:
             out += ["", StoryDoc.NO_ACTIONS]
         elif not drafts.stories:

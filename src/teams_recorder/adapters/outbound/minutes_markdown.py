@@ -3,8 +3,9 @@
 Rendered from the structured analysis, without another LLM call: title, date, participants,
 type and purpose, summary, topics, decisions, an action table (owner, due date, priority and
 the transcript timestamp where it was said), risks, open questions and next steps. Empty
-sections are left out. A degraded transcript (whisper hallucination loop) puts a warning banner
-under the title, and a claim the verifier did not confirm is kept, marked ⚠️ with the reason
+sections are left out. A degraded transcript (whisper hallucination loop) or one made from a Teams
+track recorded at the wrong sample rate puts a warning banner under the title, saying that the items
+were not checked against it (verification skips such a transcript), and a claim the verifier did not confirm is kept, marked ⚠️ with the reason
 (PRD decision 2: mark, do not drop), with a legend under the title. Labels come from messages.Minutes.
 """
 from __future__ import annotations
@@ -60,6 +61,8 @@ class MarkdownMinutesRenderer:
             out += [Minutes.DEGRADED.format(loop=health.loop_share, gaps=gaps), ""]
         if health is not None and health.rate_mismatch:
             out += [Minutes.RATE_MISMATCH.format(share=health.short_padding_share), ""]
+        if health is not None and health.untrusted:
+            out += [Minutes.NOT_VERIFIED, ""]
         if any(unconfirmed(v) for v in verifications(analysis)):
             out += [Minutes.UNCONFIRMED_LEGEND, ""]
 
