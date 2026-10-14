@@ -38,8 +38,11 @@ class MarkdownStoryRenderer:
         day = _br(drafts.day)
         out: list[str] = [StoryDoc.TITLE.format(date=day), "", StoryDoc.INTRO.format(date=day)]
         for meeting_id, health in (degraded or {}).items():
-            gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""   # as in the minutes
-            out += ["", StoryDoc.DEGRADED.format(meeting=meeting_id, loop=health.loop_share, gaps=gaps)]
+            if health.degraded:
+                gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""   # as in the minutes
+                out += ["", StoryDoc.DEGRADED.format(meeting=meeting_id, loop=health.loop_share, gaps=gaps)]
+            if health.rate_mismatch:
+                out += ["", StoryDoc.RATE_MISMATCH.format(meeting=meeting_id, share=health.short_padding_share)]
         if not actions:
             out += ["", StoryDoc.NO_ACTIONS]
         elif not drafts.stories:
