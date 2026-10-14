@@ -25,7 +25,7 @@ from typing import Any
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.constants import BacklogMd, Bin, Files, Parse, Stories, StoryDestination
-from teams_recorder.domain import PublishError, UserStory
+from teams_recorder.domain import PublishError, UserStory, unconfirmed
 from teams_recorder.messages import Err, StoryDoc
 
 
@@ -76,8 +76,12 @@ class BacklogMdPublisher:
         return [*cmd, BacklogMd.PLAIN, BacklogMd.END_OF_OPTIONS, story.title]
 
     def body(self, story: UserStory, day: date) -> str:
-        """The task description: the story sentence, the guide's other sections, open questions and where it came from."""
-        parts = [story.narrative, story.details]
+        """The task description: the verifier's mark when the card's action was not confirmed (PRD decision 10), the
+        story sentence, the guide's other sections, open questions and where it came from."""
+        mark = ""
+        if story.verification is not None and unconfirmed(story.verification):
+            mark = StoryDoc.UNCONFIRMED.format(reason=story.verification.reason or StoryDoc.NOT_CONFIRMED_NO_REASON)
+        parts = [mark, story.narrative, story.details]
         if story.open_questions:
             parts.append("\n".join([StoryDoc.QUESTIONS, *(StoryDoc.BULLET.format(text=q) for q in story.open_questions)]))
         parts.append(StoryDoc.BOARD_ORIGIN.format(
