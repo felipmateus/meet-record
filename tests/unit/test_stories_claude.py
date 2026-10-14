@@ -6,11 +6,12 @@ import pytest
 from teams_recorder.adapters.outbound.stories_claude import (
     ClaudeStoryWriter,
     SkippedOut,
+    CriterionOut,
     StoriesOut,
     StoryOut,
     build_user_message,
 )
-from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Decision, Priority, UserStory
+from teams_recorder.domain import SUGGESTION, Criterion, Action, ActionKind, Analysis, AnalysisError, Decision, Priority, UserStory
 from teams_recorder.messages import Prompt, StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -48,7 +49,10 @@ def test_draft_keeps_traceability_honest(guide: Path):
     out = StoriesOut(
         stories=[
             StoryOut(title=" Exportar horas por projeto ", narrative="Como gestor, quero exportar, para fechar o mês.",
-                     acceptance_criteria=["Dado x, quando y, então z", " "], details="**Contexto:** fechamento",
+                     acceptance_criteria=[CriterionOut(text="Dado x, quando y, então z ", source="[00:03:10]"),
+                                          CriterionOut(text=" ", source="00:00:01"),
+                                          CriterionOut(text="Exportar também em PDF", source="(sugestão)")],
+                     details="**Contexto:** fechamento",
                      open_questions=["Qual formato?"], source_action_ids=["a1", "a2", "a1", "inventado"]),
             StoryOut(title="História inventada", narrative="...", source_action_ids=["nao-existe"]),
             StoryOut(title="  ", narrative="sem título", source_action_ids=["a4"]),
@@ -67,7 +71,8 @@ def test_draft_keeps_traceability_honest(guide: Path):
     assert story.source_meetings == ["m1", "m2"]
     assert story.priority == Priority.HIGH                  # strongest of the sources
     assert story.due == date(2026, 10, 12)                  # earliest of the sources
-    assert story.acceptance_criteria == ["Dado x, quando y, então z"]
+    assert story.acceptance_criteria == [Criterion("Dado x, quando y, então z", "00:03:10"),   # brackets dropped, blank removed
+                                         Criterion("Exportar também em PDF", SUGGESTION)]      # anything but a time: a suggestion
     skipped = {k.action_id: k.reason for k in drafts.skipped}
     assert skipped == {"a3": "não é trabalho de produto", "a4": StoryDoc.NOT_ADDRESSED}
 

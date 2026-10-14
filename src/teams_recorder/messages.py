@@ -128,6 +128,7 @@ class Err:
     BAD_REASON = "verification reason must be text, not {value!r}"               # detail inside BAD_JSON
     BAD_PARTICIPANT_CHECKS = "participant_checks must be an object, not {value!r}"  # detail inside BAD_JSON
     FILE_UNREADABLE = "cannot read {path}: {error}"
+    BAD_CRITERION = "a criterion needs text and a source of HH:MM:SS or suggestion, not {value!r}"  # detail inside BAD_JSON
     MEETING_EXISTS = "meeting already exists: {meeting_id}"
     MEETING_LOCKED = "meeting {meeting_id} is already being processed"
     STEP_ERROR = "{step}: {error}"                      # content of error.txt
@@ -402,6 +403,8 @@ class Prompt:
     FIELD_STORY_TITLE = "Short story title, as the guide asks"
     FIELD_STORY_NARRATIVE = "The story sentence in the guide's format (persona, capability, benefit)"
     FIELD_STORY_CRITERIA = "Acceptance criteria, one per item, checkable by someone who was not in the meeting"
+    FIELD_CRITERION_TEXT = "The criterion, without its source"
+    FIELD_CRITERION_SOURCE = "hh:mm:ss of the action or decision it comes from (an `at` you received), or suggestion when nobody said it"
     FIELD_STORY_DETAILS = "Other sections the guide asks for, in Markdown without top-level headings; empty if none"
     FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
     FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
@@ -501,6 +504,10 @@ class StoryDoc:
     META_SEPARATOR = " · "
     CRITERIA = "**Critérios de aceite**"
     CRITERION = "- [ ] {text}"
+    CRITERION_AT = " `[{at}]`"              # a criterion said in a meeting, at this transcript time
+    CRITERION_SUGGESTION = " _(sugestão)_"  # a criterion the writer proposes
+    BOARD_CRITERION_AT = " [{at}]"          # the same on the board, where criteria are plain text
+    BOARD_SUGGESTION = " (sugestão)"
     QUESTIONS = "**Perguntas em aberto**"
     SOURCES = "**Ações de origem**"
     SOURCE_LINE = "- `{id}` {description}{at}"

@@ -9,11 +9,15 @@ Division of responsibilities (to keep the traceability honest):
 - deterministic (here): a story may only cite action ids it received (invented ids are
   dropped, and a story left with no source action is dropped too); every action that ends
   up in no story is listed as skipped, and a skipped action may only point to an existing
-  story it was given; priority and due date come from the source actions.
+  story it was given; priority and due date come from the source actions; a criterion's
+  source is a timestamp (HH:MM:SS) or a suggestion, and anything else counts as a suggestion
+  (that a cited timestamp exists in the meetings is checked by DraftUserStories, which has
+  the transcripts).
 """
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -25,11 +29,13 @@ from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.adapters.outbound.llm_schema import load_prompt
 from teams_recorder.adapters.outbound.llm_transport import StructuredTransport
-from teams_recorder.constants import Stories
+from teams_recorder.constants import Parse, Stories
 from teams_recorder.domain import (
     Action,
     Analysis,
     AnalysisError,
+    Criterion,
+    SUGGESTION,
     SkippedAction,
     StoryDrafts,
     UserStory,
@@ -40,10 +46,15 @@ from teams_recorder.domain import (
 from teams_recorder.messages import Err, Prompt, StoryDoc
 
 
+class CriterionOut(BaseModel):
+    text: str = Field(description=Prompt.FIELD_CRITERION_TEXT)
+    source: str = Field(description=Prompt.FIELD_CRITERION_SOURCE)
+
+
 class StoryOut(BaseModel):
     title: str = Field(description=Prompt.FIELD_STORY_TITLE)
     narrative: str = Field(description=Prompt.FIELD_STORY_NARRATIVE)
-    acceptance_criteria: list[str] = Field(default_factory=list, description=Prompt.FIELD_STORY_CRITERIA)
+    acceptance_criteria: list[CriterionOut] = Field(default_factory=list, description=Prompt.FIELD_STORY_CRITERIA)
     details: str = Field(default="", description=Prompt.FIELD_STORY_DETAILS)
     open_questions: list[str] = Field(default_factory=list, description=Prompt.FIELD_STORY_QUESTIONS)
     source_action_ids: list[str] = Field(default_factory=list, description=Prompt.FIELD_STORY_SOURCES)
@@ -105,7 +116,7 @@ def to_drafts(out: StoriesOut, day: date, actions: list[Action], existing: list[
         stories.append(UserStory(
             title=s.title.strip(),
             narrative=s.narrative.strip(),
-            acceptance_criteria=_clean(s.acceptance_criteria),
+            acceptance_criteria=[Criterion(c.text.strip(), _source(c.source)) for c in s.acceptance_criteria if c.text.strip()],
             details=s.details.strip(),
             open_questions=_clean(s.open_questions),
             source_action_ids=[a.id for a in sources],
@@ -123,6 +134,12 @@ def to_drafts(out: StoriesOut, day: date, actions: list[Action], existing: list[
         for a in actions if a.id not in used
     ]
     return StoryDrafts(day=day, stories=stories, skipped=skipped)
+
+
+def _source(raw: str) -> str:
+    """A cited HH:MM:SS (brackets allowed), or SUGGESTION for anything else: a criterion without a clear source is a proposal."""
+    found = re.fullmatch(Parse.TIMESTAMP, raw.strip())
+    return found.group(1) if found else SUGGESTION
 
 
 def build_user_message(day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory], user_name: str = "") -> str:

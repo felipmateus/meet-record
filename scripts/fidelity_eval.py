@@ -599,6 +599,9 @@ CITE_RULE = """
 End every acceptance criterion and every detail line with its source: the transcript timestamp of the action or decision it comes from, as [hh:mm:ss] (from the `at` fields you received), or the marker "(sugestão)" when nobody said it in the meetings and you are proposing it. Never present a proposal of yours without "(sugestão)"."""
 
 
+PRODUCT_PROVENANCE = "## Provenance of every criterion\n"   # the section prompts/stories_system.md has since task 5.0
+
+
 def story_container(data: Path, wiki: Path | None, cited: bool = False) -> Any:
     c = wc.container_for(data)
     from teams_recorder.adapters.outbound import stories_claude as sc
@@ -607,7 +610,10 @@ def story_container(data: Path, wiki: Path | None, cited: bool = False) -> Any:
     if cited:
         class CitingWriter(sc.ClaudeStoryWriter):
             def _system(self) -> str:
-                return super()._system() + CITE_RULE
+                # Since task 5.0 the product's own prompt carries the rule (as a structured source per criterion),
+                # so adding CITE_RULE again would measure two conflicting rules, not what ships.
+                system = super()._system()
+                return system if PRODUCT_PROVENANCE in system else system + CITE_RULE
 
         c.story_writer = CitingWriter(base.transport, base.guide_path, prompt_path=base.prompt_path, user_name=base.user_name)
         base = c.story_writer
@@ -716,6 +722,8 @@ A reasonable acceptance criterion that only restates the requested behavior in t
 
 
 def story_claims(drafts: dict[str, Any]) -> list[dict[str, Any]]:
+    from teams_recorder.adapters.outbound import codec
+    from teams_recorder.adapters.outbound.publisher_backlogmd import criterion_text
     claims = []
     for i, s in enumerate(drafts.get("stories", []), 1):
         def add(part: str, text: str) -> None:
@@ -724,7 +732,8 @@ def story_claims(drafts: dict[str, Any]) -> list[dict[str, Any]]:
         add("title", s["title"])
         add("narrative", s.get("narrative", ""))
         for ac in s.get("acceptance_criteria", []):
-            add("criterion", ac)
+            # the product stores {text, source} since task 5.0: judge each criterion as the board shows it
+            add("criterion", criterion_text(codec.criterion_from_value(ac)))
         for line in (s.get("details") or "").splitlines():
             if len(line.strip("-* ").strip()) > 12:
                 add("detail", line.strip("-* ").strip())
@@ -775,6 +784,8 @@ def judge_stories(work: Path, variant: str, wiki: Path | None, days: list[date],
             for d in done for c in done[d]["claims"]]
 
 
+# Since task 5.0 the shipped writer always cites (prompts/stories_system.md), so "baseline" and "cited" both run it:
+# compare gate G3 with the 8.2% recorded before (evaluation §14.5), not with a baseline run now.
 STORY_VARIANTS = {   # name → (defended analyses, wiki context, writer cites a source or "(sugestão)" for each criterion)
     "baseline": (False, False, False), "wiki": (False, True, False), "defended": (True, False, False), "defended_wiki": (True, True, False),
     "cited": (False, False, True), "guarded": ("mark", False, True),

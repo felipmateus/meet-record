@@ -182,3 +182,17 @@ def test_story_claims_split_title_sentence_criteria_and_details():
     claims = fe.story_claims(drafts)
     assert [c["part"] for c in claims] == ["title", "narrative", "criterion", "detail"]
     assert claims[-1]["text"] == "Dependências:** modelo aprovado pela Meta"   # list markers and leading emphasis stripped
+
+
+def test_story_claims_judge_cited_criteria_as_the_reviewer_sees_them():
+    # since task 5.0 the product stores {text, source}; the judge must see the source, as the board shows it
+    drafts = {"stories": [{"title": "t", "narrative": "", "acceptance_criteria": [
+        {"text": "Exporta em CSV", "source": "00:00:05"}, {"text": "Também em PDF", "source": "suggestion"}, "Antigo"]}]}
+    texts = [c["text"] for c in fe.story_claims(drafts) if c["part"] == "criterion"]
+    assert texts == ["Exporta em CSV [00:00:05]", "Também em PDF (sugestão)", "Antigo"]
+
+
+def test_the_citing_variant_does_not_stack_the_prototype_rule_on_the_product_prompt():
+    # the product prompt carries the provenance rule since task 5.0; G3 must measure that prompt alone
+    prompt = (Path(__file__).resolve().parents[2] / "prompts" / "stories_system.md").read_text(encoding="utf-8")
+    assert fe.PRODUCT_PROVENANCE in prompt

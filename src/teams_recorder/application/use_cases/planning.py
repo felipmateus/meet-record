@@ -29,8 +29,10 @@ from teams_recorder.domain import (
     TeamsRecorderError,
     TranscriptHealth,
     UserStory,
+    checked_criteria,
     derive_status,
     merge_open_actions,
+    said_at,
     task_card,
     unconfirmed,
     unconfirmed_reason,
@@ -101,6 +103,7 @@ class DraftUserStories:
         stories_only = [s for s in existing if not s.is_task_card]
         drafts = self.writer.draft(day, candidates, self._source_analyses(candidates), stories_only) if candidates else StoryDrafts(day=day)
         drafts.day = day
+        self._check_provenance(drafts)
         self._add_task_cards(drafts, by_route[ActionRoute.TASK], [s for s in existing if s.is_task_card])
         drafts.skipped += [
             SkippedAction(a.id, StoryDoc.NOT_CONFIRMED.format(reason=reason) if (reason := unconfirmed_reason(a.verification))
@@ -132,6 +135,21 @@ class DraftUserStories:
                 continue
             drafts.stories.append(card)
             seen[(card.kind, " ".join(card.title.lower().split()))] = card
+
+    def _check_provenance(self, drafts: StoryDrafts) -> None:
+        """A criterion citing a time that is not a line of its story's source meetings becomes a suggestion (FR6).
+        A meeting whose transcript cannot be read confirms nothing."""
+        lines: dict[str, set[str]] = {}
+        for story in drafts.stories:
+            said: set[str] = set()
+            for meeting_id in story.source_meetings:
+                if meeting_id not in lines:
+                    try:
+                        lines[meeting_id] = said_at(self.repo.load_transcript(meeting_id)) if self.repo.exists(meeting_id) else set()
+                    except TeamsRecorderError:
+                        lines[meeting_id] = set()
+                said |= lines[meeting_id]
+            story.acceptance_criteria = checked_criteria(story.acceptance_criteria, said)
 
     def _source_analyses(self, actions: list[Action]) -> list[Analysis]:
         meeting_ids = dict.fromkeys(a.source_meeting for a in actions)  # unique, in order

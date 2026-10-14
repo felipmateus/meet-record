@@ -8,7 +8,7 @@ import pytest
 
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher, GitIgnore, git_ignore_state
 from teams_recorder.constants import StoryDestination
-from teams_recorder.domain import ActionKind, Priority, PublishError, UserStory
+from teams_recorder.domain import Criterion, ActionKind, Priority, PublishError, UserStory
 from teams_recorder.messages import Err, StoryDoc
 
 DAY = date(2026, 10, 9)
@@ -20,7 +20,7 @@ BINARY = sys.executable   # any executable on disk: problems() only checks that 
 def _story(**kw) -> UserStory:
     defaults = dict(
         title="Exportar horas por projeto", narrative="Como gestor, quero exportar horas, para fechar o mês.",
-        acceptance_criteria=["Dado um projeto, quando exporto, então recebo um CSV", "Dado um mês vazio, quando exporto, então vejo um aviso"],
+        acceptance_criteria=[Criterion("Dado um projeto, quando exporto, então recebo um CSV"), Criterion("Dado um mês vazio, quando exporto, então vejo um aviso")],
         details="**Contexto:** fechamento mensal", open_questions=["Qual separador usar?"],
         source_action_ids=["a1", "a2"], source_meetings=["2026-10-09_10-00-00"], priority=Priority.HIGH,
     )
@@ -52,7 +52,7 @@ def test_command_shape():
     assert cmd[cmd.index("-s") + 1] == "Triagem"
     assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-l"] == ["teams-recorder", "work", "2026-10-09"]
     assert cmd[cmd.index("--priority") + 1] == "high"
-    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--ac"] == _story().acceptance_criteria   # commas kept, one each
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--ac"] == [c.text for c in _story().acceptance_criteria]   # commas kept, one each
     assert "--priority" not in publisher.command(_story(priority=None), DAY)
     assert publisher.command(_story(title="-s weird"), DAY)[-2:] == ["--", "-s weird"]               # never read as a flag
 

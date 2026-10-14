@@ -11,7 +11,7 @@ import pytest
 
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher, GitIgnore, git_ignore_state
 from teams_recorder.config import find_tool
-from teams_recorder.domain import Priority, PublishError, UserStory
+from teams_recorder.domain import Criterion, Priority, PublishError, UserStory
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_backlog_cli.py"
 CONFIG = 'statuses: ["Triagem", "To Do", "In Progress", "Done"]\nauto_commit: false\nremote_operations: false\n'
@@ -44,7 +44,7 @@ def _calls(project: Path) -> list[dict]:
 
 def test_arguments_reach_the_cli_intact(project: Path):
     story = UserStory("-x Exportar relatório de horas", "Como gestor, quero exportar,\npara fechar o mês.",
-                      acceptance_criteria=["Dado um projeto, quando exporto, então recebo um CSV"], priority=Priority.LOW)
+                      acceptance_criteria=[Criterion("Dado um projeto, quando exporto, então recebo um CSV")], priority=Priority.LOW)
     publisher = _publisher(project)
 
     assert publisher.publish(story, DAY) == "TASK-1"

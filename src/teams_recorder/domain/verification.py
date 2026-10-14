@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import replace
 from typing import Iterable
 
-from .models import Action, Analysis, Claim, ClaimKind, ClaimRef, Transcript, Verification, VerificationStatus
+from .models import SUGGESTION, Action, Analysis, Claim, ClaimKind, ClaimRef, Criterion, Transcript, Verification, VerificationStatus, clock_time
 
 
 def claims(analysis: Analysis) -> list[Claim]:
@@ -89,6 +89,18 @@ def with_verifications(analysis: Analysis, verdicts: dict[ClaimRef, Verification
         deadlines=[replace(d, verification=get(ClaimKind.DEADLINE, str(i), d.verification)) for i, d in enumerate(analysis.deadlines)],
         participant_checks=checks,
     )
+
+
+def said_at(transcript: Transcript) -> set[str]:
+    """The HH:MM:SS of every line of a transcript: the timestamps a story criterion may cite."""
+    return {clock_time(s.start) for s in transcript.segments}
+
+
+def checked_criteria(criteria: list[Criterion], said: set[str]) -> list[Criterion]:
+    """Criteria whose cited timestamp is not a line of the source meetings' transcripts (`said`) become suggestions:
+    a citation nobody can find must not look confirmed (FR6). Suggestions, and criteria drafted before provenance
+    existed (source None), stay as they are."""
+    return [c if c.source is None or c.suggested or c.source in said else Criterion(c.text, SUGGESTION) for c in criteria]
 
 
 def normalized(text: str) -> str:

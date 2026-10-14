@@ -296,13 +296,29 @@ class Publication:
     published_at: datetime
 
 
+SUGGESTION = "suggestion"   # Criterion.source of a criterion nobody said in the meetings: the writer proposes it
+
+
+@dataclass(frozen=True)
+class Criterion:
+    """An acceptance criterion and where it comes from (fidelity guard, FR6): the transcript timestamp (HH:MM:SS) of
+    what was said, or SUGGESTION when the story writer proposes it. None: drafted before provenance existed."""
+
+    text: str
+    source: str | None = None
+
+    @property
+    def suggested(self) -> bool:
+        return self.source == SUGGESTION
+
+
 @dataclass
 class UserStory:
     """A user story drafted from one or more of the user's actions. A draft until the user publishes it."""
 
     title: str
     narrative: str  # "As a <persona>, I want <capability>, so that <benefit>", in the user's language
-    acceptance_criteria: list[str] = field(default_factory=list)
+    acceptance_criteria: list[Criterion] = field(default_factory=list)
     details: str = ""  # other sections the user's story guide asks for, in Markdown
     open_questions: list[str] = field(default_factory=list)
     source_action_ids: list[str] = field(default_factory=list)
