@@ -33,6 +33,7 @@ from teams_recorder.domain import (
     merge_open_actions,
     task_card,
     unconfirmed,
+    unconfirmed_reason,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Notify, StoryDoc
@@ -95,19 +96,19 @@ class DraftUserStories:
         actions = plan.new_actions
         by_route = {route: [a for a in actions if a.route is route] for route in ActionRoute}
         existing = recent_stories(self.repo, day, self.dedup_days)
-        doubtful = [a for a in by_route[ActionRoute.STORY] if unconfirmed(a.verification)]
+        unconfirmed_story_actions = [a for a in by_route[ActionRoute.STORY] if unconfirmed(a.verification)]
         candidates = [a for a in by_route[ActionRoute.STORY] if not unconfirmed(a.verification)]
         stories_only = [s for s in existing if not s.is_task_card]
         drafts = self.writer.draft(day, candidates, self._source_analyses(candidates), stories_only) if candidates else StoryDrafts(day=day)
         drafts.day = day
         self._add_task_cards(drafts, by_route[ActionRoute.TASK], [s for s in existing if s.is_task_card])
         drafts.skipped += [
-            SkippedAction(a.id, StoryDoc.NOT_CONFIRMED.format(reason=a.verification.reason) if a.verification and a.verification.reason
+            SkippedAction(a.id, StoryDoc.NOT_CONFIRMED.format(reason=reason) if (reason := unconfirmed_reason(a.verification))
                           else StoryDoc.NOT_CONFIRMED_NO_REASON)
-            for a in doubtful
+            for a in unconfirmed_story_actions
         ]
         drafts.skipped += [
-            SkippedAction(a.id, StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS[a.kind.value]))
+            SkippedAction(a.id, StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS[a.kind.value]) + _unconfirmed_suffix(a))
             for a in by_route[ActionRoute.PLAN] if a.kind is not None
         ]
         self.repo.save_story_drafts(drafts, self.renderer.render(drafts, actions, existing, degraded_sources(self.repo, actions)))
@@ -224,6 +225,14 @@ class PublishUserStories:
             )
         elif report.published:
             self.notifier.notify(Notify.STORIES_PUBLISHED, Notify.STORIES_PUBLISHED_BODY.format(count=len(report.published)))
+
+
+def _unconfirmed_suffix(action: Action) -> str:
+    """The mark a plan-only action carries in the drafts when the verifier did not confirm it (FR4: kept, visibly marked)."""
+    reason = unconfirmed_reason(action.verification)
+    if reason is None:
+        return ""
+    return StoryDoc.UNCONFIRMED_SUFFIX.format(reason=reason) if reason else StoryDoc.UNCONFIRMED_SUFFIX_NO_REASON
 
 
 def degraded_sources(repo: MeetingRepository, actions: list[Action]) -> dict[str, TranscriptHealth]:
