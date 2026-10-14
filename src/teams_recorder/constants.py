@@ -84,6 +84,7 @@ class Files:
     ANALYZE_PROMPT = "analyze_system.md"
     PLAN_PROMPT = "plan_system.md"
     STORIES_PROMPT = "stories_system.md"
+    VERIFY_PROMPT = "verify_system.md"
     STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
@@ -187,6 +188,34 @@ class Audio:
     WAV_CODECS = {16: "pcm_s16le", 32: "pcm_f32le"}   # ffmpeg microphone backend
     LOW_DISK_HOURS = 2.0            # warn at recording start when less than this much recording fits
     CRITICAL_DISK_BYTES = 1_000_000_000  # warn once during a call below this
+
+
+class VerdictSupport(StrEnum):
+    """How far the transcript supports a claim (the claim verifier's answer; only `supported` confirms it)."""
+
+    SUPPORTED = "supported"
+    PARTIAL = "partial"
+    UNSUPPORTED = "unsupported"
+    CONTRADICTED = "contradicted"
+
+
+class Verify:
+    """Claim verification (tasks/prd-fidelity-guard, task 3.0). The patterns are data about meetings held in
+    Brazilian Portuguese, matched against normalized text (lower case, no accents); taken from the prototype
+    in scripts/fidelity_eval.py (SENSITIVE, the participant check), measured in evaluation §14.3."""
+
+    WINDOW_SECONDS = 60              # a long transcript is cut to the lines within this of each claim's timestamp...
+    MAX_TRANSCRIPT_CHARS = 200_000   # ...when longer than this (about 4 h of speech); below it the model reads it whole
+    SENSITIVE = (
+        r"cardiolog", r"coracao", r"consulta medica", r"\bmedic[oa]s?\b", r"exames? (de rotina|do coracao|de sangue|medicos?)",
+        r"doenc", r"\bdoente\b", r"atestado", r"problemas? de saude", r"gravid", r"terapia", r"psicolog", r"religi", r"igreja",
+        r"orientacao sexual", r"\bgay\b", r"partido politico", r"sindicat",
+    )
+    NAME_PARTICLES = ("da", "de", "do", "das", "dos", "dr", "dra", "e")   # not names: "Paula de Souza"
+    ADDRESS = (   # someone addressed by name; {name} is a normalized, escaped name token
+        r"\b(bom dia|boa tarde|boa noite|obrigad[oa]|oi|ola),? (o |a )?{name}\b",
+        r"\b{name},",
+    )
 
 
 class Transcription:

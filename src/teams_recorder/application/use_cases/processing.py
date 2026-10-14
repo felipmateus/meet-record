@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from teams_recorder.application.ports import MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
+from teams_recorder.application.use_cases.verification import VerifyAnalysis
 from teams_recorder.constants import Audio, Transcription
 from teams_recorder.domain import Analysis, Transcript, TranscriptHealth, TranscriptionError, transcript_health
 from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
@@ -84,6 +85,7 @@ class AnalyzeMeeting:
     repo: MeetingRepository
     analyzer: MeetingAnalyzer
     minutes: MinutesRenderer | None = None
+    verify: VerifyAnalysis | None = None   # marks the claims before they are saved; None: not verified (until task 7.0 wires it)
 
     def execute(self, meeting_id: str) -> Analysis:
         meeting = self.repo.load_meta(meeting_id)
@@ -91,6 +93,8 @@ class AnalyzeMeeting:
         with self.repo.lock(meeting_id):
             analysis = self.analyzer.analyze(transcript, meeting)
             analysis.meeting_id = meeting_id
+            if self.verify is not None:
+                analysis = self.verify.execute(meeting, analysis, transcript)
             self.repo.save_analysis(meeting_id, analysis)
             if analysis.title and not meeting.title:
                 meeting.title = analysis.title  # automatic recordings get a readable name

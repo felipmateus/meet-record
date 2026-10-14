@@ -12,7 +12,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from teams_recorder.domain import Action, Analysis, DailyPlan, Meeting, StoryDrafts, Transcript, TranscriptHealth, UserStory
+from teams_recorder.domain import (
+    Action, Analysis, ClaimRef, DailyPlan, Meeting, StoryDrafts, Transcript, TranscriptHealth, UserStory, Verification,
+)
 
 
 class CallState(StrEnum):
@@ -80,6 +82,14 @@ class AnalysisContext(Protocol):
 @runtime_checkable
 class MeetingAnalyzer(Protocol):
     def analyze(self, transcript: Transcript, meeting: Meeting) -> Analysis: ...
+
+
+@runtime_checkable
+class ClaimVerifier(Protocol):
+    def verify(self, meeting: Meeting, analysis: Analysis, transcript: Transcript) -> dict[ClaimRef, Verification]:
+        """Checks the analysis's claims against the transcript; a claim it could not judge is unconfirmed.
+        Raises on failure (no answer, an invalid one): the caller then leaves the claims unverified."""
+        ...
 
 
 @runtime_checkable

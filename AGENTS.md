@@ -56,7 +56,7 @@ container.py     composition root: the ONLY place that instantiates concrete ada
 config.py        config.toml + .env → frozen Settings; env overrides; data_dir = paths.data_dir (relative = inside the project; this repo uses ./data), or automatic: Application Support when the project sits in iCloud or a TCC-protected folder
 ```
 
-Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer) and `planner_claude` (planner); and `codec` (JSON ↔ domain) is used by `repository_fs`.
+Import direction is strict: `domain ← application ← adapters/container`. Adapters never import each other's internals except the LLM stack: `llm_schema` (output schema + prompt helpers) is used by `llm_transport` (API / Claude Code request shape, error mapping, usage log), `llm_claude` (analyzer), `planner_claude` (planner), `stories_claude` (story writer) and `verifier_claude` (claim verifier); and `codec` (JSON ↔ domain) is used by `repository_fs`.
 
 Ports and their adapters (`application/ports.py`):
 
@@ -72,6 +72,7 @@ Ports and their adapters (`application/ports.py`):
 | `DiskSpace` | `disk_space.DataDirDiskSpace` (free bytes on the data volume; low-space notifications at recording start and during a call, and in `trec doctor`) |
 | `Notifier`, `Clock` | `notifier_macos` (osascript / log), `clock`. Windows: `notifier_windows.ToastNotifier` (PowerShell toast) |
 | `RecordingConfirmation` | `confirm_macos.DialogRecordingConfirmation` (osascript `display dialog`; keep/discard asked by the daemon when it starts a recording; `None` when `[confirmation] enabled = false` or headless). Windows: `confirm_windows.MessageBoxRecordingConfirmation` (user32 `MessageBoxTimeoutW`) |
+| `ClaimVerifier` | `verifier_claude.ClaudeClaimVerifier` over a `StructuredTransport` (one call per meeting; the transcript whole, or its start plus ±60 s around each claim when long; verdict → confirmed/unconfirmed in code). Used by `VerifyAnalysis`, which also runs the two code checks (`domain/verification.py`); not wired into the container until fidelity-guard task 7.0 |
 | `MinutesRenderer` | `minutes_markdown.MarkdownMinutesRenderer` (minutes.md from the analysis, no LLM call; labels in `messages.Minutes`; a banner when the transcript's health is degraded) |
 | `Planner` | `planner_claude.ClaudePlanner` over the same `StructuredTransport` (new/overdue actions computed in code; the model writes markdown, priorities and completed ids) |
 | `StoryWriter` | Receives only `feature`/`bug` actions and unclassified ones: `DraftUserStories` routes by `Action.kind` (set by the analysis), turning `technical`/`operation` actions into task cards and leaving `management`/`communication` in the plan. `stories_claude.ClaudeStoryWriter` over the same `StructuredTransport`: drafts user stories from a plan's new actions; the user's guide (`[stories] guide`, default `prompts/user_story_guide.md`) is appended to `prompts/stories_system.md` and re-read on every call, and a missing or empty guide is an error. Invented action ids are dropped in code; uncovered actions become `skipped` |
