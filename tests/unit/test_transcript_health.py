@@ -96,12 +96,13 @@ def test_the_meeting_length_counts_the_minutes_after_the_last_segment():
     assert transcript_health(Transcript(), 0.10, duration_seconds=1800).uncovered == ((0, 30),)
 
 
-def test_healthier_prefers_more_text_then_not_degraded_then_fewer_loops():
+def test_healthier_prefers_a_loop_free_pass_that_keeps_most_of_the_text_then_more_text_then_fewer_loops():
     bad = TranscriptHealth(0.70, 28, 86, True)
     better = TranscriptHealth(0.40, 50, 86, True)
     good = TranscriptHealth(0.04, 84, 86, False)
     assert good.is_healthier_than(better) and better.is_healthier_than(bad)
-    assert TranscriptHealth(0.30, 86, 86, True).is_healthier_than(TranscriptHealth(0.02, 80, 86, False))   # more usable text wins
+    assert TranscriptHealth(0.02, 80, 86, False).is_healthier_than(TranscriptHealth(0.30, 86, 86, True))   # 80 >= 85% of 86
+    assert TranscriptHealth(0.30, 86, 86, True).is_healthier_than(TranscriptHealth(0.02, 70, 86, False))   # 70 < 85% of 86
     assert TranscriptHealth(0.0, 28, 86, False).is_healthier_than(bad)                                     # same text, no loop
     assert TranscriptHealth(0.03, 84, 86, False).is_healthier_than(TranscriptHealth(0.04, 84, 86, False))
     assert not bad.is_healthier_than(bad)   # a tie keeps the first pass
@@ -136,3 +137,12 @@ def test_short_tracks_are_not_judged_and_the_threshold_is_exclusive():
     assert rate_mismatch(_stats(100.0, 5.0), 0.05, 60) is False
     assert rate_mismatch(_stats(100.0, 5.1), 0.05, 60) is True
     assert _stats(0.0, 0.0).short_padding_share == 0.0
+
+
+def test_the_2026_10_14_retry_without_loops_now_wins():
+    # 2026-10-14_15-00-56: the first pass had 69% of its segments in loops yet "covered" 35 of 37 minutes, because a
+    # minute counts as covered by any line outside a loop; the VAD retry had no loops and text in 31 minutes
+    first = TranscriptHealth(0.69, 35, 37, True, ((6, 7), (35, 36)))
+    retry = TranscriptHealth(0.0, 31, 37, False)
+    assert retry.is_healthier_than(first) and not first.is_healthier_than(retry)
+    assert not TranscriptHealth(0.0, 29, 37, False).is_healthier_than(first)   # 29 < 85% of 35: too much text lost

@@ -205,3 +205,18 @@ def test_an_unconfirmed_plan_only_action_is_marked_in_the_drafts(repo, notifier,
     assert reasons["c1"] == (StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["communication"])
                              + StoryDoc.UNCONFIRMED_SUFFIX.format(reason="a transcrição não diz quem fará"))
     assert reasons["g1"] == StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["management"])   # unverified: as before
+
+
+def test_a_source_meeting_recorded_at_the_wrong_rate_gets_its_own_banner_in_the_drafts(repo, notifier, clock, meeting):
+    day = clock.now().date()
+    wrong_rate = TranscriptHealth(0.0, 12, 12, False, rate_mismatch=True, short_padding_share=0.669)
+    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=Transcript([Segment(0, 1, "oi")], health=wrong_rate))
+    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Exportar horas", "usuário", meeting.id, id="f1")]))
+    renderer = FakeStoryRenderer()
+
+    DraftUserStories(repo, FakeStoryWriter(), renderer, notifier).execute(day)
+
+    assert renderer.degraded[0] == {meeting.id: wrong_rate}   # not degraded by loops, still announced
+    md = MarkdownStoryRenderer().render(StoryDrafts(day), [], [], {meeting.id: wrong_rate})
+    assert StoryDoc.RATE_MISMATCH.format(meeting=meeting.id, share=0.669) in md
+    assert StoryDoc.DEGRADED.split("{meeting}")[0] not in md   # only the banner that applies

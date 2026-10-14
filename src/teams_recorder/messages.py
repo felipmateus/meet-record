@@ -354,6 +354,7 @@ class Log:
     TRANSCRIPT_RETRY_RESULT = "retry of %s: %.0f%% of segments in loops, text in %s of %s min; keeping the %s pass"
     PASS_FIRST, PASS_RETRY = "first", "retry"   # names used in TRANSCRIPT_RETRY_RESULT
     TRANSCRIPT_RETRY_FAILED = "retry of %s failed; keeping the first pass: %s"
+    TRANSCRIPT_RETRY_SKIPPED = "no retry for %s: its Teams track was recorded at the wrong sample rate, which a second pass cannot repair"
     VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
     VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
     RATE_MISMATCH = ("Teams track of %s was likely recorded at the wrong sample rate: %.0f%% of it padded in short pads "
@@ -531,6 +532,9 @@ class StoryDoc:
     UNCONFIRMED_NO_REASON = "⚠️ **A confirmar na transcrição.**"
     DEGRADED = ("> ⚠️ **Transcrição degradada** na reunião {meeting}: {loop:.0%} dos trechos são uma mesma frase repetida "
                 "pelo reconhecimento de voz{gaps}. O que veio dela pode estar incompleto.")   # gaps: Minutes.DEGRADED_GAPS
+    RATE_MISMATCH = ("> ⚠️ **Áudio do Teams gravado com a taxa errada** na reunião {meeting}: {share:.0%} da faixa do Teams é "
+                     "silêncio de preenchimento, e a fala dos outros participantes saiu acelerada e picotada. O que veio dela pode "
+                     "ter sido inventado pelo reconhecimento de voz: confirme com os participantes antes de publicar.")
     KIND = "**Tipo:** {label}"
     KIND_LABELS = {
         "feature": "Feature", "bug": "Bug", "technical": "Tarefa técnica",

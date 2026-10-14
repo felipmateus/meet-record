@@ -8,7 +8,9 @@ from pathlib import Path
 from teams_recorder.application.ports import MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
 from teams_recorder.application.use_cases.verification import VerifyAnalysis
 from teams_recorder.constants import Audio, Transcription
-from teams_recorder.domain import Analysis, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, rate_mismatch, transcript_health
+from teams_recorder.domain import (
+    Analysis, CaptureStats, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, rate_mismatch, transcript_health,
+)
 from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Log, Notify
 
@@ -34,7 +36,8 @@ class TranscribeMeeting:
 
     The Teams track's capture counters are checked too: one recorded at the wrong sample rate (see
     domain/health.rate_mismatch) is garbled before whisper sees it, so its transcript is flagged in the
-    health and the user is notified, instead of the minutes silently resting on hallucinations.
+    health and the user is notified, instead of the minutes silently resting on hallucinations. The
+    counters are read before transcribing, and such a track gets no retry: VAD cannot repair it.
     """
 
     repo: MeetingRepository
@@ -51,9 +54,10 @@ class TranscribeMeeting:
             raise TranscriptionError(Err.NO_AUDIO_FILE.format(meeting_id=meeting_id, filename=AUDIO))
         duration = self.repo.load_meta(meeting_id).duration_seconds
         with self.repo.lock(meeting_id):
-            transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration)
-            if transcript.health is not None:
-                transcript.health = self._check_capture(meeting_id, transcript.health)
+            mismatch = self._rate_mismatch(meeting_id)
+            transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration, allow_retry=mismatch is None)
+            if transcript.health is not None and mismatch is not None:
+                transcript.health = replace(transcript.health, rate_mismatch=True, short_padding_share=mismatch.short_padding_share)
             self.repo.save_transcript(meeting_id, transcript)
         health = transcript.health
         if health is not None and health.degraded and self.notifier is not None:
@@ -64,31 +68,36 @@ class TranscribeMeeting:
             self.notifier.notify(Notify.RATE_MISMATCH, Notify.RATE_MISMATCH_BODY.format(meeting_id=meeting_id, share=health.short_padding_share))
         return transcript
 
-    def _check_capture(self, meeting_id: str, health: TranscriptHealth) -> TranscriptHealth:
-        """Marks the health when the Teams track's counters show a sample-rate mismatch. Advisory: unreadable
-        counters skip the check rather than fail the transcription, which has already run by now."""
+    def _rate_mismatch(self, meeting_id: str) -> CaptureStats | None:
+        """The Teams track's counters when they show a sample-rate mismatch, else None. Read before transcribing,
+        since teams-tap writes them when the recording stops. Advisory: unreadable counters skip the check
+        rather than fail the transcription."""
         try:
             stats = self.repo.load_capture_stats(meeting_id)
         except (RepositoryError, OSError) as exc:   # OSError: a repository that does not translate its I/O errors
             log.warning(Log.CAPTURE_STATS_UNREADABLE, meeting_id, exc)
-            return health
+            return None
         if stats is None or not rate_mismatch(stats, self.max_short_pad_share, self.rate_check_min_seconds):
-            return health
+            return None
         rates = ", ".join(f"{r:.0f}" for r in stats.device_rates) or "?"   # literal-ok: list separator and unknown marker in a log argument
         log.warning(Log.RATE_MISMATCH, meeting_id, 100 * stats.short_padding_share, stats.short_padded_seconds, stats.written_seconds, rates)
-        return replace(health, rate_mismatch=True, short_padding_share=stats.short_padding_share)
+        return stats
 
     def _checked(self, transcriber: Transcriber, audio: Path, duration: float | None) -> tuple[Transcript, TranscriptHealth]:
         transcript = transcriber.transcribe(audio, self.language)
         health = transcript.health = transcript_health(transcript, self.max_loop_share, duration)
         return transcript, health
 
-    def _transcribe(self, meeting_id: str, audio: Path, duration: float | None) -> Transcript:
+    def _transcribe(self, meeting_id: str, audio: Path, duration: float | None, allow_retry: bool) -> Transcript:
+        """`allow_retry=False` when the audio itself is known to be broken: a second pass cannot repair it."""
         first, health = self._checked(self.transcriber, audio, duration)
         if not health.degraded:
             return first
         log.warning(Log.TRANSCRIPT_DEGRADED, meeting_id, 100 * health.loop_share, health.covered_minutes, health.total_minutes)
         if self.retry is None:
+            return first
+        if not allow_retry:
+            log.info(Log.TRANSCRIPT_RETRY_SKIPPED, meeting_id)
             return first
         log.info(Log.TRANSCRIPT_RETRY, meeting_id)
         try:

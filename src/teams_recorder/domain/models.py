@@ -62,6 +62,9 @@ class CaptureStats:
         return self.short_padded_seconds / self.written_seconds if self.written_seconds > 0 else 0.0
 
 
+RETRY_KEEP_SHARE = 0.85   # a pass that is not degraded wins when it keeps this share of a degraded pass's minutes with text
+
+
 @dataclass(frozen=True)
 class TranscriptHealth:
     """How usable a transcript is (see domain/health.py, which computes it)."""
@@ -76,10 +79,20 @@ class TranscriptHealth:
     short_padding_share: float = 0.0   # share of the Teams track padded in short pads, the evidence for rate_mismatch
 
     def is_healthier_than(self, other: "TranscriptHealth") -> bool:
-        """More minutes with text beats everything, so an empty or cut-short pass never replaces one with
-        usable text; then not degraded beats degraded; then fewer segments in loops. Compare passes of the
-        same audio measured against the same duration (transcript_health's duration_seconds)."""
-        return (-self.covered_minutes, self.degraded, self.loop_share) < (-other.covered_minutes, other.degraded, other.loop_share)
+        """Which of two passes of the same audio to keep (both measured against the same duration).
+
+        A pass that is not degraded (loop share at most max_loop_share) beats a degraded one when it keeps at
+        least RETRY_KEEP_SHARE of the other's minutes with text: a minute counts as covered by any line outside a
+        loop, so a pass mostly in loops can still look as if it covers more (2026-10-14_15-00-56: 69% of segments
+        in loops and 35 of 37 minutes, against a retry with no loops and 31). A pass that loses more than that
+        never wins, so an empty or cut-short retry never replaces a first pass with usable text. Otherwise: more
+        minutes with text, then fewer loops.
+        """
+        if self.degraded != other.degraded:
+            clean, looped = (other, self) if self.degraded else (self, other)
+            clean_wins = clean.covered_minutes >= RETRY_KEEP_SHARE * looped.covered_minutes
+            return clean_wins == (clean is self)
+        return (-self.covered_minutes, self.loop_share) < (-other.covered_minutes, other.loop_share)
 
     def uncovered_ranges(self) -> list[str]:
         """The minutes without text as transcript times, e.g. ["00:00:00–00:59:00"]."""
