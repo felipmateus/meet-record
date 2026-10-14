@@ -25,6 +25,11 @@ def claim_refs(analysis: Analysis) -> list[ClaimRef]:
     return [c.ref for c in claims(analysis)]
 
 
+def unconfirmed(v: Verification | None) -> bool:
+    """Checked and not confirmed. A claim never checked (None) is not unconfirmed: it is shown as before."""
+    return v is not None and v.status is VerificationStatus.UNCONFIRMED
+
+
 def combine(first: Verification | None, second: Verification | None) -> Verification | None:
     """Two verdicts on one claim: unconfirmed if either is, with both reasons; None only if neither checked it."""
     if first is None or second is None:

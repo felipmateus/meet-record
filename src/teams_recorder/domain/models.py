@@ -295,6 +295,7 @@ class UserStory:
     id: str = field(default_factory=_new_action_id)
     publications: list[Publication] = field(default_factory=list)
     kind: ActionKind | None = None   # feature/bug for stories, technical/operation for task cards; None if unclassified
+    verification: Verification | None = None   # a task card's: its action's, so an unconfirmed card is published marked
 
     def publication(self, destination: str) -> Publication | None:
         return next((p for p in self.publications if p.destination == destination), None)
@@ -346,7 +347,7 @@ def task_card(action: Action) -> UserStory:
     """A technical or operation action as a board card: the action itself, no story sentence or criteria."""
     return UserStory(
         title=action.description, narrative="", source_action_ids=[action.id], source_meetings=[action.source_meeting],
-        priority=action.priority, due=action.due, kind=action.kind,
+        priority=action.priority, due=action.due, kind=action.kind, verification=action.verification,
     )
 
 
