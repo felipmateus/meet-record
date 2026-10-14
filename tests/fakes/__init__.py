@@ -382,7 +382,10 @@ class FakeStoryPublisher:
 class FakeStoryRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[StoryDrafts, list[Action], list[UserStory]]] = []
+        self.degraded: list[dict[str, TranscriptHealth] | None] = []
 
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory]) -> str:
+    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
+               degraded: dict[str, TranscriptHealth] | None = None) -> str:
         self.calls.append((drafts, actions, existing))
+        self.degraded.append(degraded)
         return f"# Stories {drafts.day}\n{len(drafts.stories)} stories\n"
