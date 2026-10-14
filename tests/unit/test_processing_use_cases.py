@@ -1,9 +1,11 @@
+import logging
+
 import pytest
 
 from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
 from teams_recorder.domain import CaptureStats, MeetingStatus, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, derive_status
 from teams_recorder.domain.status import AUDIO, LOCK
-from teams_recorder.messages import Notify
+from teams_recorder.messages import Log, Notify
 from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript
 
 
@@ -256,3 +258,44 @@ def test_rate_check_thresholds_come_from_the_use_case(repo, meeting):
     repo.seed(meeting, {AUDIO}, capture_stats=_HEALTHY_TAP)   # 0.75% short padding
     result = TranscribeMeeting(repo, FakeTranscriber(speech_transcript()), "pt", max_short_pad_share=0.005).execute(meeting.id)
     assert result.health is not None and result.health.rate_mismatch
+
+
+def test_a_track_at_the_wrong_rate_gets_no_retry(repo, meeting, caplog):
+    # VAD cannot repair audio recorded at the wrong rate; on 2026-10-14 the useless retry took 4 minutes
+    caplog.set_level(logging.INFO)
+    repo.seed(meeting, {AUDIO}, capture_stats=_BROKEN_TAP)
+    retry, notifier = FakeTranscriber(speech_transcript()), FakeNotifier()
+
+    result = TranscribeMeeting(repo, FakeTranscriber(looped_transcript()), "pt", retry=retry, notifier=notifier).execute(meeting.id)
+
+    assert retry.calls == [] and result.health is not None
+    assert result.health.degraded and result.health.rate_mismatch and not result.health.retried
+    assert {t for t, _ in notifier.messages} == {Notify.TRANSCRIPT_DEGRADED, Notify.RATE_MISMATCH}
+    assert Log.TRANSCRIPT_RETRY_SKIPPED % meeting.id in caplog.text
+
+
+def test_a_healthy_track_still_gets_the_retry(repo, meeting):
+    repo.seed(meeting, {AUDIO}, capture_stats=_HEALTHY_TAP)
+    retry = FakeTranscriber(speech_transcript())
+    result = TranscribeMeeting(repo, FakeTranscriber(looped_transcript()), "pt", retry=retry).execute(meeting.id)
+    assert len(retry.calls) == 1 and result.health is not None and result.health.retried and not result.health.rate_mismatch
+
+
+
+def test_a_loop_free_retry_that_keeps_most_of_the_text_replaces_the_first_pass(repo, meeting):
+    # the 85% rule through the use case: the retry has no loops but less text than the first pass "covers"
+    first = looped_transcript(minutes=20, loop_minutes=2)   # 2 minutes looped, text in 18 of 20 minutes, degraded
+    retry = speech_transcript(minutes=16)                   # no loops, text in 16 minutes: 16 >= 85% of 18
+    result = _transcribe(repo, meeting, FakeTranscriber(first), FakeTranscriber(retry))
+    assert result is retry and result.health is not None and not result.health.degraded and result.health.retried
+
+
+def test_unreadable_capture_counters_still_allow_the_retry(repo, meeting):
+    class BrokenStats(type(repo)):
+        def load_capture_stats(self, meeting_id):
+            raise RepositoryError("tap.stats.json unreadable")
+    broken = BrokenStats()
+    broken.seed(meeting, {AUDIO})
+    retry = FakeTranscriber(speech_transcript())
+    result = TranscribeMeeting(broken, FakeTranscriber(looped_transcript()), "pt", retry=retry).execute(meeting.id)
+    assert len(retry.calls) == 1 and result.health is not None and not result.health.rate_mismatch
