@@ -266,7 +266,7 @@ def untrusted_sources(repo: MeetingRepository, actions: list[Action]) -> dict[st
             health = repo.load_transcript(meeting_id).health
         except TeamsRecorderError:
             continue
-        if health is not None and (health.degraded or health.rate_mismatch):
+        if health is not None and health.untrusted:
             found[meeting_id] = health
     return found
 

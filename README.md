@@ -197,7 +197,7 @@ Windows asks for no permission to capture Teams audio. The microphone needs "Let
 
 ## First run checklist
 
-1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present.
+1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the claim verifier, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present.
 2. **Grant the two macOS permissions** under System Settings > Privacy & Security. Both are requested on the first recording:
    - **Microphone**, for the process that records the microphone.
    - **Screen & System Audio Recording**, for `teams-tap`. Without it, the Teams track comes out silent and only your voice is recorded.
@@ -220,8 +220,8 @@ Once installed, there is nothing to do: join Teams calls as usual.
 
 | Command | What it does |
 |---|---|
-| `trec status` | Data folder, API key status, meetings with state and next step, degraded transcripts, recording in progress, open actions, stories waiting to be published |
-| `trec doctor` | Checks dependencies, models, the transcript-loop guard, permissions, disk and story destinations |
+| `trec status` | Data folder, API key status, meetings with state and next step, degraded transcripts, unconfirmed claims, recording in progress, open actions, stories waiting to be published |
+| `trec doctor` | Checks dependencies, models, the transcript-loop guard, the claim verifier, permissions, disk and story destinations |
 | `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`) |
 | `trec stop` | Stops the recording, mixes the tracks and writes `audio.m4a`. Works from any terminal |
 | `trec cancel` | Discards the recording in progress and deletes its files |
@@ -318,7 +318,8 @@ Safeguards:
 - Transcripts under 20 words are not sent to the model, because whisper hallucinates on silence. They get a local "transcript too short" analysis instead.
 - Refusals, truncated responses and schema violations are errors. A partial analysis is never saved.
 - The model is told not to invent tasks, deadlines or decisions.
-- Every call logs tokens (and cost, or its equivalent) to `data/log/llm_usage.jsonl`.
+- **Claim verification** (`[verification]`, on by default): one more call, Sonnet at medium effort on the same provider, checks every decision, action, deadline and participant against the transcript. What it cannot confirm is kept and marked "⚠️ _a confirmar: <motivo>_" in `minutes.md`, listed "a confirmar" in the daily plan, and never becomes a user story source. Two checks in code also mark claims with sensitive personal data and participants who neither speak nor are addressed. A failed call leaves the claims unverified and never blocks the analysis. A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not checked: the verifier would confirm the hallucinations the analysis took from it. Its banners in `minutes.md` and the story drafts say so. `enabled = false` turns off the call; the two code checks still run.
+- Every call logs tokens (and cost, or its equivalent) to `data/log/llm_usage.jsonl`; verifier calls are tagged `verify:<meeting>`.
 
 ### Provider: API or Claude Code
 
@@ -442,6 +443,9 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `cli_model` | `"opus"` | Model alias for `claude-code` |
 | | `effort` | `"high"` | Reasoning effort (`low` … `max`) |
 | | `max_tokens` | `16000` | Output cap (API) |
+| `[verification]` | `enabled` | `true` | Check each analysis's claims against the transcript (one more call per meeting) |
+| | `model`, `cli_model` | `"claude-sonnet-5-5"`, `"sonnet"` | Verifier model for `api` / `claude-code` (same provider as `[llm]`) |
+| | `effort` | `"medium"` | Verifier reasoning effort |
 | `[user]` | `name` | `""` | Your name as said in meetings, sent to the model |
 | `[confirmation]` | `enabled`, `timeout_seconds` | `true`, `30` | Keep-or-discard dialog |
 | `[planner]` | `hour` | `18` | When the planner runs, Monday to Friday |

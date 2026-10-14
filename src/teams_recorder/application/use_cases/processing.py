@@ -118,7 +118,7 @@ class AnalyzeMeeting:
     repo: MeetingRepository
     analyzer: MeetingAnalyzer
     minutes: MinutesRenderer | None = None
-    verify: VerifyAnalysis | None = None   # marks the claims before they are saved; None: not verified (until task 7.0 wires it)
+    verify: VerifyAnalysis | None = None   # marks the claims before they are saved; None: not verified at all
 
     def execute(self, meeting_id: str) -> Analysis:
         meeting = self.repo.load_meta(meeting_id)

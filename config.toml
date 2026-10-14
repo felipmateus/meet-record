@@ -74,6 +74,18 @@ cli_model = "opus"
 effort = "high"
 max_tokens = 16000
 
+[verification]
+# After each analysis, one more call checks every decision, action, deadline and participant
+# against the transcript; what it cannot confirm is kept and marked ⚠️ with the reason, in the
+# minutes, the daily plan and the story drafts. Same provider as [llm], smaller model.
+# A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not
+# checked (it would confirm its own hallucinations): its banner says so. false = no extra call
+# (the two checks done in code, sensitive data and unheard participants, still run).
+enabled = true
+model = "claude-sonnet-5-5"   # with provider = "api"
+cli_model = "sonnet"          # with provider = "claude-code"
+effort = "medium"
+
 [user]
 # Your name as people say it in meetings. Sent to the model so tasks addressed to you by
 # name ("Felipe, você fica com...") are attributed to you. Empty = not sent.

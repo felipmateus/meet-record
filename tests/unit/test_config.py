@@ -93,6 +93,9 @@ def test_invalid_mic_backend_and_effort(tmp_path: Path):
     (tmp_path / "config.toml").write_text('[llm]\neffort = "ultra"\n')
     with pytest.raises(ValueError, match="llm.effort"):
         load_settings(tmp_path)
+    (tmp_path / "config.toml").write_text('[verification]\neffort = "ultra"\n')
+    with pytest.raises(ValueError, match="verification.effort"):
+        load_settings(tmp_path)
 
 
 def test_denoise_and_vad_settings(tmp_path: Path):
@@ -268,3 +271,16 @@ def test_invalid_loop_share(tmp_path: Path, value: str):
 def test_repository_config_turns_the_guard_on():
     s = load_settings(Path(__file__).resolve().parents[2])
     assert s.whisper_max_context == 0 and s.max_loop_share == 0.10 and s.retry_on_loop and s.retry_vad
+
+
+def test_verification_defaults_and_settings(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.verify_enabled and s.verify_model == "claude-sonnet-5-5" and s.verify_cli_model == "sonnet" and s.verify_effort is Effort.MEDIUM
+    (tmp_path / "config.toml").write_text('[verification]\nenabled = false\nmodel = "claude-opus-5-5"\ncli_model = "opus"\neffort = "HIGH"\n')
+    s = load_settings(tmp_path)
+    assert not s.verify_enabled and s.verify_model == "claude-opus-5-5" and s.verify_cli_model == "opus" and s.verify_effort is Effort.HIGH
+
+
+def test_repository_config_turns_verification_on_with_sonnet():
+    s = load_settings(Path(__file__).resolve().parents[2])
+    assert s.verify_enabled and s.verify_cli_model == "sonnet" and s.verify_effort is Effort.MEDIUM

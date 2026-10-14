@@ -142,6 +142,7 @@ def test_the_drafts_document_shows_the_banner_and_the_card_mark():
     assert StoryDoc.DEGRADED.format(meeting="2026-10-08_10-30-52", loop=0.668,
                                     gaps=Minutes.DEGRADED_GAPS.format(ranges="00:00:00–00:14:00, 00:15:00–00:59:00")) in md
     assert StoryDoc.UNCONFIRMED.format(reason="a transcrição não diz quem fará") in md
+    assert md.count(StoryDoc.NOT_VERIFIED.format(meeting="2026-10-08_10-30-52")) == 1   # verification skipped it (task 7.0)
     plain = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [task_card(Action("Estimar", "usuário", "m0", id="t2"))]), [], [])
     assert "⚠️" not in plain
 
@@ -219,4 +220,5 @@ def test_a_source_meeting_recorded_at_the_wrong_rate_gets_its_own_banner_in_the_
     assert renderer.degraded[0] == {meeting.id: wrong_rate}   # not degraded by loops, still announced
     md = MarkdownStoryRenderer().render(StoryDrafts(day), [], [], {meeting.id: wrong_rate})
     assert StoryDoc.RATE_MISMATCH.format(meeting=meeting.id, share=0.669) in md
+    assert md.index(StoryDoc.RATE_MISMATCH.split("{meeting}")[0]) < md.index(StoryDoc.NOT_VERIFIED.format(meeting=meeting.id))
     assert StoryDoc.DEGRADED.split("{meeting}")[0] not in md   # only the banner that applies

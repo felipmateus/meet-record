@@ -1,4 +1,4 @@
-"""Claim verification after the analysis (tasks/prd-fidelity-guard, task 3.0)."""
+"""Claim verification after the analysis (tasks/prd-fidelity-guard, tasks 3.0 and 7.0)."""
 from __future__ import annotations
 
 import logging
@@ -34,6 +34,11 @@ class VerifyAnalysis:
     participant who neither speaks nor is addressed. A code check can only make a claim unconfirmed. When the
     verifier fails, its claims stay unverified and the code checks still apply; verification never fails the
     analysis.
+
+    A transcript that cannot be trusted (still degraded, or from a Teams track recorded at the wrong sample rate) is
+    not given to the verifier: it would confirm what the analysis took from the same hallucinated text (PRD decision
+    4). Its claims stay unverified, as when the verifier fails, so none is confirmed; the minutes and the drafts
+    document say so under the transcript banners, and the meeting still produces stories (PRD decision 9).
     """
 
     verifier: ClaimVerifier | None = None
@@ -41,7 +46,10 @@ class VerifyAnalysis:
 
     def execute(self, meeting: Meeting, analysis: Analysis, transcript: Transcript) -> Analysis:
         verdicts: dict[ClaimRef, Verification] = {}
-        if self.verifier is not None and claims(analysis):
+        health = transcript.health
+        if health is not None and health.untrusted:
+            log.warning(Log.VERIFY_SKIPPED, meeting.id, health.degraded, health.rate_mismatch)
+        elif self.verifier is not None and claims(analysis):
             try:
                 verdicts = dict(self.verifier.verify(meeting, analysis, transcript))
             except Exception as exc:  # noqa: BLE001 - verification is advisory: it never blocks the (paid) analysis

@@ -27,6 +27,7 @@ from teams_recorder.constants import (
     Stories,
     StoryDestination,
     Transcription,
+    Verify,
     Windows,
     ggml_model_file,
     raw_bytes_per_hour,
@@ -101,6 +102,10 @@ class Settings:
     max_loop_share: float = Transcription.MAX_LOOP_SHARE
     retry_on_loop: bool = Transcription.RETRY_ON_LOOP
     retry_vad: bool = Transcription.RETRY_VAD
+    verify_enabled: bool = Verify.ENABLED   # [verification]: check each analysis's claims against the transcript
+    verify_model: str = Verify.DEFAULT_API_MODEL
+    verify_cli_model: str = Verify.DEFAULT_CLI_MODEL
+    verify_effort: Effort = Verify.DEFAULT_EFFORT
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -230,6 +235,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     user = raw.get("user", {})
     confirmation = raw.get("confirmation", {})
     stories = raw.get("stories", {})
+    verification = raw.get("verification", {})
     backlog_md = stories.get("backlog_md", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
@@ -280,6 +286,10 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         max_loop_share=_parse_share(transcription.get("max_loop_share", Transcription.MAX_LOOP_SHARE)),
         retry_on_loop=bool(transcription.get("retry_on_loop", Transcription.RETRY_ON_LOOP)),
         retry_vad=bool(transcription.get("retry_vad", Transcription.RETRY_VAD)),
+        verify_enabled=bool(verification.get("enabled", Verify.ENABLED)),
+        verify_model=str(verification.get("model", Verify.DEFAULT_API_MODEL)),
+        verify_cli_model=str(verification.get("cli_model", Verify.DEFAULT_CLI_MODEL)),
+        verify_effort=_parse_enum(Effort, verification.get("effort", Verify.DEFAULT_EFFORT), Err.INVALID_VERIFY_EFFORT),
     )
 
 

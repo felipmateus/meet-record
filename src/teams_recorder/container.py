@@ -27,10 +27,12 @@ from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
+from teams_recorder.adapters.outbound.verifier_claude import ClaudeClaimVerifier
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.ports import (
     AudioMixer,
     CallDetector,
+    ClaimVerifier,
     Clock,
     DiskSpace,
     MeetingAnalyzer,
@@ -58,9 +60,10 @@ from teams_recorder.application.use_cases import (
     StartRecording,
     StopRecording,
     TranscribeMeeting,
+    VerifyAnalysis,
 )
 from teams_recorder.config import Settings, find_tool
-from teams_recorder.constants import Bin, Files, LlmProvider, MicBackend, Platform, StoryDestination, Transcription
+from teams_recorder.constants import Bin, Effort, Files, LlmProvider, MicBackend, Platform, StoryDestination, Transcription
 from teams_recorder.domain import UserStory
 
 
@@ -97,6 +100,7 @@ class Container:
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
     disk: DiskSpace | None = None
     retry_transcriber: Transcriber | None = None   # anti-loop pass for a degraded transcript; None: no retry
+    verifier: ClaimVerifier | None = None   # checks each analysis's claims against the transcript; None: [verification] off (code checks only)
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
@@ -113,7 +117,8 @@ class Container:
                                  self.retry_transcriber, self.notifier)
 
     def analyze_meeting(self) -> AnalyzeMeeting:
-        return AnalyzeMeeting(self.repo, self.analyzer, self.minutes)
+        # Without a verifier ([verification] off) the two code checks still run: they need no model call (PRD decision 11).
+        return AnalyzeMeeting(self.repo, self.analyzer, self.minutes, VerifyAnalysis(self.verifier, self.settings.user_name))
 
     def render_minutes(self) -> RenderMinutes:
         return RenderMinutes(self.repo, self.minutes)
@@ -185,6 +190,7 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
             threads=settings.whisper_threads, vad_model_path=settings.vad_model_path, max_context=settings.whisper_max_context,
         ),
         retry_transcriber=build_retry_transcriber(settings),
+        verifier=build_verifier(settings),
         analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT, user_name=settings.user_name),
         planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
@@ -241,6 +247,20 @@ def build_story_publishers(settings: Settings) -> list[StoryPublisher]:
 
 
 def build_transport(settings: Settings) -> StructuredTransport:
+    return _transport(settings, settings.llm_model, settings.llm_cli_model, settings.llm_effort)
+
+
+def build_verifier(settings: Settings) -> ClaimVerifier | None:
+    """The claim verifier, on its own transport: [verification] picks a smaller model and effort than the analysis
+    (Sonnet at medium, PRD decision 1), on the same provider. Its calls go to the same usage log, tagged verify:<id>.
+    None when [verification] enabled is false; the code checks of VerifyAnalysis still run."""
+    if not settings.verify_enabled:
+        return None
+    transport = _transport(settings, settings.verify_model, settings.verify_cli_model, settings.verify_effort)
+    return ClaudeClaimVerifier(transport, prompt_path=settings.prompts_dir / Files.VERIFY_PROMPT, user_name=settings.user_name)
+
+
+def _transport(settings: Settings, model: str, cli_model: str, effort: Effort) -> StructuredTransport:
     if settings.llm_provider is LlmProvider.CLAUDE_CODE:
-        return ClaudeCodeTransport(model=settings.llm_cli_model, effort=settings.llm_effort, usage_log=settings.usage_log)
-    return ApiTransport(model=settings.llm_model, effort=settings.llm_effort, max_tokens=settings.llm_max_tokens, usage_log=settings.usage_log)
+        return ClaudeCodeTransport(model=cli_model, effort=effort, usage_log=settings.usage_log)
+    return ApiTransport(model=model, effort=effort, max_tokens=settings.llm_max_tokens, usage_log=settings.usage_log)

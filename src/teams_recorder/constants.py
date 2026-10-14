@@ -204,10 +204,14 @@ class VerdictSupport(StrEnum):
 
 
 class Verify:
-    """Claim verification (tasks/prd-fidelity-guard, task 3.0). The patterns are data about meetings held in
+    """Claim verification (tasks/prd-fidelity-guard, tasks 3.0 and 7.0). The patterns are data about meetings held in
     Brazilian Portuguese, matched against normalized text (lower case, no accents); taken from the prototype
     in scripts/fidelity_eval.py (SENSITIVE, the participant check), measured in evaluation §14.3."""
 
+    ENABLED = True                   # [verification] enabled: one extra call per analyzed meeting (PRD decision 11)
+    DEFAULT_API_MODEL = "claude-sonnet-5-5"   # [verification] model, with provider = "api"
+    DEFAULT_CLI_MODEL = "sonnet"     # [verification] cli_model, with provider = "claude-code"
+    DEFAULT_EFFORT = Effort.MEDIUM   # Sonnet at medium effort caught every injected error in the evaluation (PRD decision 1)
     WINDOW_SECONDS = 60              # a long transcript is cut to the lines within this of each claim's timestamp...
     MAX_TRANSCRIPT_CHARS = 200_000   # ...when longer than this (about 4 h of speech); below it the model reads it whole
     SENSITIVE = (

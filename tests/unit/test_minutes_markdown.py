@@ -6,6 +6,7 @@ from pathlib import Path
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
 from teams_recorder.domain import Analysis, Meeting
+from teams_recorder.messages import Minutes
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -70,7 +71,8 @@ def test_degraded_transcript_puts_a_banner_under_the_title():
     assert lines[0] == "# Ata: Revisão da sprint de integração" and lines[1] == ""
     assert lines[2].startswith("> ⚠️ **Transcrição degradada:** 67% dos trechos são uma mesma frase repetida")
     assert ", e não há texto em 00:00:00–00:14:00, 00:15:00–00:59:00." in lines[2]
-    assert lines[3] == "" and lines[4].startswith("📅 **Data:**")
+    assert lines[3] == "" and lines[4] == Minutes.NOT_VERIFIED   # verification skipped this transcript (task 7.0)
+    assert lines[5] == "" and lines[6].startswith("📅 **Data:**")
 
 
 def test_degraded_without_gaps_and_healthy_transcripts():
@@ -87,6 +89,8 @@ def test_a_track_recorded_at_the_wrong_rate_puts_its_own_banner_under_the_title(
     health = TranscriptHealth(0.0, 12, 12, False, rate_mismatch=True, short_padding_share=0.669)
     lines = MarkdownMinutesRenderer().render(_meeting(), _analysis(), health).splitlines()
     assert lines[2].startswith("> ⚠️ **Áudio do Teams gravado com a taxa errada:** 67% da faixa do Teams")
-    assert lines[3] == "" and lines[4].startswith("📅 **Data:**")
+    assert lines[3] == "" and lines[4] == Minutes.NOT_VERIFIED
+    assert lines[5] == "" and lines[6].startswith("📅 **Data:**")
     both = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.3, 5, 12, True, rate_mismatch=True, short_padding_share=0.5))
-    assert both.index("Transcrição degradada") < both.index("taxa errada")
+    assert both.index("Transcrição degradada") < both.index("taxa errada") < both.index(Minutes.NOT_VERIFIED)
+    assert both.count(Minutes.NOT_VERIFIED) == 1

@@ -78,6 +78,13 @@ class TranscriptHealth:
     rate_mismatch: bool = False        # the Teams track was recorded at the wrong sample rate (see domain/health.py)
     short_padding_share: float = 0.0   # share of the Teams track padded in short pads, the evidence for rate_mismatch
 
+    @property
+    def untrusted(self) -> bool:
+        """Whether the transcript cannot serve as evidence: still degraded after the retry, or made from a Teams track
+        recorded at the wrong sample rate. Hallucinated text reads as fluent speech, so checking a claim against it
+        would confirm what was invented (PRD decision 4)."""
+        return self.degraded or self.rate_mismatch
+
     def is_healthier_than(self, other: "TranscriptHealth") -> bool:
         """Which of two passes of the same audio to keep (both measured against the same duration).
 
