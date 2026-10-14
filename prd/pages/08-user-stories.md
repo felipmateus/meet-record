@@ -30,6 +30,8 @@ Turns the day's new actions into user story drafts for the user's backlog, writt
 - After `trec plan`, with `[stories] enabled = true`: prints `Drafting user stories for <day>… ok (N stories, M actions left out)` and the titles. A failure prints the error, sends "User story drafts failed" and makes the command exit with code 1 after the purge; the plan itself is kept.
 - Notification "User story drafts ready: N draft(s) to review, M action(s) left out" when at least one story was drafted.
 - `trec doctor` shows whether the guide exists (`MISSING` only when drafting is enabled).
+- **Degraded transcripts** (whisper loop that survived the retry, see [Transcription](./02-transcription.md)): the drafts document opens with a banner for each source meeting whose transcript is degraded, with the time ranges that have no text, because what came from it may be incomplete. The stories are still drafted (fidelity-guard decision 9).
+- **Unconfirmed actions** (once claim verification is switched on, fidelity-guard task 7.0): a feature or bug the verifier did not confirm in the transcript never becomes a story's source; it is listed among the actions left out with "não confirmada na transcrição" and the reason. A technical or operation action still becomes a task card, marked "⚠️ A confirmar na transcrição" with the reason in the drafts and in the board task (decision 10).
 
 ## Integrations
 Drafting: same provider as the analysis and the plan (API or Claude Code), with schema-constrained structured output. Publishing: the Backlog.md CLI and `git check-ignore` (see the [integrations appendix](../appendix/integrations.md)).
