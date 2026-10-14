@@ -15,7 +15,7 @@ from teams_recorder.domain import (
     VerificationStatus,
 )
 from teams_recorder.domain.status import AUDIO
-from teams_recorder.messages import Minutes
+from teams_recorder.messages import Log, Minutes
 from tests.fakes import FakeAnalyzer, FakeClaimVerifier, FakeMinutesRenderer
 
 YES = Verification(VerificationStatus.CONFIRMED, "dito em 00:00:05")
@@ -87,3 +87,42 @@ def test_without_the_step_the_analysis_is_saved_unverified(repo, meeting):
     repo.seed(meeting, {AUDIO}, transcript=TRANSCRIPT)
     result = AnalyzeMeeting(repo, FakeAnalyzer()).execute(meeting.id)
     assert all(d.verification is None for d in result.decisions) and result.participant_checks == {}
+
+
+def test_an_untrusted_transcript_is_not_given_to_the_verifier(caplog):
+    """Task 7.0: a degraded transcript, or one from a track at the wrong rate, yields no confirmed claim (PRD decision 4)."""
+    from dataclasses import replace
+    from teams_recorder.domain import TranscriptHealth
+    for health in (TranscriptHealth(0.4, 10, 30, True), TranscriptHealth(0.0, 30, 30, False, rate_mismatch=True, short_padding_share=0.66)):
+        verifier = FakeClaimVerifier({ClaimRef(ClaimKind.DECISION, "0"): YES})
+
+        verified = VerifyAnalysis(verifier).execute(MEETING, _analysis(), replace(TRANSCRIPT, health=health))
+
+        assert verifier.calls == []
+        assert verified.decisions[0].verification is None and verified.others_actions[0].verification is None   # unverified, not ⚠️
+        assert verified.decisions[1].verification.status is VerificationStatus.UNCONFIRMED   # the code checks still apply
+        assert "Marcos" in verified.participant_checks
+    assert caplog.text.count(Log.VERIFY_SKIPPED.split("%s")[1]) == 2
+
+
+def test_a_healthy_or_unchecked_transcript_is_verified():
+    from dataclasses import replace
+    from teams_recorder.domain import TranscriptHealth
+    for health in (TranscriptHealth(0.05, 30, 30, False), None):
+        verifier = FakeClaimVerifier({ClaimRef(ClaimKind.DECISION, "0"): YES})
+        verified = VerifyAnalysis(verifier).execute(MEETING, _analysis(), replace(TRANSCRIPT, health=health))
+        assert verifier.calls and verified.decisions[0].verification == YES
+
+
+def test_an_untrusted_transcript_is_analyzed_unverified_and_its_minutes_say_so(repo, meeting):
+    """End to end through the analysis step, with the real minutes renderer."""
+    from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
+    from teams_recorder.domain import TranscriptHealth
+    degraded = Transcript(TRANSCRIPT.segments, health=TranscriptHealth(0.4, 10, 30, True))
+    repo.seed(meeting, {AUDIO}, transcript=degraded)
+    verifier = FakeClaimVerifier({ClaimRef(ClaimKind.DECISION, "0"): YES})
+
+    result = AnalyzeMeeting(repo, FakeAnalyzer(), MarkdownMinutesRenderer(), VerifyAnalysis(verifier)).execute(meeting.id)
+
+    assert verifier.calls == [] and result.decisions[0].verification is None
+    assert Minutes.NOT_VERIFIED in repo.minutes[meeting.id]

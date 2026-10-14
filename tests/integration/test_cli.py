@@ -557,3 +557,39 @@ def test_transcribe_and_status_mark_a_teams_track_recorded_at_the_wrong_rate(tmp
     status = runner.invoke(app, ["status"])
     assert "2026-10-14_15-38-49  [transcribed] → next: analyze" + Cli.MEETING_RATE_MISMATCH.format(share=health.short_padding_share) in status.output
     assert Cli.RATE_MISMATCH_TRANSCRIPTS.format(count=1) in status.output and Cli.DEGRADED_TRANSCRIPTS.format(count=0) in status.output
+
+
+def test_doctor_shows_the_claim_verifier(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    on = Cli.VERIFICATION_ON.format(model="claude-sonnet-5-5", provider="api", effort="medium")
+
+    no_prompt = runner.invoke(app, ["doctor"]).output   # a bare project has no prompts/ folder
+
+    prompt = project / "prompts" / Files.VERIFY_PROMPT
+    assert Cli.VERIFICATION_LINE.format(mark=Cli.WARNING, state=Cli.VERIFICATION_NO_PROMPT.format(state=on, path=prompt)) in no_prompt
+    prompt.parent.mkdir(); prompt.write_text("x")
+    (project / "config.toml").write_text('[llm]\nprovider = "claude-code"\n')
+    on_cli = Cli.VERIFICATION_ON.format(model="sonnet", provider="claude-code", effort="medium")
+    assert Cli.VERIFICATION_LINE.format(mark=Cli.OK, state=on_cli) in runner.invoke(app, ["doctor"]).output
+    (project / "config.toml").write_text("[verification]\nenabled = false\n")
+    assert Cli.VERIFICATION_LINE.format(mark=Cli.INFO, state=Cli.VERIFICATION_OFF) in runner.invoke(app, ["doctor"]).output
+
+
+def test_status_counts_unconfirmed_claims(tmp_path: Path, monkeypatch):
+    from teams_recorder.domain import Analysis, Decision, Verification, VerificationStatus
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    no = Verification(VerificationStatus.UNCONFIRMED, "ninguém disse isso")
+    yes = Verification(VerificationStatus.CONFIRMED, "dito")
+    for minute, decisions in ((0, [Decision("A", verification=no), Decision("B", verification=no)]),
+                              (10, [Decision("C", verification=yes)]), (20, [Decision("D")])):
+        m = Meeting.start(datetime(2026, 10, 15, 9, minute, 0)); repo.create(m)
+        repo.save_analysis(m.id, Analysis(meeting_id=m.id, summary="s", decisions=decisions))
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "2026-10-15_09-00-00  [analyzed]" + Cli.MEETING_UNCONFIRMED.format(count=2) in result.output
+    assert "2026-10-15_09-10-00  [analyzed]\n" in result.output and "2026-10-15_09-20-00  [analyzed]\n" in result.output
+    assert Cli.UNCONFIRMED_CLAIMS.format(claims=2, meetings=1) in result.output

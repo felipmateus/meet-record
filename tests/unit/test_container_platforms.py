@@ -11,7 +11,7 @@ from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetect
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.config import load_settings
-from teams_recorder.constants import Platform, Stories, StoryDestination
+from teams_recorder.constants import Files, Platform, Stories, StoryDestination
 from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
 from teams_recorder.domain.status import TAP_STATS
 from tests.fakes import FakeStoryPublisher
@@ -130,3 +130,32 @@ def test_the_macos_tap_writes_its_counters_next_to_the_track(tmp_path: Path):
     c = build_container(load_settings(tmp_path, platform=Platform.MACOS))
     tap = c.process_capture.command(1, tmp_path / "m" / "tap.wav")
     assert tap[tap.index("--stats") + 1] == str(tmp_path / "m" / TAP_STATS)
+
+
+def test_the_verifier_runs_on_its_own_smaller_model_and_logs_usage_like_the_rest(tmp_path: Path, monkeypatch):
+    from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport
+    from teams_recorder.adapters.outbound.verifier_claude import ClaudeClaimVerifier
+    from teams_recorder.constants import Effort
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    (tmp_path / "config.toml").write_text('[llm]\nprovider = "claude-code"\n[user]\nname = "Felipe"\n')
+    c = build_container(load_settings(tmp_path), headless=True)
+    verifier = c.verifier
+    assert isinstance(verifier, ClaudeClaimVerifier) and isinstance(verifier.transport, ClaudeCodeTransport)
+    assert verifier.transport.model == "sonnet" and verifier.transport.effort is Effort.MEDIUM
+    assert verifier.transport.usage_log == c.settings.usage_log and verifier.user_name == "Felipe"
+    assert verifier.prompt_path == c.settings.prompts_dir / Files.VERIFY_PROMPT
+    step = c.analyze_meeting().verify
+    assert step is not None and step.verifier is verifier and step.user_name == "Felipe"   # both need the name (task 3.0 note)
+
+    (tmp_path / "config.toml").write_text('[llm]\nprovider = "api"\n')
+    api = build_container(load_settings(tmp_path), headless=True).verifier
+    assert isinstance(api, ClaudeClaimVerifier) and isinstance(api.transport, ApiTransport)
+    assert api.transport.model == "claude-sonnet-5-5" and api.transport.effort is Effort.MEDIUM
+
+
+def test_verification_off_keeps_only_the_code_checks(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    (tmp_path / "config.toml").write_text("[verification]\nenabled = false\n")
+    c = build_container(load_settings(tmp_path), headless=True)
+    step = c.analyze_meeting().verify
+    assert c.verifier is None and step is not None and step.verifier is None   # no model call; PRD decision 11
