@@ -139,6 +139,7 @@ class Err:
     INVALID_BIT_DEPTH = "invalid audio.bit_depth: {value!r} (use one of {options})"
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
+    INVALID_VERIFY_EFFORT = "invalid verification.effort: {value!r}; use one of {options}"
     INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
     INVALID_LOOP_SHARE = "invalid transcription.max_loop_share: {value!r}; use a fraction above 0 and up to 1 (e.g. 0.10)"
     NO_DETECTOR = "daemon without a configured detector"
@@ -187,6 +188,8 @@ class Cli:
     DEGRADED_TRANSCRIPTS = "Degraded transcripts: {count}"
     MEETING_RATE_MISMATCH = "  ⚠ Teams audio recorded at the wrong sample rate ({share:.0%} short padding)"
     RATE_MISMATCH_TRANSCRIPTS = "Teams tracks recorded at the wrong sample rate: {count}"
+    MEETING_UNCONFIRMED = "  ⚠ {count} unconfirmed claim(s)"
+    UNCONFIRMED_CLAIMS = "Unconfirmed claims: {claims} in {meetings} meeting(s)"
     MEETING_TITLE = " {title}"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
@@ -208,6 +211,10 @@ class Cli:
     RETRY_OFF = "off ([transcription] retry_on_loop = false)"
     RETRY_SAME = "off (it would only repeat the first pass)"
     RETRY_VAD_MISSING = "; VAD model missing at {path}  → {script} {model}"
+    VERIFICATION_LINE = "[{mark}] claim verification: {state}"
+    VERIFICATION_ON = "on, model {model} ({provider}), effort {effort}"
+    VERIFICATION_OFF = "off ([verification] enabled = false): analyses are not checked against the transcript"
+    VERIFICATION_NO_PROMPT = "{state}; prompt missing at {path}"
     API_KEY_LINE = "[{mark}] ANTHROPIC_API_KEY in .env{hint}"
     API_KEY_NOT_REQUIRED = " (not required with provider = claude-code)"
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
@@ -357,6 +364,8 @@ class Log:
     TRANSCRIPT_RETRY_SKIPPED = "no retry for %s: its Teams track was recorded at the wrong sample rate, which a second pass cannot repair"
     VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
     VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
+    VERIFY_SKIPPED = ("verification of %s skipped: its transcript cannot be trusted (degraded: %s, wrong sample rate: %s), so the "
+                      "verifier would confirm what the analysis took from it; its claims stay unverified (the code checks still apply)")
     RATE_MISMATCH = ("Teams track of %s was likely recorded at the wrong sample rate: %.0f%% of it padded in short pads "
                      "(%.0f of %.0f s, device rate(s) %s); its transcript is unreliable")
     CAPTURE_STATS_UNREADABLE = "capture stats of %s unreadable; skipping the sample-rate check: %s"
@@ -439,6 +448,7 @@ class Minutes:
     DEGRADED = ("> ⚠️ **Transcrição degradada:** {loop:.0%} dos trechos são uma mesma frase repetida pelo reconhecimento de voz{gaps}. "
                 "Esta ata pode estar incompleta: ouça o áudio desses trechos antes de usá-la.")
     DEGRADED_GAPS = ", e não há texto em {ranges}"
+    NOT_VERIFIED = "> Esta transcrição não serve de prova: nenhum item desta ata foi confirmado a partir dela."   # true whether verification ran or not
     UNCONFIRMED_LEGEND = "> ⚠️ Os itens marcados com ⚠️ não foram confirmados na transcrição; o motivo vem ao lado. Confira-os no áudio antes de usar."
     MARK = " ⚠️ _a confirmar: {reason}_"   # reason: one line, with Markdown's _ and * escaped
     MARK_NO_REASON = " ⚠️ _a confirmar_"
@@ -490,6 +500,7 @@ class Minutes:
 
 
 class StoryDoc:
+    NOT_VERIFIED = "> A transcrição da reunião {meeting} não serve de prova: nenhum item que veio dela foi confirmado."
     """Labels of plans/<day>.stories.md. Portuguese on purpose, like `Minutes`: a document for
     the user, built from LLM content that is in Portuguese."""
 
