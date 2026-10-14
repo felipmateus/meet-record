@@ -56,7 +56,7 @@ class TopicOut(BaseModel):
 class DeadlineOut(BaseModel):
     what: str
     when: str | None = Field(default=None, description=Prompt.FIELD_ISO_DATE)
-    who: str = Llm.OWNER_UNKNOWN
+    who: str = Field(default=Llm.OWNER_UNKNOWN, description=Prompt.FIELD_DEADLINE_WHO.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN))
 
 
 class AnalysisOut(BaseModel):
