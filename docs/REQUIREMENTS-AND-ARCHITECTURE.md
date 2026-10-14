@@ -483,3 +483,9 @@ teams-recorder/
 - **Prompt rule:** the writer's prompt also forbids citing a claim the verifier did not confirm (it may become an open question), closing the note left by task 4.0.
 - **Evaluation:** `scripts/fidelity_eval.py` reads the new criteria with their source, so gate G3 (task 8.0) measures the product's output.
 - Live once merged: the next drafts carry the sources. No daemon restart is needed; drafting runs in `trec plan` / `trec stories`.
+- **Code review** (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-14-11-46.md`). It found no bug in the product path. Its main finding was in the evaluation: the citing variants still appended the prototype's `CITE_RULE` to a prompt that now has its own rule, which would have measured two conflicting rules in G3. Fixed:
+  - the script appends `CITE_RULE` only to a prompt without the rule, and judges criteria with the product's own formatting;
+  - the stored suggestion value is now `suggestion` (English, as AGENTS.md asks) rather than `sugestao`, before any draft was saved with it;
+  - a stored criterion is read strictly, so a damaged file cannot show an invented citation.
+
+  Known limits are recorded in the tech spec: detail lines are prompt-only, and the time check is an existence check.

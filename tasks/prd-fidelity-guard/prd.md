@@ -70,6 +70,7 @@ Notes on FR1 and FR7 (2026-10-11, task 1.0):
   - **30 segments:** all score 0%, the looped 2026-10-08 transcript scores 68% (text in 28 of 86 minutes), and loops cycling through up to 7 lines are caught. It is the widest window that keeps the healthy meetings at 0%; at 40 the 07/10 meeting reaches 0.8%.
   - **10 segments:** the window shipped first. It missed loops of 3 or more lines and was changed after the code review.
 - **FR3 (2026-10-13, task 3.0):** FR3 first said a verifier failure leaves everything `unconfirmed`; it now leaves those claims *unverified*, following the tech spec: marking every claim ⚠️ when nothing was checked would be a false mark, and false marks erode trust (§7 Risks). The two code checks still run, and a claim the verifier skipped in an answer that did arrive is `unconfirmed`. The analysis is never blocked.
+- **FR6 (2026-10-14, task 5.0):** the code checks the criteria's sources (each has one; a cited time must be a line of the story's source meetings). Detail lines get the writer's rule only, as in the measured prototype, with no check in code.
 - **FR7:** the transcript part is done (`trec doctor` shows `max_context`, the threshold and the retry state; `trec status` marks and counts degraded transcripts). The verification model line comes with task 7.0.
 
 ## 6. Success criteria
