@@ -56,7 +56,9 @@ max_context = 0
 # same line 5+ times within 30 segments). Healthy meetings measured 0%; the looped one 68%.
 max_loop_share = 0.10
 # A degraded transcript is transcribed once more with -mc 0 and, with retry_vad, Silero VAD (about
-# 30% slower; needs the VAD model above); the one with more minutes of text is kept. If it is still degraded, it is
+# 30% slower; needs the VAD model above); a pass that is not degraded is kept when it has at least 85%
+# (fixed, not a setting) of the other's minutes with text, else the one with more text. No retry when the Teams track was recorded at
+# the wrong sample rate (VAD cannot repair that). If it is still degraded, it is
 # saved marked as such, you get a notification and minutes.md shows a warning.
 retry_on_loop = true
 retry_vad = true
