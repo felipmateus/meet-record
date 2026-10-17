@@ -11,7 +11,7 @@ from teams_recorder.application.use_cases import AnalyzeMeeting, CancelRecording
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.domain import Meeting, MeetingStatus, derive_status
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK
-from tests.fakes import FakeAnalyzer, FakeCallDetector, FakeMicCapture, FakeMixer, FakeProcessCapture, FakeTranscriber
+from tests.fakes import FakeAnalyzer, FakeCallDetector, FakeMicCapture, FakeMixer, FakeProcessCapture, FakeSpeakerObserver, FakeTranscriber
 
 
 @dataclass
@@ -23,9 +23,11 @@ class FakeContainer:
     clock: object
     proc: FakeProcessCapture
     mic: FakeMicCapture
-    settings: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(capture_log=Path("/fake/log/capture.log")))
+    settings: SimpleNamespace = field(default_factory=lambda: SimpleNamespace(capture_log=Path("/fake/log/capture.log"),
+                                                                              speakers_log=Path("/fake/log/speakers.log")))
     confirmation: object = None
     disk: object = None
+    speakers: object = None   # the speaker observer; None: not wired (the daemon reads it with getattr)
 
     @property
     def process_capture(self):
@@ -36,7 +38,7 @@ class FakeContainer:
         return self.mic
 
     def start_recording(self):
-        return StartRecording(self.repo, self.proc, self.mic, self.notifier, self.clock, "mic")
+        return StartRecording(self.repo, self.proc, self.mic, self.notifier, self.clock, "mic", speakers=self.speakers)
 
     def stop_recording(self):
         repo = self.repo
@@ -46,10 +48,10 @@ class FakeContainer:
                 repo.touch(out.parent.name, AUDIO)
                 return super().mix(tracks, out)
 
-        return StopRecording(self.repo, self.proc, self.mic, MixerThatWrites(), self.notifier, self.clock)
+        return StopRecording(self.repo, self.proc, self.mic, MixerThatWrites(), self.notifier, self.clock, self.speakers)
 
     def cancel_recording(self):
-        return CancelRecording(self.repo, self.proc, self.mic, self.notifier)
+        return CancelRecording(self.repo, self.proc, self.mic, self.notifier, self.speakers)
 
     def pipeline(self):
         return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()))
@@ -174,6 +176,171 @@ def test_dead_capturer_is_logged_once(repo, notifier, clock, caplog):
         d.tick(); d.tick()
     warnings = [r for r in caplog.records if "died during call" in r.getMessage()]
     assert len(warnings) == 1 and "teams-tap" in warnings[0].getMessage()
+
+
+def _observed_daemon(repo, notifier, clock, states, speakers):
+    d, c = _daemon(repo, notifier, clock, states)
+    c.speakers = speakers
+    return d, c
+
+
+def test_ut039_recover_stops_the_observer_with_the_recorders(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    orphan = c.start_recording().execute(pid=1)
+    repo.touch(orphan.meeting.id, TAP_TRACK)
+    repo.touch(orphan.meeting.id, MIC_TRACK)
+    handle = repo.load_active().speakers_handle
+
+    d.recover()
+
+    assert handle is not None and speakers.stopped == [handle.pid]
+    assert c.proc.is_stopped(orphan.process_handle) and repo.load_active() is None
+
+
+def test_ut039_recover_stops_the_observer_of_a_recording_without_tracks(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    c.start_recording().execute(pid=1)   # no tracks recorded
+    handle = repo.load_active().speakers_handle
+
+    d.recover()
+
+    assert speakers.stopped == [handle.pid] and repo.load_active() is None
+
+
+def test_ut039_a_failing_observer_stop_does_not_stop_recovery(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    c.start_recording().execute(pid=1)
+    speakers.stop_error = RuntimeError("bootout failed")
+
+    d.recover()
+
+    assert repo.load_active() is None
+
+
+def test_ut039_a_dead_observer_is_logged_once(repo, notifier, clock, caplog):
+    import logging
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [CallState.IN_CALL] * 6, speakers)
+    d.tick(); d.tick()
+    assert d.active is not None and d.active.speakers_handle is not None
+    speakers.died = {d.active.speakers_handle.pid}
+    with caplog.at_level(logging.WARNING):
+        d.tick(); d.tick(); d.tick()
+    warnings = [r.getMessage() for r in caplog.records if "died during call" in r.getMessage()]
+    assert warnings == [f"capturer teams-speakers (pid {d.active.speakers_handle.pid}) died during call {d.active.meeting.id}; "
+                        "see /fake/log/speakers.log"]
+    assert c.proc.is_running(d.active.process_handle)   # the recording itself carries on
+
+
+def test_a_failing_observer_check_never_keeps_a_call_from_ending(repo, notifier, clock, caplog):
+    """Review round 2, issue 003: launchctl failing under the observer's is_running used to leave every tick before the call-end check."""
+    import logging
+    speakers = FakeSpeakerObserver(check_error=OSError("launchctl: Resource temporarily unavailable"))
+    states = [CallState.IN_CALL] * 3 + [CallState.IDLE] * 6
+    d, c = _observed_daemon(repo, notifier, clock, states, speakers)
+    with caplog.at_level(logging.WARNING):
+        for _ in states:
+            d.tick()                                  # no tick raises
+    assert d.active is None and repo.load_active() is None
+    assert len(repo.list_meetings()) == 1
+    failures = [m for m in caplog.messages if "speaker observer check" in m]
+    assert len(failures) == 1 and "Resource temporarily unavailable" in failures[0]   # logged once for the call, not on every tick
+    assert len(speakers.stopped) == 1                                                  # and the observer was still stopped with the call
+
+
+def test_a_failing_observer_check_does_not_hide_a_recorder_that_died(repo, notifier, clock, caplog):
+    import logging
+    speakers = FakeSpeakerObserver(check_error=RuntimeError("boom"))
+    d, c = _observed_daemon(repo, notifier, clock, [CallState.IN_CALL] * 6, speakers)
+    d.tick(); d.tick()
+    assert d.active is not None
+    c.proc.died = {d.active.process_handle.pid}
+    with caplog.at_level(logging.WARNING):
+        d.tick(); d.tick()
+    assert len([m for m in caplog.messages if "teams-tap" in m and "died during call" in m]) == 1
+
+
+def test_a_recovered_recording_without_an_observer_handle_still_boots_the_job_out(repo, notifier, clock):
+    """Review round 2, issue 041: the job exists a startup grace before its handle is persisted; a crash in it leaves no handle."""
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    c.start_recording().execute(pid=1)               # no tracks recorded
+    active = repo.load_active()
+    active.speakers_handle = None                    # the daemon died after the bootstrap, before the handle was saved
+    repo.save_active(active)
+    stale_before = speakers.stale_stops
+
+    d.recover()
+
+    assert speakers.stale_stops == stale_before + 1 and speakers.stopped == [] and repo.load_active() is None
+
+
+def test_a_recovered_recording_with_tracks_and_no_observer_handle_boots_the_job_out_too(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    orphan = c.start_recording().execute(pid=1)
+    repo.touch(orphan.meeting.id, TAP_TRACK)
+    repo.touch(orphan.meeting.id, MIC_TRACK)
+    active = repo.load_active()
+    active.speakers_handle = None
+    repo.save_active(active)
+    stale_before = speakers.stale_stops
+
+    d.recover()
+
+    assert speakers.stale_stops == stale_before + 1 and repo.load_active() is None
+
+
+def test_a_failing_stale_stop_does_not_stop_recovery(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [], speakers)
+    c.start_recording().execute(pid=1)
+    active = repo.load_active()
+    active.speakers_handle = None
+    repo.save_active(active)
+    speakers.stop_error = RuntimeError("bootout failed")
+
+    d.recover()
+
+    assert repo.load_active() is None
+
+
+def test_a_recording_without_an_observer_is_not_watched_for_one(repo, notifier, clock, caplog):
+    import logging
+    d, c = _observed_daemon(repo, notifier, clock, [CallState.IN_CALL] * 4, FakeSpeakerObserver(reason="binary-missing"))
+    with caplog.at_level(logging.WARNING):
+        for _ in range(4):
+            d.tick()
+    assert d.active is not None and d.active.speakers_handle is None
+    assert not [r for r in caplog.records if "died during call" in r.getMessage()]
+    assert repo.unavailable == {d.active.meeting.id: "binary-missing"}
+
+
+def test_a_full_call_with_an_observer_stops_it_and_titles_the_meeting(repo, notifier, clock):
+    from teams_recorder.domain import SpeakerLog
+    speakers = FakeSpeakerObserver()
+    states = [CallState.IN_CALL, CallState.IN_CALL, CallState.IN_CALL, CallState.IDLE, CallState.IDLE, CallState.IDLE]
+    d, c = _observed_daemon(repo, notifier, clock, states, speakers)
+    d.tick(); d.tick()
+    repo.seed_speakers(d.active.meeting.id, SpeakerLog(subject="Daily"))
+    handle = d.active.speakers_handle
+    for _ in range(4):
+        d.tick()
+
+    assert d.active is None and speakers.stopped == [handle.pid]
+    assert repo.list_meetings()[0].title == "Daily"
+
+
+def test_a_discarded_call_stops_the_observer(repo, notifier, clock):
+    speakers = FakeSpeakerObserver()
+    d, c = _observed_daemon(repo, notifier, clock, [CallState.IN_CALL] * 4, speakers)
+    c.confirmation = FakeConfirmation(ConfirmAnswer.DISCARD)
+    d.tick(); d.tick(); d.tick()
+    assert d.active is None and d.ignoring_call
+    assert len(speakers.stopped) == 1
 
 
 # --- keep-recording question ------------------------------------------------------

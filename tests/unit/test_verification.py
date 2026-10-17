@@ -108,3 +108,15 @@ def test_a_participant_listed_twice_is_one_claim():
     from teams_recorder.domain import claims
     analysis = Analysis(meeting_id="m", summary="s", participants=["Ana", "Ana", "Bruno"])
     assert [c.ref.key for c in claims(analysis)] == ["Ana", "Bruno"]
+
+
+def test_a_labelled_speaker_or_a_roster_name_is_heard_even_when_never_said_in_the_text():
+    """Speaker attribution UT-053: same token rule as the owner's name."""
+    segments = [Segment(0, 4, "Bom dia a todos.", speaker="Ana Souza"), Segment(5, 9, "Vamos seguir.")]
+    labelled = Transcript(segments, roster=("Felipe", "Ana Souza", "Lucas Huguenin Gurgel de Moura"))
+    assert _heard("Ana", labelled)                                  # first name of a label
+    assert _heard("Lucas Huguenin Gurgel de Moura", labelled)       # roster entry, never in the text
+    assert _heard("Lucas", labelled)                                # a part of a roster entry
+    assert not _heard("Marcos", labelled)                           # neither said nor seen
+    assert not _heard("de", labelled)                               # particles do not count
+    assert not _heard("Lucas", Transcript(segments))                # without the roster it is just a name nobody said

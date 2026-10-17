@@ -284,3 +284,16 @@ def test_verification_defaults_and_settings(tmp_path: Path):
 def test_repository_config_turns_verification_on_with_sonnet():
     s = load_settings(Path(__file__).resolve().parents[2])
     assert s.verify_enabled and s.verify_cli_model == "sonnet" and s.verify_effort is Effort.MEDIUM
+
+
+def test_ut060_speakers_are_on_by_default_and_the_flag_overrides(tmp_path: Path):
+    assert load_settings(tmp_path).speakers_enabled is True
+    (tmp_path / "config.toml").write_text("[speakers]\nenabled = false\n")
+    assert load_settings(tmp_path).speakers_enabled is False
+    assert load_settings(tmp_path).speakers_log == load_settings(tmp_path).log_dir / "speakers.log"
+
+
+def test_the_repository_config_documents_the_speakers_section():
+    s = load_settings(Path(__file__).resolve().parents[2])
+    assert s.speakers_enabled is True
+    assert "[speakers]" in (Path(__file__).resolve().parents[2] / "config.toml").read_text()

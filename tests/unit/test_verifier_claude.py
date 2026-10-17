@@ -150,7 +150,8 @@ def test_the_prompt_ships_with_the_project_and_the_schema_is_strict():
 
 def test_the_shipped_prompt_is_the_measured_prototype_prompt():
     # The evaluation's numbers (§14.3) came from scripts/fidelity_eval.py VERIFY_SYSTEM. The product's prompt may
-    # differ only where it must: the user's name comes in the message, and the reason is written in Portuguese.
+    # differ only where it must: the user's name comes in the message, the reason is written in Portuguese, and
+    # the transcript may carry speaker labels and the roster (speaker attribution; the numbers predate the sentence).
     import ast
     script = Path(__file__).resolve().parents[2] / "scripts" / "fidelity_eval.py"
     tree = ast.parse(script.read_text(encoding="utf-8"))
@@ -160,5 +161,38 @@ def test_the_shipped_prompt_is_the_measured_prototype_prompt():
     expected = (measured
                 .replace("The user who records the meetings is Felipe.",
                          "The message starts with the name of the user who records the meetings, when known, and the meeting date.")
-                .replace("- reason: one short sentence.", "- reason: one short sentence, in Brazilian Portuguese."))
+                .replace("- reason: one short sentence.", "- reason: one short sentence, in Brazilian Portuguese.")
+                .replace("it has no speaker labels and may contain recognition errors.",
+                         "it may contain recognition errors. A name after a timestamp (\"[00:01:02] Ana: ...\") is the person who said "
+                         "the line and is reliable attribution; a line without a name is unattributed. When the message lists the "
+                         "participants seen in the meeting window, those people were present, even if they never speak."))
     assert shipped.strip() == expected.strip()
+
+
+LABELLED = Transcript(
+    [Segment(0, 4, "Bom dia.", speaker="Ana"), Segment(5, 9, "Vamos usar o Mapbox."), Segment(10, 14, "Eu mando.", speaker="Felipe")],
+    roster=("Felipe", "Ana", "Lucas Huguenin Gurgel de Moura"), user_label="Felipe",
+)
+
+
+def test_the_verifier_prompt_treats_labels_as_attribution_and_no_longer_denies_them():
+    """Speaker attribution UT-052 and UT-056: the pin above accepts exactly this sentence and nothing else."""
+    shipped = load_prompt(load_settings().prompts_dir / Files.VERIFY_PROMPT)
+    assert "no speaker labels" not in shipped
+    assert "is the person who said the line and is reliable attribution" in shipped
+    assert "participants seen in the meeting window, those people were present" in shipped
+
+
+def test_labelled_lines_and_the_roster_reach_the_verifier():
+    text, excerpt = transcript_for(LABELLED, [])
+    assert not excerpt and text.splitlines() == ["[00:00:00] Ana: Bom dia.", "[00:00:05] Vamos usar o Mapbox.", "[00:00:10] Felipe: Eu mando."]
+
+    transport = FakeTransport(VerifyOut(verdicts=[]))
+    verifier = ClaudeClaimVerifier(transport, system_prompt="SYS", user_name="Felipe")
+    verifier.verify(MEETING, ANALYSIS, LABELLED)
+    user = transport.calls[0]["user"]
+    assert "Meeting date: 2026-10-12 (Monday)\nParticipants seen in the meeting window: Felipe, Ana, Lucas Huguenin Gurgel de Moura\n\n## Transcript" in user
+    assert "[00:00:10] Felipe: Eu mando." in user
+
+    verifier.verify(MEETING, ANALYSIS, TRANSCRIPT)
+    assert "Participants seen" not in transport.calls[1]["user"]   # no roster, no line: the message is what it was

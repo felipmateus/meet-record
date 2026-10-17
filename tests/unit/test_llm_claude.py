@@ -157,8 +157,44 @@ def test_the_analysis_prompt_carries_the_fidelity_rules():
     assert "names of people mentioned or addressed" not in prompt   # the old participant rule is gone
 
 
+def test_the_analysis_prompt_takes_owners_from_labels_and_participants_from_the_roster():
+    """Speaker attribution UT-050 and UT-051b."""
+    prompt = (load_settings().prompts_dir / Files.ANALYZE_PROMPT).read_text(encoding="utf-8")
+    assert "A name after the timestamp" in prompt and "is the person who said the line" in prompt
+    assert "There is no speaker identification" not in prompt
+    assert "the user speaks in the first person taking on a commitment" in prompt and "applies to unlabelled lines only" in prompt
+    assert "`participants` is exactly that list" in prompt
+    assert "Do not replace `usuário` with the user's name" in prompt                       # the data contract keeps the literal
+    assert "lines labelled with the owner's label, whatever name it is" in prompt          # ...for any label, a fallback one too
+
+
+def test_the_message_names_the_roster_and_the_owners_label(meeting):
+    """Speaker attribution UT-051."""
+    names = ("Felipe Mateus de Carvalho", "Lucas Huguenin Gurgel de Moura")
+    labelled = Transcript(segments=[Segment(0, 3, "Bom dia.", speaker=names[1]), Segment(3, 9, "Eu envio hoje.", speaker=names[0])],
+                          roster=names, user_label=names[0])
+
+    msg = build_user_message(labelled, meeting)
+
+    assert "Participants seen in the meeting window: Felipe Mateus de Carvalho, Lucas Huguenin Gurgel de Moura\n" in msg
+    assert 'Speaker labels: the name after a timestamp is who said the line; "Felipe Mateus de Carvalho" is the recording owner' in msg
+    assert msg.index("Duration:") < msg.index("Participants seen") < msg.index("Speaker labels") < msg.index("Transcript (with timestamps)")
+    assert "[00:00:03] Felipe Mateus de Carvalho: Eu envio hoje." in msg
+    fallback = Transcript(segments=[Segment(0, 3, "Oi.", speaker="Você")], user_label="Você")
+    assert 'Speaker labels: the name after a timestamp is who said the line; "Você" is the recording owner' in build_user_message(fallback, meeting)
+    assert "Participants seen" not in build_user_message(fallback, meeting)
+
+
+def test_an_unlabelled_transcript_gives_the_message_it_always_had(meeting, transcript):
+    msg = build_user_message(transcript, meeting)
+    assert "Participants seen" not in msg and "Speaker labels" not in msg
+    assert msg == ("Meeting date: 2026-10-06 (Tuesday)\nStart: 14:00\nTitle: Planejamento\nDuration: 45 min"
+                   "\n\nTranscript (with timestamps):\n\n[00:00:00] Bom dia.\n[00:00:03] Felipe, relatório até quarta.")
+
+
 def test_the_schema_descriptions_repeat_the_owner_and_participant_rules():
     schema = json.dumps(strict_schema(AnalysisOut), ensure_ascii=False)
     for description in (Prompt.FIELD_PARTICIPANTS, Prompt.FIELD_ACTION_OWNER, Prompt.FIELD_DEADLINE_WHO):
         assert description.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN) in schema
+    assert "exactly the listed participants" in schema and "lines labelled with the owner's label" in schema   # UT-055
     assert "not people only talked about" in Prompt.FIELD_PARTICIPANTS and "only when the transcript makes it evident" in Prompt.FIELD_DEADLINE_WHO

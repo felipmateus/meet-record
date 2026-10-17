@@ -114,7 +114,8 @@ def test_degraded_transcript_is_retried_and_the_healthier_result_kept(repo, meet
     result = _transcribe(repo, meeting, first, retry, notifier)
 
     assert retry.calls == first.calls == [(repo.path(meeting.id, AUDIO), "pt")]
-    assert result is retry.transcript and repo.load_transcript(meeting.id) is result
+    # the saved transcript is the labelled copy of the kept pass, so the passes are told apart by their segments
+    assert result.segments == retry.transcript.segments and repo.load_transcript(meeting.id) is result
     assert result.health is not None and not result.health.degraded and result.health.retried
     assert notifier.messages == []   # repaired: nothing to warn about
 
@@ -125,7 +126,7 @@ def test_still_degraded_after_the_retry_keeps_the_healthier_pass_and_notifies(re
 
     result = _transcribe(repo, meeting, first, retry, notifier)
 
-    assert result is first.transcript and len(retry.calls) == 1
+    assert result.segments == first.transcript.segments and len(retry.calls) == 1
     assert result.health is not None and result.health.degraded and result.health.retried
     title, body = notifier.messages[-1]
     assert title == Notify.TRANSCRIPT_DEGRADED
@@ -196,7 +197,7 @@ def test_an_empty_retry_does_not_replace_a_first_pass_with_text(repo, meeting):
 
     result = _transcribe(repo, meeting, first, FakeTranscriber(Transcript()))
 
-    assert result is first.transcript and result.health is not None and result.health.retried and result.health.covered_minutes == 5
+    assert result.segments == first.transcript.segments and result.health is not None and result.health.retried and result.health.covered_minutes == 5
 
 
 def test_health_is_measured_against_the_meeting_length(repo, clock):
@@ -287,7 +288,7 @@ def test_a_loop_free_retry_that_keeps_most_of_the_text_replaces_the_first_pass(r
     first = looped_transcript(minutes=20, loop_minutes=2)   # 2 minutes looped, text in 18 of 20 minutes, degraded
     retry = speech_transcript(minutes=16)                   # no loops, text in 16 minutes: 16 >= 85% of 18
     result = _transcribe(repo, meeting, FakeTranscriber(first), FakeTranscriber(retry))
-    assert result is retry and result.health is not None and not result.health.degraded and result.health.retried
+    assert result.segments == retry.segments and result.health is not None and not result.health.degraded and result.health.retried
 
 
 def test_unreadable_capture_counters_still_allow_the_retry(repo, meeting):

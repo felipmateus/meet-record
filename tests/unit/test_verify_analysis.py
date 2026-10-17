@@ -126,3 +126,17 @@ def test_an_untrusted_transcript_is_analyzed_unverified_and_its_minutes_say_so(r
 
     assert verifier.calls == [] and result.decisions[0].verification is None
     assert Minutes.NOT_VERIFIED in repo.minutes[meeting.id]
+
+
+def test_a_roster_name_never_said_in_the_text_is_not_flagged_by_the_code_check():
+    """Speaker attribution UT-054: the roster is evidence of presence; the verifier still decides."""
+    transcript = Transcript(TRANSCRIPT.segments, roster=("Felipe", "Ana", "Lucas Huguenin Gurgel de Moura"), user_label="Felipe")
+    analysis = Analysis(meeting_id=MEETING.id, summary="s", participants=["Ana", "Lucas Huguenin Gurgel de Moura", "Marcos"])
+    lucas = ClaimRef(ClaimKind.PARTICIPANT, "Lucas Huguenin Gurgel de Moura")
+
+    without = VerifyAnalysis(None, user_name="Felipe").execute(MEETING, analysis, transcript)
+    assert list(without.participant_checks) == ["Marcos"]            # roster names stay unverified, nothing lowers them
+
+    confirmed = VerifyAnalysis(FakeClaimVerifier({lucas: YES}), user_name="Felipe").execute(MEETING, analysis, transcript)
+    assert confirmed.participant_checks["Lucas Huguenin Gurgel de Moura"] == YES
+    assert confirmed.participant_checks["Marcos"].status is VerificationStatus.UNCONFIRMED

@@ -12,16 +12,20 @@ from teams_recorder.domain import (
     Action,
     Analysis,
     AnalysisError,
+    CaptureError,
     ClaimRef,
     CaptureStats,
     DailyPlan,
     Decision,
+    EnergyTimeline,
     Meeting,
     MeetingNotFound,
     PublishError,
     RepositoryError,
     Segment,
     SkippedAction,
+    SpeakerLog,
+    SpeakersUnavailable,
     StoryDrafts,
     Transcript,
     TranscriptHealth,
@@ -86,6 +90,72 @@ class FakeProcessCapture:
 class FakeMicCapture(FakeProcessCapture):
     def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle:  # type: ignore[override]
         return super().start(0, out, epoch)
+
+
+class FakeSpeakerObserver:
+    """Records its starts (with the `out` path and the epoch) and stops. `reason` makes `start` raise
+    SpeakersUnavailable(reason); `error` makes it raise that exception instead (a failure the port does not promise)."""
+
+    _next_pid = 5000
+
+    def __init__(self, reason: str | None = None, error: Exception | None = None, problem_list: list[str] | None = None,
+                 stop_error: Exception | None = None, check_error: Exception | None = None) -> None:
+        self.reason = reason
+        self.error = error
+        self.problem_list = list(problem_list or [])
+        self.stop_error = stop_error
+        self.check_error = check_error   # makes `is_running` raise (launchctl failing under the daemon's tick)
+        self.starts: list[tuple[Path, float]] = []
+        self.handles: list[CaptureHandle] = []
+        self.stopped: list[int] = []
+        self.stale_stops = 0             # calls of `stop_stale`: a stop with no handle to name the job
+        self.died: set[int] = set()
+
+    def start(self, out: Path, epoch: float) -> CaptureHandle:
+        if self.error is not None:
+            raise self.error
+        if self.reason is not None:
+            raise SpeakersUnavailable(self.reason)
+        FakeSpeakerObserver._next_pid += 1
+        handle = CaptureHandle(pid=FakeSpeakerObserver._next_pid, out=out)
+        self.starts.append((out, epoch))
+        self.handles.append(handle)
+        return handle
+
+    def stop(self, handle: CaptureHandle) -> Path:
+        if self.stop_error is not None:
+            raise self.stop_error
+        self.stopped.append(handle.pid)
+        return handle.out
+
+    def stop_stale(self) -> None:
+        if self.stop_error is not None:
+            raise self.stop_error
+        self.stale_stops += 1
+
+    def is_running(self, handle: CaptureHandle) -> bool:
+        if self.check_error is not None:
+            raise self.check_error
+        return handle in self.handles and handle.pid not in self.stopped and handle.pid not in self.died
+
+    def problems(self) -> list[str]:
+        return list(self.problem_list)
+
+
+class FakeEnergyMeter:
+    """Returns the timeline given for a track (keyed by its file name) and records what it measured; a track in `fail`
+    raises CaptureError, a track without a timeline too."""
+
+    def __init__(self, timelines: dict[str, EnergyTimeline] | None = None, fail: set[str] | None = None) -> None:
+        self.timelines = dict(timelines or {})
+        self.fail = set(fail or ())
+        self.measured: list[Path] = []
+
+    def measure(self, track: Path) -> EnergyTimeline:
+        self.measured.append(track)
+        if track.name in self.fail or track.name not in self.timelines:
+            raise CaptureError(f"cannot measure {track.name}")
+        return self.timelines[track.name]
 
 
 class FakeMixer:
@@ -176,6 +246,8 @@ class _Rec:
     transcript: Transcript | None = None
     analysis: Analysis | None = None
     capture_stats: CaptureStats | None = None
+    speaker_log: SpeakerLog | None = None
+    energy: dict[str, EnergyTimeline] = field(default_factory=dict)
 
 
 class InMemoryMeetingRepository:
@@ -188,6 +260,9 @@ class InMemoryMeetingRepository:
         self.active: ActiveRecording | None = None
         self.minutes: dict[str, str] = {}
         self.story_drafts: dict[date, tuple[StoryDrafts, str]] = {}
+        self.notice_days: dict[str, date] = {}
+        self.unavailable: dict[str, str] = {}   # meeting id -> reason written by write_speakers_unavailable
+        self.speaker_log_calls: list[tuple[str, float, float]] = []
 
     def _get(self, meeting_id: str) -> _Rec:
         try:
@@ -260,6 +335,31 @@ class InMemoryMeetingRepository:
 
     def load_capture_stats(self, meeting_id: str) -> CaptureStats | None:
         return self._get(meeting_id).capture_stats
+
+    def seed_speakers(self, meeting_id: str, log: SpeakerLog | None = None, energy: dict[str, EnergyTimeline] | None = None) -> None:
+        rec = self._get(meeting_id)
+        rec.speaker_log = log
+        rec.energy = dict(energy or {})
+
+    def write_speakers_unavailable(self, meeting_id: str, reason: str) -> None:
+        self.unavailable[meeting_id] = reason
+        self._get(meeting_id).speaker_log = SpeakerLog(unavailable=reason)
+
+    def load_speaker_log(self, meeting_id: str, fallback_epoch: float, end: float) -> SpeakerLog | None:
+        self.speaker_log_calls.append((meeting_id, fallback_epoch, end))
+        return self._get(meeting_id).speaker_log
+
+    def save_energy(self, meeting_id: str, energy: dict[str, EnergyTimeline]) -> None:
+        self._get(meeting_id).energy = dict(energy)
+
+    def load_energy(self, meeting_id: str) -> dict[str, EnergyTimeline]:
+        return dict(self._get(meeting_id).energy)
+
+    def last_notice_day(self, key: str) -> date | None:
+        return self.notice_days.get(key)
+
+    def save_notice_day(self, key: str, day: date) -> None:
+        self.notice_days[key] = day
 
     def save_transcript(self, meeting_id: str, transcript: Transcript) -> None:
         rec = self._get(meeting_id)
