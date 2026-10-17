@@ -27,6 +27,52 @@ class AgentStatus:
     state: str | None
 
 
+@dataclass(frozen=True)
+class JobState:
+    """What `launchctl print` says about a job; a field is None when the output does not carry it."""
+
+    pid: int | None = None
+    state: str | None = None
+    last_exit: int | None = None   # None while the job has never exited
+
+    @property
+    def running(self) -> bool:
+        return self.pid is not None and self.state == Parse.LAUNCHCTL_RUNNING
+
+
+def parse_print(output: str) -> JobState:
+    """Reads pid, state and last exit code from `launchctl print` output (the last occurrence of each wins)."""
+    pid: int | None = None
+    state: str | None = None
+    last_exit: int | None = None
+    for line in output.splitlines():
+        s = line.strip()
+        if s.startswith(Parse.LAUNCHCTL_PID):
+            pid = int(s.split("=", 1)[1].strip())
+        elif s.startswith(Parse.LAUNCHCTL_STATE):
+            state = s.split("=", 1)[1].strip()
+        elif s.startswith(Parse.LAUNCHCTL_LAST_EXIT):
+            value = s.split("=", 1)[1].strip()
+            last_exit = int(value) if value.lstrip("-").isdigit() else None
+    return JobState(pid, state, last_exit)
+
+
+def job_domain() -> str:
+    """The launchctl domain of the logged-in user's GUI session."""
+    return Launchd.DOMAIN.format(uid=os.getuid())
+
+
+def run_launchctl(runner: Runner, *args: str, timeout: float) -> "subprocess.CompletedProcess[str]":
+    """One launchctl call that cannot hang its caller. A call that does not answer within `timeout` seconds is killed and
+    reported as a failed one (exit `Launchd.TIMEOUT_EXIT`, the reason in stderr), so callers treat it like any refusal."""
+    command = [Bin.LAUNCHCTL, *args]
+    try:
+        return runner(command, capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            command, Launchd.TIMEOUT_EXIT, stdout="", stderr=Err.LAUNCHCTL_TIMED_OUT.format(args=" ".join(args), seconds=timeout))
+
+
 @dataclass
 class LaunchAgent:
     project_dir: Path
@@ -74,7 +120,7 @@ class LaunchAgent:
                    calendar=[{"Hour": hour, "Minute": 0, "Weekday": wd} for wd in Launchd.PLANNER_WEEKDAYS], **kw)
 
     def _domain(self) -> str:
-        return Launchd.DOMAIN.format(uid=os.getuid())
+        return job_domain()
 
     def _target(self) -> str:
         return f"{self._domain()}/{self.label}"
@@ -116,15 +162,8 @@ class LaunchAgent:
 
     def status(self) -> AgentStatus:
         result = self._launchctl("print", self._target())
-        pid: int | None = None
-        state: str | None = None
-        for line in result.stdout.splitlines():
-            s = line.strip()
-            if s.startswith(Parse.LAUNCHCTL_PID):
-                pid = int(s.split("=", 1)[1].strip())
-            elif s.startswith(Parse.LAUNCHCTL_STATE):
-                state = s.split("=", 1)[1].strip()
-        return AgentStatus(loaded=result.returncode == 0, plist=self.plist_path, plist_exists=self.plist_path.exists(), pid=pid, state=state)
+        job = parse_print(result.stdout)
+        return AgentStatus(loaded=result.returncode == 0, plist=self.plist_path, plist_exists=self.plist_path.exists(), pid=job.pid, state=job.state)
 
     def _launchctl(self, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
         result = self.runner([Bin.LAUNCHCTL, *args], capture_output=True, text=True, check=False)

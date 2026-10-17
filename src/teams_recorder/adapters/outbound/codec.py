@@ -4,13 +4,14 @@ Kept in the adapter so the domain knows nothing about the persistence format.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+import json
+import math
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Iterable
 
 import re
 
-from teams_recorder.constants import Audio, Parse
+from teams_recorder.constants import Audio, Parse, Speakers
 from teams_recorder.domain import (
     Action,
     ActionKind,
@@ -21,12 +22,17 @@ from teams_recorder.domain import (
     DailyPlan,
     Deadline,
     Decision,
+    EnergyTimeline,
+    LabelSummary,
     Meeting,
     MeetingType,
     Priority,
     Publication,
     Segment,
     SkippedAction,
+    SpeakerEvent,
+    SpeakerLog,
+    SILENCE_DB,
     StoryDrafts,
     Topic,
     Transcript,
@@ -35,6 +41,8 @@ from teams_recorder.domain import (
     UserStory,
     Verification,
     VerificationStatus,
+    turns_from_events,
+    window_subject,
 )
 from teams_recorder.messages import Err
 
@@ -108,17 +116,157 @@ def capture_stats_from_dict(d: dict[str, Any]) -> CaptureStats:
     )
 
 
+def _segment_to_dict(s: Segment) -> dict[str, Any]:
+    out: dict[str, Any] = {"start": s.start, "end": s.end, "text": s.text}
+    return {**out, "speaker": s.speaker} if s.speaker else out   # unlabelled segments are written as before labels existed
+
+
+def _speakers_to_dict(t: Transcript, labels: LabelSummary) -> dict[str, Any]:
+    return {"roster": list(t.roster), "user_label": t.user_label, "labelled": labels.labelled, "eligible": labels.eligible,
+            "reason": labels.reason}
+
+
 def transcript_to_dict(t: Transcript) -> dict[str, Any]:
-    return {"language": t.language, "health": health_to_dict(t.health) if t.health else None, "segments": [asdict(s) for s in t.segments]}
+    out = {"language": t.language, "health": health_to_dict(t.health) if t.health else None, "segments": [_segment_to_dict(s) for s in t.segments]}
+    return {**out, "speakers": _speakers_to_dict(t, t.labels)} if t.labels is not None else out
 
 
 def transcript_from_dict(d: dict[str, Any]) -> Transcript:
-    # transcripts written before 2026-10-11 have no health
+    # transcripts written before 2026-10-11 have no health; before speaker attribution, no speaker and no speakers summary
+    speakers = d.get("speakers")
+    if speakers is not None and not isinstance(speakers, dict):
+        raise TypeError(Err.BAD_SPEAKERS.format(value=speakers))
     return Transcript(
         language=d.get("language", Audio.DEFAULT_LANGUAGE),
-        segments=[Segment(float(s["start"]), float(s["end"]), s["text"]) for s in d.get("segments", [])],
+        segments=[Segment(float(s["start"]), float(s["end"]), s["text"], _optional_text(s.get("speaker"))) for s in d.get("segments", [])],
         health=health_from_dict(d["health"]) if d.get("health") else None,
+        roster=tuple(str(n) for n in speakers.get("roster", [])) if speakers else (),
+        user_label=_optional_text(speakers.get("user_label")) if speakers else None,
+        labels=LabelSummary(int(speakers["labelled"]), int(speakers["eligible"]), _optional_text(speakers.get("reason"))) if speakers else None,
     )
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(Err.BAD_TEXT.format(value=value))
+    return value or None
+
+
+# Speaker observer events (speakers.jsonl, written by teams-speakers; see docs/tasks/speaker-attribution/_dx.md)
+def speakers_unavailable_line(reason: str, at: float) -> str:
+    """The single line the recorder writes when the observer could not start."""
+    return json.dumps({"t": at, "event": "unavailable", "reason": reason}) + "\n"
+
+
+def _finite(value: Any) -> float | None:
+    """`value` as a finite float; None for anything else (text, NaN, infinity, an integer too large for a float)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _event(line: str) -> dict[str, Any] | None:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("event"), str) or _finite(record.get("t")) is None:
+        return None
+    return record
+
+
+def speaker_log_from_lines(lines: Iterable[str], fallback_epoch: float, end: float) -> SpeakerLog:
+    """The observer's record of a meeting. Times become seconds since the epoch the helper echoes in its start event,
+    or since `fallback_epoch` (the meeting's start) when that event is missing. An unavailable line wins over anything
+    else; lines that are not events are skipped and counted.
+
+    A turn left open closes at the time of the last event of the file (a stop, a heartbeat or any other), not at `end`,
+    the meeting's length: the helper writes nothing after it dies or while its window is frozen, so what it did not
+    report is not credited to the last speaker it saw. `end` stays in the signature as the repository port's contract.
+    """
+    records: list[dict[str, Any]] = []
+    skipped = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        record = _event(line)
+        if record is None:
+            skipped += 1
+        else:
+            records.append(record)
+    unavailable = next((r for r in records if r["event"] == "unavailable"), None)
+    if unavailable is not None:
+        return SpeakerLog(unavailable=str(unavailable.get("reason") or ""), skipped=skipped)
+    start = next((r for r in records if r["event"] == "start"), None)
+    start_epoch = _finite(start.get("epoch")) if start is not None else None
+    epoch = start_epoch if start_epoch is not None else fallback_epoch
+    events: list[SpeakerEvent] = []
+    roster: list[str] = []
+    me: str | None = None
+    subject: str | None = None
+    ended = False
+    last = 0.0
+    for r in records:
+        kind, at, window = r["event"], float(r["t"]) - epoch, str(r.get("window") or r.get("kind") or "")
+        last = max(last, at)
+        name = r.get("name")
+        if kind == "speaking" and isinstance(name, str) and name:
+            events.append(SpeakerEvent(at, name, bool(r.get("speaking")), window))
+        elif kind == "seen" and isinstance(name, str) and name:
+            roster.append(name)
+            if r.get("me") and me is None:
+                me = name
+        elif kind == "window":
+            if r.get("state") in (Speakers.WINDOW_LOST, Speakers.WINDOW_FROZEN):   # a frozen tree reports nothing true: close like a lost window
+                events.append(SpeakerEvent(at, "", False, window))
+            elif subject is None and isinstance(r.get("title"), str):
+                subject = window_subject(r["title"], compact=window == "compact")
+        elif kind == "title" and subject is None and isinstance(r.get("subject"), str) and r["subject"].strip():
+            subject = r["subject"].strip()
+        elif kind == "stop":
+            ended = True
+        elif kind not in ("start", "speaking", "seen", "title", Speakers.HEARTBEAT_EVENT):
+            skipped += 1
+    return SpeakerLog(turns_from_events(events, last), tuple(dict.fromkeys(roster)), me, subject, ended, skipped=skipped)
+
+
+# Track levels (energy.json)
+def energy_to_dict(energy: dict[str, EnergyTimeline]) -> dict[str, Any]:
+    step = next(iter(energy.values())).step if energy else 0.1
+    return {"step_seconds": step, "tracks": {name: list(t.levels) for name, t in energy.items()}}
+
+
+def _level(value: Any, track: str) -> float:
+    """One dBFS level, with -inf and anything below the silence floor read as the floor; a value that is not a number, is NaN,
+    or sits above `Speakers.MAX_LEVEL_DB` (a power of ten of it would overflow) is a ValueError naming the track."""
+    try:
+        level = float(value)
+    except OverflowError:
+        level = math.inf
+    if math.isnan(level) or level > Speakers.MAX_LEVEL_DB:
+        raise ValueError(Err.BAD_ENERGY_LEVEL.format(limit=Speakers.MAX_LEVEL_DB, value=value, track=track))
+    return max(level, SILENCE_DB)
+
+
+def energy_from_dict(d: dict[str, Any]) -> dict[str, EnergyTimeline]:
+    step = _finite(d["step_seconds"])
+    if step is None or step <= 0:
+        raise ValueError(Err.BAD_ENERGY_STEP.format(value=d["step_seconds"]))
+    tracks = d["tracks"]
+    if not isinstance(tracks, dict):
+        raise TypeError(Err.BAD_ENERGY.format(value=tracks))
+    out: dict[str, EnergyTimeline] = {}
+    for name, levels in tracks.items():
+        if not isinstance(levels, list) or not all(isinstance(v, (int, float)) for v in levels):
+            raise TypeError(Err.BAD_ENERGY.format(value=name))
+        out[str(name)] = EnergyTimeline(step, tuple(_level(v, str(name)) for v in levels))
+    return out
 
 
 # Verification (fidelity guard). Written only when a claim was verified, so files and the JSON
