@@ -48,5 +48,5 @@ The spike folder is `data/wiki-spike/` so it never collides with the future `dat
 ## Relevant files
 
 - `data/wiki-spike/` (new, ignored), `prompts/wiki_schema.md` (new)
-- `tasks/prd-llm-wiki/techspec.md` §9, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10
+- `docs/tasks/prd-llm-wiki/techspec.md` §9, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10
 - `data/wiki-eval/questions.toml` (new, ignored)

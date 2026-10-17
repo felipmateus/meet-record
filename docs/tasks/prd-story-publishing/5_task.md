@@ -59,4 +59,4 @@ See techspec §5.1 (adapter), §6 (location and one-time setup), §9 (spike) and
 - `src/teams_recorder/adapters/outbound/publisher_backlogmd.py` (new), `adapters/outbound/process_control.py`
 - `src/teams_recorder/constants.py`, `messages.py`, `container.py`
 - `tests/fixtures/fake_backlog_cli.py` (new), `tests/unit/test_publisher_backlogmd.py` (new), `tests/integration/test_publisher_backlogmd.py` (new), `tests/integration/test_publisher_backlogmd_real.py` (new)
-- `tasks/prd-story-publishing/techspec.md` (§9 answers)
+- `docs/tasks/prd-story-publishing/techspec.md` (§9 answers)

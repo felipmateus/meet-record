@@ -34,7 +34,7 @@ Pulled forward on 2026-10-10, at the user's request, before tasks 2–6 (the wik
 - [x] 7.6 Unit tests of the deterministic parts (`tests/unit/test_eval_harness.py`: normalization, word error rate, checks, injection, marking, parsers). The opt-in integration test is replaced by the documented script runs.
 - [x] 7.7 Synthetic run on nine meetings (`--runs 3`): results in evaluation.md §13. Calibration with the user's labels still pending, so G2 is provisional.
 - [x] 7.8 Scale test, 90 meetings (evaluation.md §12): `fill`, `ingest`, `clean`, `autorun` implemented and run unattended; results in evaluation.md §13 (run 2). G2 as written not met; the wiki is not better than the minutes in context at this size and costs 3× per answer.
-- [x] 7.9 Pipeline fidelity (evaluation §14): transcription, analysis claims, defenses, stories in six variants, propagation, wiki audit, whisper settings; led to `tasks/prd-fidelity-guard/`.
+- [x] 7.9 Pipeline fidelity (evaluation §14): transcription, analysis claims, defenses, stories in six variants, propagation, wiki audit, whisper settings; led to `docs/tasks/prd-fidelity-guard/`.
 
 ## Implementation details
 
@@ -57,4 +57,4 @@ The runner builds its own temporary data dir from the corpus and runs the projec
 - `tests/fixtures/wiki_corpus/` (new: transcripts, `meta.json`, `facts.toml`, `questions.toml`)
 - `scripts/wiki_eval.py` (new), `scripts/wiki_eval/judge_system.md` (new)
 - `tests/unit/test_wiki_eval.py` (new), `tests/integration/test_wiki_eval_real.py` (new)
-- `data/wiki-eval/runs/<timestamp>/` (ignored), `docs/run-logs/RUN_LOG-*.md`, `tasks/prd-llm-wiki/techspec.md` §9, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10
+- `data/wiki-eval/runs/<timestamp>/` (ignored), `docs/run-logs/RUN_LOG-*.md`, `docs/tasks/prd-llm-wiki/techspec.md` §9, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10

@@ -2,7 +2,7 @@
 
 > **Status:** draft for approval · **Date:** 2026-10-11 · **Slug:** `fidelity-guard`
 > **Evidence:** [evaluation of the LLM wiki and the pipeline](../prd-llm-wiki/evaluation.md) §14 (tests run on 2026-10-11 with `scripts/fidelity_eval.py` and `scripts/wiki_corpus.py`)
-> **Supersedes as the next step:** the LLM wiki implementation (tasks 2–6 of `tasks/prd-llm-wiki/`), which the evaluation did not justify for question answering.
+> **Supersedes as the next step:** the LLM wiki implementation (tasks 2–6 of `docs/tasks/prd-llm-wiki/`), which the evaluation did not justify for question answering.
 > **Progress:**
 > - **Task 1.0** (transcript health and language): implemented on 2026-10-11 and reviewed with the `code-review` skill (run log `docs/run-logs/RUN_LOG-felipemateusdecarvalho-2026-10-11-20-34.md`). FR1 and FR2 below record what changed while building it, and G1 is met.
 > - **Task 2.0** (verification types and persistence): done on 2026-10-12.
