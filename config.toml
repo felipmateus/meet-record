@@ -98,6 +98,14 @@ name = "Felipe"
 enabled = true
 timeout_seconds = 30
 
+[speakers]
+# Read who is speaking from the Teams meeting window during each recording and label the
+# transcript lines with the display names. Needs the teams-speakers helper (scripts/build-native.sh)
+# and the Accessibility permission for it (trec doctor tells how). Keep a Teams window visible
+# during meetings: a fully covered window stops updating. false = no observer; your own lines are
+# still labelled from the microphone track.
+enabled = true
+
 [planner]
 hour = 18
 retention_days = 30

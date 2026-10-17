@@ -11,6 +11,7 @@ See the [flowchart](#how-it-works) for the whole pipeline.
 - **Automatic recording.** A daemon watches Teams and starts recording about 1–2 s after a call begins. It stops about 5 s after you hang up. A dialog lets you discard any recording.
 - **Two aligned tracks.** Teams audio is captured through a Core Audio process tap and the microphone separately. The tracks are aligned to the call's start, then mixed with noise reduction and loudness normalization.
 - **Local transcription.** whisper.cpp (`large-v3-turbo-q5_0`, 574 MB) runs on your Mac. Audio never leaves the machine.
+- **Speaker labels (macOS).** A second helper reads who is speaking from the Teams meeting window, and your own lines are told apart from the microphone track. Transcript lines carry the person's name, and the analysis takes owners and participants from them. No voice is modelled. See [Speaker labels](#speaker-labels).
 - **Structured analysis.** Claude extracts the summary, topics, decisions, your actions, other people's actions, deadlines, risks and open questions. Every item carries the transcript timestamp where it was said.
 - **Meeting minutes.** A `minutes.md` file is written for each meeting, with no extra model call.
 - **Daily plan.** The day's meetings and the running list of open actions are consolidated into a prioritized Markdown plan. Overdue and completed actions are tracked.
@@ -30,6 +31,7 @@ See the [flowchart](#how-it-works) for the whole pipeline.
 - [Command reference](#command-reference)
 - [Recording in detail](#recording-in-detail)
 - [Transcription](#transcription)
+- [Speaker labels](#speaker-labels)
 - [Analysis with Claude](#analysis-with-claude)
 - [Daily plan](#daily-plan)
 - [User stories and the Backlog.md board](#user-stories-and-the-backlogmd-board)
@@ -77,9 +79,9 @@ flowchart LR
 ```
 
 1. **Detect.** Every second the daemon reads `pmset -g assertions`. While Teams is in a call, it holds a "prevent sleep" assertion, and that is the signal. On Windows, the signal is Teams holding the microphone, as recorded by the privacy indicator in the registry.
-2. **Record.** Recording starts on the first positive reading. `teams-tap` (a small Swift binary) writes Teams audio to `tap.wav` and the microphone to `mic.wav`. A dialog asks whether to keep the recording; recording does not wait for the answer.
-3. **Mix.** After hang-up, ffmpeg cleans each track (80 Hz high-pass, noise reduction), mixes them, normalizes to -18 LUFS and writes `audio.m4a`. The raw tracks are deleted.
-4. **Transcribe.** whisper.cpp writes `transcript.json` and `transcript.txt` (`[hh:mm:ss] text`).
+2. **Record.** Recording starts on the first positive reading. `teams-tap` (a small Swift binary) writes Teams audio to `tap.wav` and the microphone to `mic.wav`. On macOS, `teams-speakers` (a second Swift binary) also watches the Teams meeting window and writes who speaks when to `speakers.jsonl`. A dialog asks whether to keep the recording; recording does not wait for the answer.
+3. **Mix.** After hang-up, the level of each raw track is saved to `energy.json`, then ffmpeg cleans each track (80 Hz high-pass, noise reduction), mixes them, normalizes to -18 LUFS and writes `audio.m4a`. The raw tracks are deleted.
+4. **Transcribe.** whisper.cpp writes `transcript.json` and `transcript.txt` (`[hh:mm:ss] text`, or `[hh:mm:ss] Name: text` for a line whose speaker is known).
 5. **Analyze.** The transcript text is sent to Claude with a JSON schema. The result is saved as `analysis.json` and rendered to `minutes.md`.
 6. **Plan.** At 6 pm, Monday to Friday, `trec plan` builds `plans/YYYY-MM-DD.md` and updates `open_actions.json`.
 7. **Draft and publish stories.** If enabled, stories are drafted into `plans/YYYY-MM-DD.stories.md` and sent to the **Triagem** column of a Backlog.md board.
@@ -92,6 +94,7 @@ Steps 3–5 run in the background, so a call that starts right after another one
 |---|---|
 | Orchestration | Python 3.11+ (Typer CLI, Pydantic, python-dotenv), hexagonal architecture |
 | Audio capture (macOS) | Swift binary `native/teams-tap`: Core Audio Process Tap (macOS 14.2+) and AVAudioEngine for the microphone |
+| Speaker labels (macOS) | Swift binary `native/teams-speakers`: reads the Teams window through the Accessibility API (read-only), started by the daemon as its own launchd job |
 | Audio capture (Windows) | C# binary `native/teams-tap-win`: WASAPI process loopback (.NET 8) |
 | Mixing and conversion | ffmpeg |
 | Transcription | whisper.cpp (`whisper-cli`), ggml models from Hugging Face, optional Silero VAD |
@@ -135,12 +138,12 @@ What it does:
 1. Checks macOS, the project location and whether Teams is installed.
 2. Installs `ffmpeg` and `whisper-cpp` with Homebrew, and asks for the Xcode Command Line Tools if they are missing.
 3. Creates `.venv` with Python 3.11 or later (installing `python@3.12` if needed) and installs the package.
-4. Builds `teams-tap` (`scripts/build-native.sh`).
+4. Builds `teams-tap` and `teams-speakers` (`scripts/build-native.sh`).
 5. Asks for your name and the LLM provider, and writes them to `config.toml`. With the `api` provider it creates `.env` with permission 600 for the key.
 6. Downloads the whisper model (574 MB) into the models folder.
 7. Runs `trec doctor`.
 8. Installs the daemon and the 6 pm planner as LaunchAgents. It skips this while a recording is in progress, and asks before taking over services that run another copy of the project.
-9. Explains the two macOS permissions and can open their settings pages.
+9. Explains the three macOS permissions (Microphone, Screen & System Audio Recording, Accessibility) and can open their settings pages. The Accessibility entry has to be added by hand, see the [first run checklist](#first-run-checklist).
 
 | Option | Effect |
 |---|---|
@@ -163,7 +166,7 @@ If you prefer to do the installer's steps yourself:
 brew install ffmpeg whisper-cpp
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-scripts/build-native.sh                 # → native/teams-tap/.build/release/teams-tap
+scripts/build-native.sh                 # → native/teams-tap/.build/release/teams-tap and native/teams-speakers/.build/release/teams-speakers
 scripts/download-model.sh               # → data/models/ggml-large-v3-turbo-q5_0.bin
 cp .env.example .env && chmod 600 .env  # only for the api provider; paste the key
 trec doctor
@@ -188,6 +191,7 @@ Only the parts that talk to the operating system differ:
 | Part | macOS | Windows |
 |---|---|---|
 | Teams audio and microphone | `teams-tap` (Swift, Core Audio) | `teams-tap.exe` (C#, WASAPI), stopped through a stop file |
+| Speaker labels from the Teams window | `teams-speakers` (Swift, Accessibility API) | Not available yet; your own lines are still labelled from the two tracks |
 | Call detection | Teams' power assertion in `pmset` | Teams holding the microphone (registry `ConsentStore\microphone`) |
 | Background service | LaunchAgents | Task Scheduler tasks `\teams-recorder\daemon` (at logon) and `\teams-recorder\planner` (Mon–Fri 6 pm) |
 | Notifications | Notification Center | Toasts, shown under "Windows PowerShell" |
@@ -197,13 +201,14 @@ Windows asks for no permission to capture Teams audio. The microphone needs "Let
 
 ## First run checklist
 
-1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the claim verifier, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present.
-2. **Grant the two macOS permissions** under System Settings > Privacy & Security. Both are requested on the first recording:
+1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the claim verifier, the speaker labels, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present. The `speaker labels` line is information only and never fails the doctor: it says whether `teams-speakers` is built and whether it holds the Accessibility permission (the check runs the helper as its own short-lived launchd job, the same context the daemon uses), and how the last recording was labelled.
+2. **Grant the three macOS permissions** under System Settings > Privacy & Security. The first two are requested on the first recording; the third is not requested by macOS, you add it by hand:
    - **Microphone**, for the process that records the microphone.
    - **Screen & System Audio Recording**, for `teams-tap`. Without it, the Teams track comes out silent and only your voice is recorded.
+   - **Accessibility**, for `teams-speakers`, so it can read the Teams window. Open the Accessibility pane, press the **+** button, press Cmd+Shift+G, enter `<project>/native/teams-speakers/.build/release/teams-speakers`, choose Open and switch the entry on. A request made by a background job creates no entry, so the **+** button is the only way. The grant has to be on the helper itself: the daemon runs it as its own launchd job (`local.teams-recorder.speakers`), so granting your terminal or Python does not cover it. macOS ties the grant to the binary, so a rebuild (`scripts/build-native.sh`) may require adding it again; `trec doctor` tells. Without it recordings work as before, only without names (see [Speaker labels](#speaker-labels)).
 3. **Set your name** in `config.toml` (`[user] name`), as people say it in meetings, so tasks addressed to you by name are attributed to you.
 4. **Check that the detector sees a call.** Join a test call and run `trec daemon --once`. It should report Teams in a call along with its PID.
-5. **Check the services** with `trec agent status`.
+5. **Check the services** with `trec agent status`. After an update that adds the speaker labels, run `trec agent restart` so the daemon starts using them.
 
 ## Daily use
 
@@ -220,12 +225,12 @@ Once installed, there is nothing to do: join Teams calls as usual.
 
 | Command | What it does |
 |---|---|
-| `trec status` | Data folder, API key status, meetings with state and next step, degraded transcripts, unconfirmed claims, recording in progress, open actions, stories waiting to be published |
-| `trec doctor` | Checks dependencies, models, the transcript-loop guard, the claim verifier, permissions, disk and story destinations |
-| `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`) |
+| `trec status` | Data folder, API key status, meetings with state and next step (and the share of labelled lines, `· speakers 78%`), degraded transcripts, unconfirmed claims, recording in progress, open actions, stories waiting to be published |
+| `trec doctor` | Checks dependencies, models, the transcript-loop guard, the claim verifier, the speaker labels (helper build and Accessibility permission), permissions, disk and story destinations |
+| `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`); prints a `Speakers:` line when the observer started |
 | `trec stop` | Stops the recording, mixes the tracks and writes `audio.m4a`. Works from any terminal |
 | `trec cancel` | Discards the recording in progress and deletes its files |
-| `trec transcribe [id]` | Transcribes one meeting, or all meetings in state `recorded` |
+| `trec transcribe [id]` | Transcribes one meeting, or all meetings in state `recorded`, and prints how many lines got a speaker label, or why none did |
 | `trec analyze [id]` | Analyzes one meeting, or all meetings in state `transcribed`, and writes `minutes.md` |
 | `trec minutes [id] [--all]` | Re-renders `minutes.md` from existing analyses, with no model call |
 | `trec plan [--date YYYY-MM-DD] [--purge]` | Builds the day's plan; `--purge` also applies audio retention afterwards |
@@ -266,8 +271,9 @@ Configure it under `[confirmation]`: `enabled = false` turns the question off, a
 
 - `teams-tap --pid` captures Teams: the main process and the helper processes that actually emit audio, since Teams' main process emits none. `teams-tap --mic default` records the microphone through AVAudioEngine. It follows the system default input (so it switches to a headset) and survives the reconfiguration Teams performs when it opens the microphone. `teams-tap --list` shows the current audio clients.
 - Both tracks share the meeting start as their epoch. Every buffer is placed at its Core Audio timestamp, and missing time is written as silence, so the tracks keep the real call length and stay in sync. Each gap is logged in `data/log/capture.log` as `gap of X s at Y s`.
+- On macOS the daemon also starts `teams-speakers` right after the two recorders, as its own launchd job (`local.teams-recorder.speakers`, definition in `<data_dir>/run/`), and stops it with them. It never blocks a recording: when the helper is not built, lacks the Accessibility permission or fails to start, the recording goes on and one line saying why is written to `speakers.jsonl`. `trec start` prints a `Speakers:` line when it started, or why it did not. See [Speaker labels](#speaker-labels).
 - Raw tracks are 16-bit WAV (about 1 GB per hour). `audio.bit_depth = 32` records 32-bit float instead (about 2 GB per hour), with no gain for transcription.
-- When the call ends, the recorders stop at once and the "recording in progress" marker is released. Mixing writes `audio.partial.m4a` and renames it only on success, with a time limit of twice the meeting length (at least 10 minutes). If mixing fails or the daemon stops first, the raw tracks stay and the next daemon start mixes them again.
+- When the call ends, the recorders stop at once and the "recording in progress" marker is released. Before mixing, the level of each raw track per 100 ms is saved to `energy.json` (the tracks are gone afterwards); a failure is logged and mixing goes on. Mixing writes `audio.partial.m4a` and renames it only on success, with a time limit of twice the meeting length (at least 10 minutes). If mixing fails or the daemon stops first, the raw tracks stay and the next daemon start mixes them again.
 - A track that is missing or under 1 KB is dropped, and the mix uses the other one. If one track is shorter than half the other, raw copies are kept in `<meeting>/debug/` for diagnosis.
 - A notification warns when a recording starts with room for less than 2 hours, and again during a call if less than 1 GB is left.
 - If the daemon crashes during a recording, it finalizes the orphaned recording when it starts again and resumes stalled meetings.
@@ -292,6 +298,27 @@ The M4A is converted to 16 kHz mono WAV and passed to `whisper-cli` with the lan
 
 Voice activity detection (Silero) is off on the first pass. In a test with short sentences it cut off speech, and the noise reduction in the mix is what improved the text. The installer downloads the VAD model for the retry; to use VAD on every pass, set `transcription.vad = true`.
 
+## Speaker labels
+
+On macOS every line of a transcript can carry the name of the person who said it, with no voice model and no enrolment: the names come from the Teams window itself, and your own lines come from the two tracks.
+
+- **Remote participants.** During a recording `teams-speakers` reads the Teams meeting windows (the main window and the compact view Teams keeps on top when the meeting loses focus) through the macOS Accessibility API, twice per second. A participant's tile shows a frame while they speak. The helper writes each change with the display name to `speakers.jsonl`, together with the names seen (the roster), your own tile's name and the meeting subject from the window title. It is read-only: it sets no accessibility attribute and never focuses, moves or clicks anything in Teams.
+- **Your lines.** The tile of yourself has no frame, so your lines come from `energy.json`: a line is yours when no remote turn covers at least 30% of it, the microphone is at least 6 dB louder than the Teams track over it and above -50 dBFS. Remote speech leaking from your speakers into the microphone is louder on the Teams track, so it does not fool the comparison. This part works without the Accessibility permission, and also with `[speakers] enabled = false`.
+- **Labelling.** At transcription each speech line takes the remote participant whose speaking turns cover at least 30% of it (the largest overlap wins); else yourself, as `[user] name`, else your own tile's name, else "Você"; else no label. `transcript.txt` shows `[00:03:12] Lucas Huguenin Gurgel de Moura: então eu subo o ambiente até quarta`; unlabelled lines are unchanged. `transcript.json` gains `speaker` on labelled segments and a `speakers` summary (roster, your label, lines labelled out of eligible, and the reason when none was). Transcripts made before this feature load as before. `trec transcribe <id>` redoes the transcript and its labels while `audio.m4a` still exists; `speakers.jsonl` and `energy.json` stay with the meeting.
+- **Downstream.** The analysis and the claim verifier receive the labelled lines, the roster and which label is yours. A labelled line's commitment belongs to the person named (to `usuário` when the label is yours); the first-person heuristic applies only to unlabelled lines. When the roster was read, `participants` is that list. A recording with no title takes the meeting subject from the window (a `--title` wins).
+- **Fail-soft.** The labels are optional. A missing helper, a missing permission, no Teams window, a crashed helper or a covered window never fail a recording or a step: the lines stay unlabelled and `trec transcribe`, `trec status` and `trec doctor` say why (see Troubleshooting). The first meeting of a day with no labels at all for a reason you can act on raises one "Speaker labels unavailable" notification; later ones that day only log. Everything stays on the Mac.
+
+**What it needs from you**
+- **Accessibility permission for `teams-speakers`**, added by hand (see the [first run checklist](#first-run-checklist)), and `trec agent restart` once, so the daemon loads the feature.
+- **A Teams window that is rendered.** Chromium stops updating the accessibility tree of a window that is fully covered by another one, so while no Teams window is visible nobody is detected and only your own lines are labelled. The compact view counts: Teams keeps it on top when the meeting window loses focus, so working in another app does not hide it.
+- **Labels are Teams' display names**, as shown on the tiles (a guest keeps the suffix Teams shows, for example `teste Não verificado`).
+
+**Testing it.** A tile exists per participant, and the same account on two devices is one participant: joining from your phone with your own account gives the phone no tile. Join the test meeting as someone else, for example from the phone as a guest ("join as a guest" with another name), talk in bursts with yourself muted on the Mac, and check `trec transcribe` and the transcript afterwards.
+
+`teams-speakers --check` reports the permission of the process that macOS holds responsible *where it runs*: typed in a terminal it reports the terminal's grant, not the daemon's. `trec doctor` runs the same check as a launchd job, which is the context that matters. Run by hand, `--verbose` logs every pass's element count and duration. Under the daemon the helper's log is `data/log/speakers.log`.
+
+Design and measurements: [`docs/SPEAKER-ATTRIBUTION.md`](docs/SPEAKER-ATTRIBUTION.md) (investigation and the eight probe runs), `docs/tasks/speaker-attribution/prd.md` and `docs/tasks/speaker-attribution/` (specification, ADRs).
+
 ## Analysis with Claude
 
 ```bash
@@ -304,7 +331,7 @@ The model returns a schema-validated record:
 | Field | Content |
 |---|---|
 | `title`, `purpose`, `meeting_type` | Inferred title (names untitled automatic recordings), why the meeting happened, and its type (`standup`, `client`, `project_review`, `one_on_one`, `other`) |
-| `participants`, `summary`, `topics` | People who speak or are addressed (not people only talked about), 3–6 sentence summary, topics with key points |
+| `participants`, `summary`, `topics` | People who speak or are addressed (not people only talked about), or the roster read from the Teams window when there is one; 3–6 sentence summary, topics with key points |
 | `decisions` | Only what was actually decided, with timestamp |
 | `my_actions`, `others_actions` | Description, owner, ISO due date, priority (only when urgency was stated), timestamp, and **kind** |
 | `deadlines`, `open_questions`, `next_meetings`, `risks` | Relative dates are resolved against the meeting date |
@@ -446,7 +473,8 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | `[verification]` | `enabled` | `true` | Check each analysis's claims against the transcript (one more call per meeting) |
 | | `model`, `cli_model` | `"claude-sonnet-5-5"`, `"sonnet"` | Verifier model for `api` / `claude-code` (same provider as `[llm]`) |
 | | `effort` | `"medium"` | Verifier reasoning effort |
-| `[user]` | `name` | `""` | Your name as said in meetings, sent to the model |
+| `[speakers]` | `enabled` | `true` | Read who is speaking from the Teams window during each recording and label the transcript lines (macOS; needs `teams-speakers` and its Accessibility permission). `false` starts no helper and writes no `speakers.jsonl`; your own lines are still labelled from the microphone track |
+| `[user]` | `name` | `""` | Your name as said in meetings, sent to the model; also the label of your own lines when set |
 | `[confirmation]` | `enabled`, `timeout_seconds` | `true`, `30` | Keep-or-discard dialog |
 | `[planner]` | `hour` | `18` | When the planner runs, Monday to Friday |
 | | `retention_days` | `30` | Audio of transcribed meetings older than this is purged |
@@ -483,7 +511,7 @@ The prompts are written in English and ask the model for Brazilian Portuguese ou
 ### What leaves your machine
 
 - **Audio and transcription never leave the Mac.** whisper.cpp runs locally.
-- **Only the transcript text and the prompt** are sent to Claude, through the API or your local Claude Code. The plan and story steps send the analyses, not the audio.
+- **Only the transcript text and the prompt** are sent to Claude, through the API or your local Claude Code. With speaker labels the text includes the participants' display names (as shown in Teams) before their lines. The plan and story steps send the analyses, not the audio.
 - Stories go to a local Backlog.md board with no network access, and they are never versioned.
 - Telling participants you are recording, and following company policy and LGPD (Brazil's data protection law), are your responsibility. Native Teams recording may be disabled in corporate tenants; this tool does not change that policy.
 
@@ -496,8 +524,10 @@ data/                                   # paths.data_dir (git-ignored)
 │   ├── meta.json                       # id, start, end, PID, title
 │   ├── tap.wav, mic.wav                # raw tracks, only until mixed
 │   ├── tap.stats.json                  # teams-tap's counters for the Teams track (padding, device rates)
+│   ├── speakers.jsonl                  # teams-speakers' events: who spoke when, the roster, the subject (macOS)
+│   ├── energy.json                     # level of each raw track per 100 ms, kept after the tracks are deleted
 │   ├── audio.m4a                       # mono AAC 48 kHz mix
-│   ├── transcript.json, transcript.txt
+│   ├── transcript.json, transcript.txt # lines carry the speaker name when known
 │   ├── analysis.json, minutes.md
 │   ├── error.txt                       # "step: message" after a failure
 │   └── debug/                          # raw copies kept on a track anomaly
@@ -510,6 +540,7 @@ data/                                   # paths.data_dir (git-ignored)
     ├── teams-recorder.log              # daemon (daily rotation, 30 days)
     ├── daemon.out.log, daemon.err.log
     ├── capture.log                     # recorders' stderr, padded gaps
+    ├── speakers.log                    # teams-speakers' stderr (permission, windows and tiles found, counters)
     └── llm_usage.jsonl                 # one line per model call
 ```
 
@@ -550,6 +581,7 @@ src/teams_recorder/
 └── constants.py         # enums, env var names, binaries, file names, defaults
 native/
 ├── teams-tap/           # Swift package: Core Audio process tap + microphone recorder
+├── teams-speakers/      # Swift package: reads who speaks from the Teams window (Accessibility API, read-only)
 └── teams-tap-win/       # C# (.NET 8): WASAPI counterpart with the same CLI
 prompts/                 # system prompts and the story guide
 scripts/                 # installers, native builds, model download
@@ -563,6 +595,8 @@ tests/                   # unit/, integration/, fakes/, fixtures/
 | `MeetingRepository` | `repository_fs` (folder per meeting, atomic writes, `.lock`) | same |
 | `ProcessAudioCapture` | `capture_coreaudio` → `teams-tap --pid` | `capture_wasapi` → `teams-tap.exe --pid --stop-file` |
 | `MicCapture` | `capture_mic_coreaudio` (default) or `capture_mic_ffmpeg` | `capture_wasapi.WasapiMicCapture` |
+| `SpeakerObserver` | `speakers_ax` → `teams-speakers`, run as its own launchd job per recording | none (`[speakers] enabled = false` also wires none) |
+| `EnergyMeter` | `energy_ffmpeg` (RMS per 100 ms of each raw track) | same |
 | `AudioMixer` | `mixer_ffmpeg` | same |
 | `Transcriber` | `transcriber_whispercpp` | same |
 | `MeetingAnalyzer`, `Planner`, `StoryWriter` | `llm_claude`, `planner_claude`, `stories_claude` over one shared transport (`llm_transport.ApiTransport` or `ClaudeCodeTransport`) | same |
@@ -654,6 +688,28 @@ TREC_TEAMS_PROCESS=python3.11 trec daemon --once   # while tests/fixtures/fake_c
 **The Teams track is silent; only my voice is recorded.**
 `teams-tap` lacks **Screen & System Audio Recording** permission. Grant it under System Settings > Privacy & Security, then record again. Running `teams-tap --list` during a call shows whether the Teams processes are audio clients.
 
+**`trec transcribe` prints `Speakers: no labels (...)`, or `trec status` shows `· speakers 0% (...)`.**
+The reason in the parentheses says what to do. Only your own lines are labelled while there are no labels from the window.
+- *the observer did not run: Accessibility permission missing*: add `native/teams-speakers/.build/release/teams-speakers` under System Settings > Privacy & Security > Accessibility with the **+** button and switch it on (granting your terminal or Python does not help), then `trec doctor`. If you added it already, a rebuild may have invalidated the grant: remove the entry and add it again.
+- *the observer did not run: teams-speakers not built*: run `scripts/build-native.sh`.
+- *the observer did not run: it failed to start; see data/log/speakers.log*: read the end of that log; the helper's exit code and message are there.
+- *the observer died before reading a Teams window*: the helper stopped early in the call; see `data/log/speakers.log` and the daemon log.
+- *no Teams meeting window was read during the call*: no Teams window was rendered, so nothing could be read. Keep a Teams window visible (the compact view is enough). If one was visible all along, Teams may have changed its window; `data/log/speakers.log` shows what the helper found.
+- *speaker events found but no line matched them*: the helper read the window but no speaking turn overlapped a line. Log only, no notification; check `speakers.jsonl` for `speaking` events.
+- *no observer data for this meeting*: no `speakers.jsonl` exists: the meeting was recorded before the feature, `[speakers] enabled = false`, on Windows, or the daemon was not restarted since the feature was installed (`trec agent restart`).
+
+**Only part of a meeting is labelled (for example `speakers 40%`).**
+The Teams window was covered for part of the call, so nobody was detected speaking while it was. Keep a Teams window visible during meetings; the compact view counts. The share is lines labelled out of lines with speech.
+
+**`trec doctor` says the permission is granted, but recordings still report it missing.**
+The `[WARNING] speaker labels` line. The grant may not hold for the daemon's job (a rebuilt binary is a new identity to macOS). Record another meeting to confirm; if it still reports it missing, remove the `teams-speakers` entry from the Accessibility list, add it again with the **+** button and run `trec agent restart`.
+
+**The Accessibility list shows no `teams-speakers` entry.**
+macOS creates none for a background job's request. Add it by hand with the **+** button (Cmd+Shift+G to type the path).
+
+**My second device (or my phone on the same account) has no label.**
+The same account on two devices is one Teams participant, so the second device has no tile of its own and nothing labels it. Test with another account (see [Speaker labels](#speaker-labels)).
+
 **The daemon does not start recording.**
 Run `trec daemon --once` during a call. If Teams is not seen, check `audio.teams_process_name` (new Teams is `MSTeams`) and look at `pmset -g assertions` for the Teams process. Make sure the service runs with `trec agent status`, and read `data/log/teams-recorder.log`.
 
@@ -698,7 +754,7 @@ Endpoint security scanning on the first open of new files (`.pyc` included) can 
 | — | User story drafts and Backlog.md publishing | Done; publishing is manual (`publish = false`) until story quality is approved |
 | — | Windows port | Implemented and unit-tested; not yet run on Windows |
 
-Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure Boards destinations, reading approvals back from the board, and speaker identification (diarization). Calendar integration was dropped.
+Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure Boards destinations, reading approvals back from the board, and voice identification (a voiceprint per person, deliberately left out). Speaker labels from the Teams window ship on macOS; their gates on real meetings are pending. Calendar integration was dropped.
 
 ## Further documentation
 
@@ -706,7 +762,8 @@ Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure 
 |---|---|
 | [`prd/README.md`](prd/README.md) | Product requirements: modules, flows, global rules, with one page per flow and appendices (states, integrations, data layout) |
 | [`docs/REQUIREMENTS-AND-ARCHITECTURE.md`](docs/REQUIREMENTS-AND-ARCHITECTURE.md) | Requirements, architecture, risks and per-phase implementation notes |
-| [`tasks/prd-story-publishing/`](tasks/prd-story-publishing/) | PRD, tech spec and tasks for story publishing |
+| [`docs/SPEAKER-ATTRIBUTION.md`](docs/SPEAKER-ATTRIBUTION.md) | Investigation and spike runs behind the speaker labels; PRD in [`docs/tasks/speaker-attribution/`](docs/tasks/speaker-attribution/) |
+| [`docs/tasks/prd-story-publishing/`](docs/tasks/prd-story-publishing/) | PRD, tech spec and tasks for story publishing |
 | [`docs/COMMITS.md`](docs/COMMITS.md) | Commit conventions |
 | [`AGENTS.md`](AGENTS.md) | Guidance for coding agents |
 | [`native/teams-tap-win/README.md`](native/teams-tap-win/README.md) | The Windows capture binary |

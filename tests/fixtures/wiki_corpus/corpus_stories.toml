@@ -1,7 +1,7 @@
 # Stories corpus: the nine meetings of corpus.toml plus six about requirements, changed requirements and bugs, so
-# that drafting produces real user stories (tasks/prd-llm-wiki/evaluation.md §14). Kept apart from corpus.toml
+# that drafting produces real user stories (docs/tasks/prd-llm-wiki/evaluation.md §14). Kept apart from corpus.toml
 # because these meetings change answers in questions.toml. Select it with WIKI_CORPUS_FILE=corpus_stories.toml.
-# Synthetic meeting corpus for the LLM wiki evaluation (tasks/prd-llm-wiki/evaluation.md §4).
+# Synthetic meeting corpus for the LLM wiki evaluation (docs/tasks/prd-llm-wiki/evaluation.md §4).
 # Everything here is fictional: companies, people, projects and numbers. The user is Felipe,
 # as in config.toml, so the analysis attributes his commitments to him.
 #

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -25,13 +26,15 @@ from teams_recorder.domain import (
     Analysis,
     CaptureStats,
     DailyPlan,
+    EnergyTimeline,
     Meeting,
     MeetingNotFound,
     RepositoryError,
+    SpeakerLog,
     StoryDrafts,
     Transcript,
 )
-from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, ENERGY, ERROR, LOCK, META, MINUTES, SPEAKERS, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Err
 
 T = TypeVar("T")
@@ -161,11 +164,18 @@ class FsMeetingRepository:
         return self.data_dir / Files.ACTIVE_RECORDING
 
     def save_active(self, active: ActiveRecording) -> None:
-        _write_json(self._active_path, {
+        data: dict[str, Any] = {
             "meeting_id": active.meeting.id,
-            "process_handle": {"pid": active.process_handle.pid, "out": str(active.process_handle.out)},
-            "mic_handle": {"pid": active.mic_handle.pid, "out": str(active.mic_handle.out)},
-        })
+            "process_handle": self._handle_to_dict(active.process_handle),
+            "mic_handle": self._handle_to_dict(active.mic_handle),
+        }
+        if active.speakers_handle is not None:   # absent otherwise, so older readers see the pointer they know
+            data["speakers_handle"] = self._handle_to_dict(active.speakers_handle)
+        _write_json(self._active_path, data)
+
+    @staticmethod
+    def _handle_to_dict(handle: CaptureHandle) -> dict[str, Any]:
+        return {"pid": handle.pid, "out": str(handle.out)}
 
     def load_active(self) -> ActiveRecording | None:
         if not self._active_path.exists():
@@ -182,7 +192,8 @@ class FsMeetingRepository:
             return None
         process_handle = _decode(path, data, lambda d: self._handle_from_dict(d["process_handle"]))
         mic_handle = _decode(path, data, lambda d: self._handle_from_dict(d["mic_handle"]))
-        return ActiveRecording(meeting=meeting, process_handle=process_handle, mic_handle=mic_handle)
+        speakers_handle = _decode(path, data, lambda d: self._handle_from_dict(d["speakers_handle"]) if d.get("speakers_handle") else None)
+        return ActiveRecording(meeting=meeting, process_handle=process_handle, mic_handle=mic_handle, speakers_handle=speakers_handle)
 
     @staticmethod
     def _handle_from_dict(d: dict[str, Any]) -> CaptureHandle:
@@ -210,6 +221,39 @@ class FsMeetingRepository:
             return codec.capture_stats_from_dict(json.loads(text))
         except (KeyError, TypeError, ValueError) as exc:   # ValueError covers JSONDecodeError
             raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
+
+    def write_speakers_unavailable(self, meeting_id: str, reason: str) -> None:
+        _write_atomic(self._require(meeting_id) / SPEAKERS, codec.speakers_unavailable_line(reason, time.time()))
+
+    def load_speaker_log(self, meeting_id: str, fallback_epoch: float, end: float) -> SpeakerLog | None:
+        path = self._require(meeting_id) / SPEAKERS
+        try:
+            text = retry_io(lambda: path.read_text(encoding="utf-8", errors="replace"), str(path))
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise RepositoryError(Err.FILE_UNREADABLE.format(path=path, error=exc)) from exc
+        return codec.speaker_log_from_lines(text.splitlines(), fallback_epoch, end)
+
+    def save_energy(self, meeting_id: str, energy: dict[str, EnergyTimeline]) -> None:
+        _write_json(self._require(meeting_id) / ENERGY, codec.energy_to_dict(energy))
+
+    def load_energy(self, meeting_id: str) -> dict[str, EnergyTimeline]:
+        path = self._require(meeting_id) / ENERGY
+        return _decoded(path, codec.energy_from_dict) if path.exists() else {}
+
+    def _notice_path(self, key: str) -> Path:
+        return self.data_dir / Files.NOTICES_DIR / key
+
+    def last_notice_day(self, key: str) -> date | None:
+        path = self._notice_path(key)
+        try:
+            return date.fromisoformat(retry_io(lambda: path.read_text(encoding="utf-8"), str(path)).strip())
+        except (OSError, ValueError):   # absent, unreadable or damaged: as if it never fired, so the user is told once more
+            return None
+
+    def save_notice_day(self, key: str, day: date) -> None:
+        _write_atomic(self._notice_path(key), day.isoformat() + "\n")
 
     def load_transcript(self, meeting_id: str) -> Transcript:
         return _decoded(self._require(meeting_id) / TRANSCRIPT_JSON, codec.transcript_from_dict)

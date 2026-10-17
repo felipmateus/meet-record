@@ -1,5 +1,5 @@
 """ClaimVerifier backed by a StructuredTransport: one model call per meeting checks every claim of the analysis
-against the transcript (tasks/prd-fidelity-guard, task 3.0; prototype `verify_meeting` in scripts/fidelity_eval.py).
+against the transcript (docs/tasks/prd-fidelity-guard, task 3.0; prototype `verify_meeting` in scripts/fidelity_eval.py).
 
 The model judges each claim on several axes (support, owner, date, tentative, sensitive); the mapping to a
 single confirmed/unconfirmed status is done here, in code, as the prototype's `l1_flag` did.
@@ -23,7 +23,7 @@ from teams_recorder.domain import (
     Verification,
     VerificationStatus,
     claims,
-    clock_time,
+    timestamped_line,
 )
 from teams_recorder.messages import Err, Minutes, Prompt
 
@@ -82,7 +82,7 @@ def transcript_for(transcript: Transcript, claims: list[Claim], max_chars: int =
     timestamp: deadlines, participants) plus the lines within `window` seconds of each claim's timestamp,
     in order, with a gap marker where lines were left out.
     """
-    lines = [(s.start, f"[{clock_time(s.start)}] {s.text.strip()}") for s in transcript.segments]
+    lines = [(s.start, timestamped_line(s)) for s in transcript.segments]
     full = "\n".join(text for _, text in lines)
     if len(full) <= max_chars:
         return full, False
@@ -149,6 +149,8 @@ class ClaudeClaimVerifier:
         header = [Prompt.MEETING_DATE.format(date=meeting.started_at.date().isoformat(), weekday=Prompt.WEEKDAYS[meeting.started_at.weekday()])]
         if self.user_name:
             header.insert(0, Prompt.USER_NAME.format(name=self.user_name))
+        if transcript.roster:
+            header.append(Prompt.ROSTER.format(names=", ".join(transcript.roster)))
         return ("\n".join(header) + (Prompt.VERIFY_EXCERPTS if excerpt else Prompt.VERIFY_TRANSCRIPT) + text
                 + Prompt.VERIFY_CLAIMS + "\n".join(describe(c) for c in claims))
 

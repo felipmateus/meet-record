@@ -1,0 +1,7 @@
+# Task 4 memory
+
+- State: completed, uncommitted. Ports `SpeakerObserver`/`EnergyMeter` (`application/ports.py`), adapters `adapters/outbound/speakers_ax.py` and `energy_ffmpeg.py`, `[speakers] enabled` (`Settings.speakers_enabled`, `Settings.speakers_log`), `Container.speakers`/`Container.energy`, `build_speaker_observer`, `teams_speakers_binary`, fakes `FakeSpeakerObserver`/`FakeEnergyMeter` (`tests/fakes`), stand-in `tests/fixtures/fake_speakers.py`.
+- Contract for task 5: `observer.start(out, epoch)` returns a `CaptureHandle`, raises `SpeakersUnavailable(reason)` (`binary-missing`, `permission-missing`, `start-failed`) and takes about 1.5 s (the startup grace) when it succeeds; `stop` boots the launchd job out and is safe on a dead or absent job; the job label is fixed, so a second `start` boots out the first. A recovery path (daemon crash leaving the job) only needs `stop(handle)` or a bootout of `local.teams-recorder.speakers`; its definition is `<data_dir>/run/local.teams-recorder.speakers.plist`.
+- `FakeSpeakerObserver(reason=..., error=..., problem_list=..., stop_error=...)`, `.starts` holds `(out, epoch)`; `FakeEnergyMeter({"tap.wav": timeline})` is keyed by file name and raises `CaptureError` for a missing or failing track.
+- Contract for task 8: `problems()` returns the finished lines (see task_04.md Completion Notes); it runs a short-lived launchd job (about a second), so the doctor should call it once.
+- Evidence: `pytest` 669 passed, 8 skipped; `mypy` clean; launchctl was never called for real.

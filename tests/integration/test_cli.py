@@ -593,3 +593,152 @@ def test_status_counts_unconfirmed_claims(tmp_path: Path, monkeypatch):
     assert "2026-10-15_09-00-00  [analyzed]" + Cli.MEETING_UNCONFIRMED.format(count=2) in result.output
     assert "2026-10-15_09-10-00  [analyzed]\n" in result.output and "2026-10-15_09-20-00  [analyzed]\n" in result.output
     assert Cli.UNCONFIRMED_CLAIMS.format(claims=2, meetings=1) in result.output
+
+
+# --- speaker labels ----------------------------------------------------------------------------------------------------
+SPEAKERS_BINARY = "native/teams-speakers/.build/release/teams-speakers"
+
+
+def _speaker_stand_in(project: Path, monkeypatch, trusted: bool) -> list:
+    """The helper at its project path is the stand-in; the observer `trec doctor` builds runs it through a fake launchctl
+    (never the real one). Returns the launchctl calls."""
+    from teams_recorder.adapters.inbound import cli
+    from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
+    from teams_recorder.container import teams_speakers_binary
+    from tests.integration.test_speakers_observer import STAND_IN, ProcessLaunchctl
+    binary = teams_speakers_binary(project)
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{STAND_IN}" "$@"\n')
+    binary.chmod(0o755)
+    monkeypatch.setenv("FAKE_SPEAKERS_TRUSTED", "1" if trusted else "0")
+    launchctl = ProcessLaunchctl()
+    monkeypatch.setattr(cli, "build_speaker_observer", lambda settings: AxSpeakerObserver(binary, project / "data" / "run", runner=launchctl))
+    return launchctl.calls
+
+
+def test_it005_doctor_reports_the_helper_and_the_exit_code_is_the_features_own_absence(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    (project / "config.toml").write_text("[speakers]\nenabled = false\n")
+    without = runner.invoke(app, ["doctor"])
+    assert "speaker labels: off" in without.output
+    (project / "config.toml").unlink()
+
+    calls = _speaker_stand_in(project, monkeypatch, trusted=True)
+    granted = runner.invoke(app, ["doctor"])
+    assert f"[ok ] speaker labels: teams-speakers at {SPEAKERS_BINARY}; Accessibility permission granted\n" in granted.output
+    assert [c[1] for c in calls].count("bootstrap") == 1   # the check ran once
+
+    _speaker_stand_in(project, monkeypatch, trusted=False)
+    missing = runner.invoke(app, ["doctor"])
+    assert (f"[info] speaker labels: teams-speakers at {SPEAKERS_BINARY}; Accessibility permission missing → run `{SPEAKERS_BINARY} --check --prompt`"
+            in missing.output)
+    assert str(project) not in missing.output.split("speaker labels:")[1].split("\n")[0]
+    assert granted.exit_code == missing.exit_code == without.exit_code == 1   # a bare project fails the doctor on its own; the feature changes nothing
+
+
+def test_it005_doctor_with_everything_else_ready_still_exits_0_with_the_helper_missing_its_permission(tmp_path: Path, monkeypatch):
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("TREC_LLM_PROVIDER", "claude-code")
+    monkeypatch.setattr("teams_recorder.adapters.inbound.cli.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("teams_recorder.adapters.inbound.cli._tool_path", lambda name, project_dir: f"/usr/bin/{name}")
+    monkeypatch.setattr("teams_recorder.adapters.inbound.cli._teams_tap_path", lambda settings: "/usr/bin/teams-tap")
+    model = project / "data" / "models" / "ggml-large-v3-turbo-q5_0.bin"
+    model.parent.mkdir(parents=True); model.write_bytes(b"\x00")
+    guide = project / "prompts" / "user_story_guide.md"
+    guide.parent.mkdir(); guide.write_text("x")
+    _speaker_stand_in(project, monkeypatch, trusted=False)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert "[info] speaker labels:" in result.output
+    assert result.exit_code == 0, result.output
+
+
+def _transcribed_with(project: Path, minute: int, labels, speakers=()):
+    from teams_recorder.domain import Segment, Transcript
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 17, 9, minute, 0), title=f"M{minute}"); repo.create(m)
+    segments = [Segment(float(i), i + 1.0, "oi", name) for i, name in enumerate(speakers)] or [Segment(0, 1, "oi")]
+    repo.save_transcript(m.id, Transcript(segments, "pt", labels=labels))
+    return m
+
+
+def test_status_shows_the_labelled_share_per_meeting(tmp_path: Path, monkeypatch):
+    from teams_recorder.domain import LabelSummary
+    project = _project(tmp_path, monkeypatch)
+    _transcribed_with(project, 0, LabelSummary(167, 214, None), ("Felipe",))
+    _transcribed_with(project, 10, LabelSummary(0, 214, "no-window"))
+    _transcribed_with(project, 20, LabelSummary(0, 214, "no-observer"))   # feature off, Windows, no observer data: no segment
+    _transcribed_with(project, 30, None)                                   # made before the feature: no segment
+
+    result = runner.invoke(app, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "2026-10-17_09-00-00 M0  [transcribed] → next: analyze  · speakers 78%\n" in result.output
+    assert "2026-10-17_09-10-00 M10  [transcribed] → next: analyze  · speakers 0% (no Teams meeting window was read during the call)\n" in result.output
+    assert "2026-10-17_09-20-00 M20  [transcribed] → next: analyze\n" in result.output
+    assert "2026-10-17_09-30-00 M30  [transcribed] → next: analyze\n" in result.output
+
+
+def test_status_puts_the_speakers_segment_before_the_health_markers(tmp_path: Path, monkeypatch):
+    from teams_recorder.domain import LabelSummary, Segment, Transcript, TranscriptHealth
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 8, 10, 0, 0)); repo.create(m)
+    repo.save_transcript(m.id, Transcript([Segment(0, 1, "oi")], "pt", TranscriptHealth(0.668, 28, 86, True, ((0, 14),)), labels=LabelSummary(5, 10, None)))
+
+    result = runner.invoke(app, ["status"])
+
+    assert "[transcribed] → next: analyze  · speakers 50%" + Cli.MEETING_DEGRADED.format(loop=0.668) in result.output
+
+
+def test_transcribe_prints_the_speakers_line_after_the_health_line(tmp_path: Path, monkeypatch):
+    from teams_recorder.domain import Segment, Transcript
+    from tests.fakes import FakeTranscriber
+    project = _project(tmp_path, monkeypatch)
+    repo = FsMeetingRepository(project / "data")
+    m = Meeting.start(datetime(2026, 10, 17, 9, 30, 12)); repo.create(m)
+    repo.path(m.id, AUDIO).write_bytes(b"\x00")
+    _with_transcribers(monkeypatch, FakeTranscriber(Transcript([Segment(0, 10, "primeira fala " * 5), Segment(10, 20, "segunda fala " * 5)], "pt")))
+
+    result = runner.invoke(app, ["transcribe", m.id])
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    health = next(i for i, line in enumerate(lines) if line.startswith("  Health:"))
+    assert lines[health + 1] == "  Speakers: no labels (no observer data for this meeting)"   # no speakers.jsonl in this meeting
+    assert lines[health + 2].startswith("  Text: ")
+
+
+def test_start_prints_the_observer_line(tmp_path: Path, monkeypatch):
+    from dataclasses import replace
+    from teams_recorder.adapters.inbound import cli
+    from tests.fakes import FakeMicCapture, FakeNotifier, FakeProcessCapture, FakeSpeakerObserver
+    project = _project(tmp_path, monkeypatch)
+    build = cli.build_container
+
+    def with_observer(observer):
+        monkeypatch.setattr(cli, "build_container", lambda settings, **kw: replace(
+            build(settings, **kw), process_capture=FakeProcessCapture(), mic_capture=FakeMicCapture(), notifier=FakeNotifier(), speakers=observer))
+
+    with_observer(FakeSpeakerObserver())
+    started = runner.invoke(app, ["start", "--pid", "1"])
+    assert started.exit_code == 0, started.output
+    meeting_id = next(line for line in started.output.splitlines() if line.startswith("Recording meeting")).split()[2]
+    assert f"  Speakers:    {project}/data/recordings/{meeting_id}/speakers.jsonl  (observer PID " in started.output
+    assert started.output.index("  Microphone:") < started.output.index("  Speakers:") < started.output.index("Stop with")
+    runner.invoke(app, ["cancel"])
+
+    for reason, text in (("permission-missing", "not running (Accessibility permission missing; see trec doctor)"),
+                         ("binary-missing", "not running (teams-speakers not built; see trec doctor)"),
+                         ("start-failed", "not running (it failed to start; see data/log/speakers.log)")):
+        with_observer(FakeSpeakerObserver(reason=reason))
+        result = runner.invoke(app, ["start", "--pid", "1"])
+        assert result.exit_code == 0, result.output
+        assert f"  Speakers:    {text}\n" in result.output
+        runner.invoke(app, ["cancel"])
+
+    with_observer(None)   # [speakers] enabled = false (or Windows): no observer, no line
+    result = runner.invoke(app, ["start", "--pid", "1"])
+    assert result.exit_code == 0 and "Speakers:" not in result.output
+    runner.invoke(app, ["cancel"])

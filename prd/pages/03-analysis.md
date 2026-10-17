@@ -21,7 +21,7 @@ Turns the transcript into a structured record of what matters to the user: summa
 | `title` | text | short title (≤ 8 words) inferred from the content; names untitled automatic recordings |
 | `purpose` | text | one sentence: why the meeting happened |
 | `meeting_type` | enum | `standup`, `client`, `project_review`, `one_on_one`, `other` |
-| `participants[]` | text | people who speak or are addressed directly, not people only talked about (no guessing; no diarization yet) |
+| `participants[]` | text | people who speak or are addressed directly, not people only talked about (no guessing); when the transcript carries a roster read from the Teams window, exactly that list. Owners are taken from the speaker label of a line when it has one (the user's label gives `usuário`); the first-person heuristic applies only to unlabelled lines |
 | `summary` | text | 3 to 6 sentences, objective |
 | `topics[]` | title, points[] | main discussion topics in order, 1 to 4 key points each |
 | `decisions[]` | text | only what was actually decided; tentative statements are not decisions |

@@ -118,7 +118,8 @@ def sensitive_data(text: str, patterns: Iterable[str]) -> bool:
 
 def participant_heard(name: str, transcript: Transcript, user_name: str, particles: Iterable[str], address: Iterable[str]) -> bool:
     """Whether a participant is a person in the meeting rather than someone mentioned once: the recording's owner,
-    a name said at least twice, or a name someone addresses (`address` templates with `{name}`, e.g. a greeting).
+    a name said at least twice, a name someone addresses (`address` templates with `{name}`, e.g. a greeting), or a
+    name the transcript lists in its roster or on a labelled line (same token rule as the owner's name).
 
     The prototype's rule, measured in the evaluation; a person named twice passes even if only mentioned.
     """
@@ -131,6 +132,10 @@ def participant_heard(name: str, transcript: Transcript, user_name: str, particl
     if not names:
         return False
     if user and (user <= set(names) or set(names) <= user):   # "Felipe" and "Felipe Mateus" are the owner
+        return True
+    # a name the observer read in the meeting window, or the label of a line: present even if never said aloud
+    seen = [*transcript.roster, *(s.speaker for s in transcript.segments if s.speaker)]
+    if any(known and (known <= set(names) or set(names) <= known) for known in map(set, map(tokens, seen))):
         return True
     # segments joined by spaces, as the prototype did: whisper often splits right after "Bom dia,"
     text = " ".join(normalized(s.text.strip()) for s in transcript.segments)

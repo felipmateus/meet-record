@@ -421,3 +421,34 @@ def test_health_from_before_the_rate_check_loads_unflagged():
     old = {"loop_share": 0.0, "covered_minutes": 3, "total_minutes": 3, "degraded": False, "uncovered": []}
     health = codec.health_from_dict(old)
     assert not health.rate_mismatch and health.short_padding_share == 0.0
+
+
+def test_it001_the_dx_events_and_energy_label_a_transcript_through_the_file_repository(fs: FsMeetingRepository):
+    from teams_recorder.application.use_cases import TranscribeMeeting
+    from teams_recorder.domain import EnergyTimeline
+    from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
+    from tests.fakes import FakeTranscriber
+    from tests.unit.test_speakers_codec import DX_EXAMPLE, FELIPE, LUCAS
+
+    m = Meeting.start(datetime(2026, 10, 17, 9, 30, 12), pid=4242); fs.create(m)
+    fs.path(m.id, AUDIO).write_bytes(b"audio")
+    fs.path(m.id, "speakers.jsonl").write_text("\n".join(json.dumps(r) for r in DX_EXAMPLE) + "\n")
+    mic = [-70.0] * 2200
+    mic[2000:2050] = [-30.0] * 50   # the user speaks 200.0-205.0 s, the Teams track silent then
+    fs.save_energy(m.id, {TAP_TRACK: EnergyTimeline(0.1, tuple([-60.0] * 2200)), MIC_TRACK: EnergyTimeline(0.1, tuple(mic))})
+    fake = FakeTranscriber(Transcript(segments=[
+        Segment(192.0, 199.5, "então eu subo o ambiente de homologação até quarta"),   # inside Lucas's turn (191.1-199.6)
+        Segment(200.0, 205.0, "pode deixar comigo o relatório"),                       # outside every turn, the microphone loud
+        Segment(210.0, 215.0, "a gente combina o resto depois"),                       # neither
+    ]))
+
+    TranscribeMeeting(fs, fake, "pt", user_name="Felipe").execute(m.id)
+
+    saved = json.loads(fs.path(m.id, TRANSCRIPT_JSON).read_text())
+    assert [s.get("speaker") for s in saved["segments"]] == [LUCAS, "Felipe", None]
+    assert saved["speakers"] == {"roster": [FELIPE, LUCAS], "user_label": "Felipe", "labelled": 2, "eligible": 3, "reason": None}
+    assert fs.path(m.id, TRANSCRIPT_TXT).read_text().splitlines() == [
+        f"[00:03:12] {LUCAS}: então eu subo o ambiente de homologação até quarta",
+        "[00:03:20] Felipe: pode deixar comigo o relatório",
+        "[00:03:30] a gente combina o resto depois",
+    ]

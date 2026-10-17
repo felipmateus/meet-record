@@ -18,13 +18,18 @@ from teams_recorder import __version__
 from teams_recorder.adapters.outbound.disk_space import DataDirDiskSpace
 from teams_recorder.adapters.outbound.launchd import LaunchAgent
 from teams_recorder.adapters.outbound.process_finder import find_pid
+from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
-from teams_recorder.application.ports import MeetingRepository
+from teams_recorder.application.ports import ActiveRecording, MeetingRepository
 from teams_recorder.application.use_cases import gaps_text, stories_waiting
 from teams_recorder.config import Settings, find_tool, load_settings
 from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
-from teams_recorder.container import Container, build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
-from teams_recorder.domain import MeetingStatus, TeamsRecorderError, TranscriptHealth, derive_status, next_step, unconfirmed, verifications
+from teams_recorder.container import (
+    Container, build_container, build_retry_transcriber, build_speaker_observer, build_story_publishers, teams_speakers_binary, teams_tap_binary,
+)
+from teams_recorder.domain import (
+    LabelSummary, MeetingStatus, SpeakerReason, TeamsRecorderError, Transcript, derive_status, next_step, unconfirmed, verifications,
+)
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Cli, Err, Notify, Step
 
@@ -88,11 +93,12 @@ def status() -> None:
         files = c.repo.files(m.id)
         st = derive_status(files)
         nxt = next_step(st)
-        health = _transcript_health(c.repo, m.id) if TRANSCRIPT_JSON in files else None
-        marker = ""
+        transcript = _load_transcript(c.repo, m.id) if TRANSCRIPT_JSON in files else None
+        health = transcript.health if transcript else None
+        marker = _speakers_segment(transcript.labels if transcript else None)
         if health is not None and health.degraded:
             degraded += 1
-            marker = Cli.MEETING_DEGRADED.format(loop=health.loop_share)
+            marker += Cli.MEETING_DEGRADED.format(loop=health.loop_share)
         if health is not None and health.rate_mismatch:
             rate_mismatched += 1
             marker += Cli.MEETING_RATE_MISMATCH.format(share=health.short_padding_share)
@@ -134,12 +140,40 @@ def status() -> None:
         raise typer.Exit(code=1)
 
 
-def _transcript_health(repo: MeetingRepository, meeting_id: str) -> TranscriptHealth | None:
-    """The saved health of a meeting's transcript; None for transcripts made before the check, or unreadable ones."""
+def _load_transcript(repo: MeetingRepository, meeting_id: str) -> Transcript | None:
+    """A meeting's saved transcript; None when it is unreadable (its health and speaker summary are then unknown)."""
     try:
-        return repo.load_transcript(meeting_id).health
+        return repo.load_transcript(meeting_id)
     except TeamsRecorderError:
         return None
+
+
+def _no_labels_text(reason: str | None) -> str:
+    """The reason table of `trec transcribe` for a transcript without a label; a summary with no reason counts as no observer data."""
+    return Cli.SPEAKERS_REASON.get(reason or SpeakerReason.NO_OBSERVER, reason or "")
+
+
+def _speakers_segment(labels: LabelSummary | None) -> str:
+    """The `trec status` segment of a meeting line: the labelled share, `0%` with the reason when nothing was labelled,
+    nothing for transcripts without a summary and for those of meetings with no observer data (feature off, Windows, old)."""
+    if labels is None:
+        return ""
+    if labels.labelled:
+        return Cli.MEETING_SPEAKERS.format(share=labels.share or 0.0)
+    if (labels.reason or SpeakerReason.NO_OBSERVER) == SpeakerReason.NO_OBSERVER:
+        return ""
+    return Cli.MEETING_SPEAKERS_NONE.format(reason=_no_labels_text(labels.reason))
+
+
+def _speakers_line(transcript: Transcript) -> str | None:
+    """The `Speakers:` line of `trec transcribe`; None for a transcript without a summary."""
+    labels = transcript.labels
+    if labels is None:
+        return None
+    if labels.labelled:
+        names = Cli.SPEAKER_NAMES_SEPARATOR.join(transcript.speakers)
+        return Cli.SPEAKERS_LABELLED.format(share=labels.share or 0.0, eligible=labels.eligible, names=names)
+    return Cli.SPEAKERS_NO_LABELS.format(reason=_no_labels_text(labels.reason))
 
 
 def _unconfirmed_count(repo: MeetingRepository, meeting_id: str) -> int:
@@ -184,6 +218,7 @@ def doctor() -> None:
         ))
     _check_transcript_health(settings)
     _check_verification(settings)
+    _check_speakers(settings)
     key_needed = settings.llm_provider == LlmProvider.API
     typer.echo(Cli.API_KEY_LINE.format(mark=_mark(settings.has_api_key, key_needed), hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
     env_file = settings.project_dir / Files.DOTENV
@@ -224,6 +259,55 @@ def _check_transcript_health(settings: Settings) -> None:
         state = Cli.RETRY_ON_VAD.format(path=retry.vad_model_path) if retry.vad_model_path else Cli.RETRY_ON
         mark = Cli.WARNING if hint else Cli.OK
     typer.echo(Cli.RETRY_LINE.format(mark=mark, state=state, hint=hint))
+
+
+def _last_labels(repo: MeetingRepository) -> tuple[str, LabelSummary] | None:
+    """The latest transcribed meeting and its speaker summary; None when there is none, or it has no summary (made before the feature)."""
+    for meeting_id in reversed(repo.meeting_ids()):
+        if TRANSCRIPT_JSON in repo.files(meeting_id):
+            transcript = _load_transcript(repo, meeting_id)
+            return (meeting_id, transcript.labels) if transcript is not None and transcript.labels is not None else None
+    return None
+
+
+def _check_speakers(settings: Settings) -> None:
+    """Doctor line for the speaker helper: off, not built, permission missing, or ready; a ready helper also reports how the last
+    recording went and a warning when that recording reported the permission missing. Never fails the doctor. Not shown on Windows
+    (the helper reads the macOS Accessibility API). Runs the observer's check once: it is a short-lived launchd job."""
+    if settings.platform is Platform.WINDOWS:
+        return
+    observer = build_speaker_observer(settings)
+    if observer is None:
+        typer.echo(Cli.SPEAKERS_LINE.format(mark=Cli.INFO, state=Cli.SPEAKERS_OFF))
+        return
+    binary = teams_speakers_binary(settings.project_dir)
+    shown = _relative(binary, settings.project_dir)
+    try:
+        problems = [text.replace(str(binary), shown) for text in observer.problems()]
+    except (OSError, TeamsRecorderError) as exc:
+        problems = [Err.SPEAKERS_PROBLEM_CHECK.format(detail=exc)]
+    if problems:
+        detail = Cli.SPEAKERS_PROBLEMS_SEPARATOR.join(problems)
+        typer.echo(Cli.SPEAKERS_LINE.format(mark=Cli.INFO, state=Cli.SPEAKERS_AT.format(path=shown, detail=detail) if binary.exists() else detail))
+        return
+    last = _last_labels(FsMeetingRepository(settings.data_dir))
+    if last is not None and last[1].reason == SpeakerReason.PERMISSION_MISSING:
+        typer.echo(Cli.SPEAKERS_LINE.format(mark=Cli.WARNING, state=Cli.SPEAKERS_MISMATCH.format(meeting_id=last[0], binary=shown)))
+        return
+    detail = Cli.SPEAKERS_GRANTED
+    if last is not None:
+        labels = last[1]
+        outcome = Cli.SPEAKERS_OBSERVER_RAN.format(share=labels.share or 0.0) if labels.labelled else _no_labels_text(labels.reason)
+        detail += Cli.SPEAKERS_LAST_RECORDING.format(meeting_id=last[0], outcome=outcome)
+    typer.echo(Cli.SPEAKERS_LINE.format(mark=Cli.OK, state=Cli.SPEAKERS_AT.format(path=shown, detail=detail)))
+
+
+def _relative(path: Path, base: Path) -> str:
+    """`path` as shown to the user: relative to the project when it sits inside it."""
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
 
 
 def _check_verification(settings: Settings) -> None:
@@ -276,7 +360,24 @@ def start(
     typer.echo(Cli.RECORDING_MEETING.format(meeting_id=active.meeting.id, pid=target))
     typer.echo(Cli.TRACK_TEAMS.format(path=active.process_handle.out, pid=active.process_handle.pid))
     typer.echo(Cli.TRACK_MIC.format(path=active.mic_handle.out, pid=active.mic_handle.pid))
+    if c.speakers is not None:   # no line when the feature is off (or on Windows): there is no observer to report on
+        if active.speakers_handle is not None:
+            typer.echo(Cli.TRACK_SPEAKERS.format(path=active.speakers_handle.out, pid=active.speakers_handle.pid))
+        else:
+            reason = _observer_not_started(c.repo, active)
+            pointer = Cli.SPEAKERS_SEE_LOG if reason == SpeakerReason.START_FAILED else Cli.SPEAKERS_SEE_DOCTOR
+            typer.echo(Cli.TRACK_SPEAKERS_OFF.format(reason=Cli.SPEAKERS_NOT_STARTED.get(reason, reason), pointer=pointer))
     typer.echo(Cli.STOP_HINT)
+
+
+def _observer_not_started(repo: MeetingRepository, active: ActiveRecording) -> str:
+    """Why the observer did not start, as the recording use case wrote it to speakers.jsonl; a failure to start when that is unreadable."""
+    started = active.meeting.started_at.timestamp()
+    try:
+        log = repo.load_speaker_log(active.meeting.id, started, started)
+    except TeamsRecorderError:
+        log = None
+    return (log.unavailable if log is not None else None) or SpeakerReason.START_FAILED.value
 
 
 @app.command(help=Cli.STOP_CMD_HELP)
@@ -330,6 +431,9 @@ def transcribe(
                 typer.echo(Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""))
             if health.rate_mismatch:
                 typer.echo(Cli.TRANSCRIPT_RATE_MISMATCH.format(share=health.short_padding_share))
+        speakers_line = _speakers_line(transcript)
+        if speakers_line is not None:
+            typer.echo(speakers_line)
         typer.echo(Cli.TEXT_PATH.format(path=c.repo.path(mid, TRANSCRIPT_TXT)))
     if failures:
         raise typer.Exit(code=1)

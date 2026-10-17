@@ -6,6 +6,10 @@ Changing a wording here changes it everywhere; tests assert on these same consta
 """
 from __future__ import annotations
 
+# Reason texts shared by the daily notice (`Notify`) and the CLI lines (`Cli`): the two coincide for these.
+_SPEAKERS_NO_WINDOW = "no Teams meeting window was read during the call"
+_SPEAKERS_OBSERVER_DIED = "the observer died before reading a Teams window"
+
 
 class Notify:
     RECORDING_STARTED = "Recording started"
@@ -38,6 +42,16 @@ class Notify:
     RATE_MISMATCH = "Teams audio recorded at the wrong rate"
     RATE_MISMATCH_BODY = ("Meeting {meeting_id}: {share:.0%} of the Teams track is silence padding, so the other participants' speech "
                           "is garbled and their part of the transcript is unreliable.")
+    NO_SPEAKER_LABELS = "Speaker labels unavailable"
+    NO_SPEAKER_LABELS_BODY = "Meeting {meeting_id}: {reason}"
+    # The body per notifying reason (domain.SpeakerReason values); no-match and no-observer never notify.
+    NO_SPEAKER_LABELS_REASON = {
+        "binary-missing": "teams-speakers is not built. Run scripts/build-native.sh.",
+        "permission-missing": "Accessibility permission missing for teams-speakers. Run trec doctor.",
+        "start-failed": "the observer failed to start. See data/log/speakers.log.",
+        "observer-died": f"{_SPEAKERS_OBSERVER_DIED}. See data/log/speakers.log.",
+        "no-window": f"{_SPEAKERS_NO_WINDOW}. Keep a Teams window visible.",
+    }
 
 
 class Ask:
@@ -69,6 +83,24 @@ class Err:
     NO_USABLE_TRACK = "no usable audio track to mix: {tracks}"
     MIX_FAILED = "ffmpeg failed to mix: {error}"
     MIX_FAILED_CODE = "ffmpeg failed to mix (code {code}): {tail}"
+    # speaker observer and energy meter
+    SPEAKERS_BINARY_MISSING = "teams-speakers binary not found at {path}. Build it with: {script}"
+    SPEAKERS_PERMISSION_MISSING = "Accessibility permission missing for teams-speakers (exit code {code}). {tail}"
+    SPEAKERS_START_FAILED = "teams-speakers did not start as launchd job {label}: {detail}"
+    SPEAKERS_LAUNCHD = "launchctl {args} failed ({code}): {stderr}"   # the detail of a failed bootstrap
+    SPEAKERS_EXITED = "it exited with code {code}. {tail}"
+    SPEAKERS_NOT_RUNNING = "it was not running after {seconds:.1f} s"
+    SPEAKERS_CHECK_HUNG = "it did not finish within {seconds:.0f} s"
+    # What `problems()` returns for `trec doctor` (the doctor adds the "speaker labels:" prefix and the level).
+    SPEAKERS_PROBLEM_NOT_BUILT = "teams-speakers not built → {script}"
+    SPEAKERS_PROBLEM_PERMISSION = (
+        "Accessibility permission missing → run `{binary} --check --prompt` and allow teams-speakers "
+        "(add it with the + button: {binary}) under System Settings > Privacy & Security > Accessibility"
+    )
+    SPEAKERS_PROBLEM_CHECK = "the Accessibility permission could not be checked: {detail}"
+    ENERGY_FAILED = "ffmpeg could not measure the level of {track}: {error}"
+    ENERGY_FAILED_CODE = "ffmpeg could not measure the level of {track} (code {code}): {tail}"
+    ENERGY_NO_LEVELS = "ffmpeg printed no levels for {track}"
     # transcription
     MODEL_MISSING = "model not found at {path}. Download it with {script}"
     AUDIO_MISSING = "audio not found: {path}"
@@ -128,12 +160,18 @@ class Err:
     BAD_REASON = "verification reason must be text, not {value!r}"               # detail inside BAD_JSON
     BAD_PARTICIPANT_CHECKS = "participant_checks must be an object, not {value!r}"  # detail inside BAD_JSON
     FILE_UNREADABLE = "cannot read {path}: {error}"
+    BAD_SPEAKERS = "the speakers summary must be an object, not {value!r}"   # detail inside BAD_JSON
+    BAD_TEXT = "expected text or null, not {value!r}"                       # detail inside BAD_JSON
+    BAD_ENERGY = "energy levels must be a list of numbers per track (track {value!r})"   # detail inside BAD_JSON
+    BAD_ENERGY_STEP = "the energy step must be a positive number of seconds, not {value!r}"   # detail inside BAD_JSON
+    BAD_ENERGY_LEVEL = "energy levels must be finite dBFS values of at most {limit:g}, not {value!r} (track {track!r})"   # detail inside BAD_JSON
     BAD_CRITERION = "a criterion needs text and a source of HH:MM:SS or suggestion, not {value!r}"  # detail inside BAD_JSON
     MEETING_EXISTS = "meeting already exists: {meeting_id}"
     MEETING_LOCKED = "meeting {meeting_id} is already being processed"
     STEP_ERROR = "{step}: {error}"                      # content of error.txt
     # launchd / config / daemon
     LAUNCHCTL_FAILED = "launchctl {args} failed ({code}): {stderr}"
+    LAUNCHCTL_TIMED_OUT = "launchctl {args} did not answer within {seconds:g} s"   # stderr of a call reported as failed
     SCHTASKS_FAILED = "schtasks {args} failed ({code}): {stderr}"
     INVALID_PROVIDER = "invalid llm.provider: {value!r}; use one of {options}"
     INVALID_BIT_DEPTH = "invalid audio.bit_depth: {value!r} (use one of {options})"
@@ -191,6 +229,8 @@ class Cli:
     MEETING_UNCONFIRMED = "  ⚠ {count} unconfirmed claim(s)"
     UNCONFIRMED_CLAIMS = "Unconfirmed claims: {claims} in {meetings} meeting(s)"
     MEETING_TITLE = " {title}"
+    MEETING_SPEAKERS = "  · speakers {share:.0%}"
+    MEETING_SPEAKERS_NONE = "  · speakers 0% ({reason})"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
     OPEN_ACTIONS = "Open actions: {count}"
@@ -217,6 +257,16 @@ class Cli:
     VERIFICATION_NO_PROMPT = "{state}; prompt missing at {path}"
     API_KEY_LINE = "[{mark}] ANTHROPIC_API_KEY in .env{hint}"
     API_KEY_NOT_REQUIRED = " (not required with provider = claude-code)"
+    SPEAKERS_LINE = "[{mark}] speaker labels: {state}"
+    SPEAKERS_AT = "teams-speakers at {path}; {detail}"
+    SPEAKERS_GRANTED = "Accessibility permission granted"
+    SPEAKERS_LAST_RECORDING = "; last recording {meeting_id}: {outcome}"
+    SPEAKERS_OBSERVER_RAN = "observer ran, {share:.0%} of lines labelled"
+    SPEAKERS_OFF = "off ([speakers] enabled = false); only your own lines are labelled, from the microphone track"
+    SPEAKERS_PROBLEMS_SEPARATOR = "; "
+    SPEAKERS_MISMATCH = ("Accessibility permission granted to teams-speakers now, but the last recording {meeting_id} reported it missing "
+                         "→ record again to confirm; if it still reports it missing, add teams-speakers again "
+                         "(add it with the + button: {binary})")
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
     DATA_IN = "[info] data in {path}"
     STORY_GUIDE_LINE = "[{mark}] user story guide: {path}{hint}"
@@ -228,6 +278,15 @@ class Cli:
     RECORDING_MEETING = "Recording meeting {meeting_id} (target PID {pid})."
     TRACK_TEAMS = "  Teams:       {path}  (recorder PID {pid})"
     TRACK_MIC = "  Microphone:  {path}  (recorder PID {pid})"
+    TRACK_SPEAKERS = "  Speakers:    {path}  (observer PID {pid})"
+    TRACK_SPEAKERS_OFF = "  Speakers:    not running ({reason}; {pointer})"
+    # The reason the observer did not start, for the line above (the transcribe table says more once there is a transcript).
+    SPEAKERS_NOT_STARTED = {
+        "binary-missing": "teams-speakers not built",
+        "permission-missing": "Accessibility permission missing",
+        "start-failed": "it failed to start",
+    }
+    SPEAKERS_SEE_DOCTOR, SPEAKERS_SEE_LOG = "see trec doctor", "see data/log/speakers.log"
     STOP_HINT = "Stop with `trec stop` or discard with `trec cancel`."
     NO_RECORDING = "no recording in progress"
     STOPPED = "Meeting {meeting_id} stopped after {minutes:.1f} min."
@@ -244,6 +303,19 @@ class Cli:
     ANALYZING = "Analyzing {meeting_id}…"
     FAILED = " FAILED: {error}"
     TRANSCRIBED_OK = " ok ({segments} segments, {minutes:.1f} min)"
+    SPEAKERS_LABELLED = "  Speakers: {share:.0%} of {eligible} lines labelled ({names})"
+    SPEAKERS_NO_LABELS = "  Speakers: no labels ({reason})"
+    SPEAKER_NAMES_SEPARATOR = ", "
+    # Why a transcript has no label (SpeakerReason values), as `trec transcribe` prints it and as `trec status` shows it.
+    SPEAKERS_REASON = {
+        "binary-missing": "the observer did not run: teams-speakers not built",
+        "permission-missing": "the observer did not run: Accessibility permission missing",
+        "start-failed": "the observer did not run: it failed to start; see data/log/speakers.log",
+        "observer-died": f"{_SPEAKERS_OBSERVER_DIED}; see data/log/speakers.log",
+        "no-window": _SPEAKERS_NO_WINDOW,
+        "no-match": "speaker events found but no line matched them",
+        "no-observer": "no observer data for this meeting",
+    }
     TRANSCRIPT_HEALTH = "  Health: {loop:.0%} of segments in repetition loops, text in {covered} of {total} min{retried}"
     RETRIED = " (after a second pass with the anti-loop settings)"
     TRANSCRIPT_DEGRADED = "  WARNING: degraded transcript{gaps}. The analysis still runs on it and the minutes will say so."
@@ -324,7 +396,16 @@ class Log:
     FINISHING_BEFORE_EXIT = "finishing recording in progress before exiting"
     DAEMON_STOPPED = "daemon stopped"
     CAPTURER_DIED = "capturer %s (pid %s) died during call %s; see %s"
-    CAPTURER_TAP, CAPTURER_MIC = "teams-tap", "microphone"   # names used in CAPTURER_DIED
+    CAPTURER_TAP, CAPTURER_MIC, CAPTURER_SPEAKERS = "teams-tap", "microphone", "teams-speakers"   # names used in CAPTURER_DIED
+    SPEAKERS_STARTED = "speaker observer started for %s (pid %s)"
+    SPEAKERS_UNAVAILABLE = "speaker observer unavailable for %s: %s (%s)"
+    SPEAKERS_UNAVAILABLE_NOT_RECORDED = "the reason the speaker observer was unavailable for %s could not be recorded: %s"
+    SPEAKERS_STOP_FAILED = "speaker observer (pid %s) could not be stopped: %s"
+    ENERGY_MEASURED = "energy of %s measured: %.1f s in %d windows"
+    ENERGY_FAILED = "energy of %s could not be measured: %s; the user's lines will not be labelled"
+    ENERGY_NOT_SAVED = "energy of %s could not be saved: %s; the user's lines will not be labelled"
+    TITLE_FROM_WINDOW = "meeting %s titled from the Teams window: %s"
+    TITLE_FROM_WINDOW_FAILED = "the Teams window subject of %s could not be read: %s; the meeting stays untitled"
     CALL_WITHOUT_PID = "call detected but no Teams PID; waiting"
     ALREADY_ACTIVE = "a recording is already active (manual?); daemon will not start another"
     RECORDING_STARTED = "recording started: %s (target pid %s)"
@@ -369,6 +450,13 @@ class Log:
     RATE_MISMATCH = ("Teams track of %s was likely recorded at the wrong sample rate: %.0f%% of it padded in short pads "
                      "(%.0f of %.0f s, device rate(s) %s); its transcript is unreliable")
     CAPTURE_STATS_UNREADABLE = "capture stats of %s unreadable; skipping the sample-rate check: %s"
+    SPEAKERS_LABELLED = "speaker labels of %s: %d of %d lines labelled (%s)"
+    SPEAKERS_LABEL_FAILED = "speaker labels of %s could not be computed: %s; transcript saved without labels"
+    NO_SPEAKER_LABELS = "no speaker labels for %s: %s"
+    SPEAKERS_NOTICE_FAILED = "the speaker-labels notice for %s could not be recorded: %s"
+    SPEAKERS_BOOTOUT_FAILED = "launchctl bootout of %s failed (%s); stopping pid %d directly"
+    SPEAKERS_STALE_STOPPED = "booted out the speaker observer job %s that no recording owned (pid %s)"
+    SPEAKERS_CHECK_FAILED = "speaker observer check of %s failed: %s; the recording goes on (not logged again for this call)"
 
 
 class Prompt:
@@ -379,6 +467,8 @@ class Prompt:
     MEETING_START = "Start: {time}"
     MEETING_TITLE = "Title: {title}"
     MEETING_DURATION = "Duration: {minutes} min"
+    ROSTER = "Participants seen in the meeting window: {names}"
+    SPEAKER_LABELS = 'Speaker labels: the name after a timestamp is who said the line; "{label}" is the recording owner'
     TRANSCRIPT_HEADER = "\n\nTranscript (with timestamps):\n\n"
     PLAN_DATE = "Plan date: {date} ({weekday}). The plan is for the next business day."
     WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -390,8 +480,10 @@ class Prompt:
     TRUNCATED = "\n…(truncated)"
     # JSON Schema field descriptions (part of the contract with the model)
     FIELD_ACTION_DESCRIPTION = "Task, starting with a verb in the infinitive"
-    FIELD_DEADLINE_WHO = "Who delivers it; '{self_owner}' for the recording owner; another person only when the transcript makes it evident; '{unknown}' otherwise"
-    FIELD_ACTION_OWNER = "Owner; '{self_owner}' for the recording owner; another person only when the transcript makes it evident; '{unknown}' otherwise"
+    FIELD_DEADLINE_WHO = ("Who delivers it; '{self_owner}' for the recording owner (and for lines labelled with the owner's label); "
+                          "another person only when the transcript makes it evident; '{unknown}' otherwise")
+    FIELD_ACTION_OWNER = ("Owner; '{self_owner}' for the recording owner (and for lines labelled with the owner's label); "
+                          "another person only when the transcript makes it evident (a name after the timestamp is who said the line); '{unknown}' otherwise")
     FIELD_DUE = "Due date in ISO format (YYYY-MM-DD) or null"
     FIELD_ISO_DATE = "ISO date or null"
     FIELD_AT = "Transcript timestamp (HH:MM:SS) of the line where it was said, or null"
@@ -400,7 +492,8 @@ class Prompt:
     FIELD_TITLE = "Short meeting title (max 8 words), inferred from the content"
     FIELD_PURPOSE = "One sentence: why the meeting happened"
     FIELD_MEETING_TYPE = "standup, client, project_review, one_on_one or other"
-    FIELD_PARTICIPANTS = "Names of people who speak or are addressed directly in the meeting, not people only talked about (no guessing)"
+    FIELD_PARTICIPANTS = ("Names of people who speak or are addressed directly in the meeting, not people only talked about (no guessing); "
+                          "exactly the listed participants when the message lists participants seen in the meeting window")
     FIELD_TOPICS = "Main discussion topics in order, each with its key points"
     FIELD_RISKS = "Risks, blockers or issues raised"
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
@@ -485,6 +578,7 @@ class Minutes:
     OWNER_SELF = "{name} (você)"
     OWNER_SELF_NO_NAME = "você"
     OWNER_UNKNOWN = "⚠️ sem responsável"
+    SPEAKER_USER_FALLBACK = "Você"   # label of the user's lines when neither [user] name nor the user's own tile name is known
     FOOTER = "---\n_Gerada automaticamente a partir da transcrição. Confira cada item no horário indicado antes de compartilhar._"
     # Reasons stored with an unconfirmed claim and shown in these minutes (task 4.0); the verifier writes its own.
     REASON_SENSITIVE = "contém dado pessoal sensível"

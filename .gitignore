@@ -10,6 +10,7 @@ htmlcov/
 build/
 dist/
 native/teams-tap/.build/
+native/teams-speakers/.build/
 native/teams-tap-win/bin/
 native/teams-tap-win/obj/
 .DS_Store
@@ -18,3 +19,6 @@ tools/
 # Backlog.md board of drafted user stories: meeting content, never versioned (public repository)
 backlog/
 backlog.config.yml
+
+# output of the accessibility spike (scripts/ax-speaker-probe.swift): participant names
+ax-speaker-probe*.jsonl

@@ -12,6 +12,7 @@
     ├── teams-recorder.log            # daemon (daily rotation, 30 days)
     ├── daemon.out.log / daemon.err.log
     ├── capture.log                   # recorders' stderr
+    ├── speakers.log                  # teams-speakers' stderr (macOS)
     └── llm_usage.jsonl               # one line per LLM call
 ```
 
@@ -26,6 +27,18 @@ Written by `teams-tap --stats` when the Teams recorder stops (macOS only); read 
 {"written_seconds": 709.9, "padded_seconds": 474.9, "short_padded_seconds": 474.9, "gaps": 0, "file_rate": 48000, "device_rates": [16000], "rate_changes": 0}
 ```
 
+## `speakers.jsonl` (macOS)
+Written by `teams-speakers` during the recording, one JSON object per line (`t` is Unix seconds; the `start` event carries the `epoch` every event is relative to): `start`, `window` (`found`/`lost`, `kind` main or compact, the window title), `title` (the meeting subject), `seen` (a participant tile, `me` marks the user's own), `speaking` (name, on/off, window) and `stop` (reason and counters). When the helper could not start, the file has exactly one line written by the recorder: `{"event": "unavailable", "reason": "binary-missing" | "permission-missing" | "start-failed"}`. Deleted with the meeting.
+```json
+{"t": 1760655201.104, "event": "speaking", "name": "Lucas Huguenin Gurgel de Moura", "speaking": true, "window": "main"}
+```
+
+## `energy.json`
+The level of each raw track per 100 ms (dBFS, `-120.0` is digital silence), measured before the tracks are deleted; all or nothing. Used to label the user's own lines. Deleted with the meeting.
+```json
+{"step_seconds": 0.1, "tracks": {"tap.wav": [-120.0, -61.2, -58.9], "mic.wav": [-120.0, -70.3, -38.2]}}
+```
+
 ## `current_recording.json`
 ```json
 {"meeting_id": "…", "process_handle": {"pid": 123, "out": "…/tap.wav"}, "mic_handle": {"pid": 124, "out": "…/mic.wav"}}
@@ -33,9 +46,10 @@ Written by `teams-tap --stats` when the Teams recorder stops (macOS only); read 
 
 ## `transcript.json`
 ```json
-{"language": "pt", "segments": [{"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal."}]}
+{"language": "pt", "segments": [{"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal.", "speaker": "Lucas Huguenin Gurgel de Moura"}],
+ "speakers": {"roster": ["Felipe Mateus de Carvalho", "Lucas Huguenin Gurgel de Moura"], "user_label": "Felipe", "labelled": 167, "eligible": 214, "reason": null}}
 ```
-`transcript.txt`: `[hh:mm:ss] text` per segment.
+`speaker` appears on labelled segments only; `speakers` is absent on transcripts made before the feature and present, with a `reason`, when nothing was labelled. `transcript.txt`: `[hh:mm:ss] text` per segment, `[hh:mm:ss] Name: text` for a labelled one.
 
 ## `minutes.md`
 Human-readable minutes rendered from `analysis.json` (see the analysis page). Not part of the meeting status.

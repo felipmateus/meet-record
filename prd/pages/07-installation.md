@@ -16,12 +16,12 @@ Install from scratch on another Mac, or for another user, with a single script, 
 3. Homebrew: install `ffmpeg` and `whisper-cpp` when missing. If Homebrew itself is missing, stop and show the official install command.
 4. Xcode Command Line Tools: if missing, open the macOS installer and stop, asking the user to run the script again.
 5. Python 3.11 or later (installs `python@3.12` with Homebrew if none is found): create `.venv` and install the package.
-6. Build `teams-tap`.
+6. Build `teams-tap` and `teams-speakers` (`scripts/build-native.sh`).
 7. Ask for the user's name (default: the current `[user] name`) and the LLM provider (`claude-code` or `api`), and write them to `config.toml`. For `claude-code`, check that Claude Code is installed. For `api`, create `.env` from the example with permission 600.
 8. Download the whisper model (and the VAD model when `vad = true`) into the configured models folder.
 9. Run `trec doctor`.
 10. Install the daemon and the planner, unless a recording is in progress, or the services run another copy of the project and the user declines.
-11. Explain the two macOS permissions and offer to open their settings pages.
+11. Explain the three macOS permissions (Microphone, Screen & System Audio Recording, Accessibility) and offer to open their settings pages. Accessibility is for `teams-speakers`: macOS does not ask for it, so the text says to add `native/teams-speakers/.build/release/teams-speakers` with the **+** button (the daemon runs the helper as its own launchd job, so the grant must be on the helper), that a rebuild may require adding it again, and that `trec doctor` verifies it.
 12. Summarize the items that need attention.
 
 ## Options
@@ -37,7 +37,8 @@ Install from scratch on another Mac, or for another user, with a single script, 
 
 ## Business rules
 - Running it again is safe: each step only does what is missing.
-- Installing Homebrew, logging in to Claude Code and granting the macOS permissions stay with the user.
+- Installing Homebrew, logging in to Claude Code and granting the macOS permissions stay with the user (the installer never touches a permission, and `trec agent restart` after an update stays with the user too).
+- The uninstaller removes the `teams-tap` build with `--all`; it does not yet remove `native/teams-speakers/.build` or the helper's launchd job.
 - `scripts/uninstall.sh` removes only the services that run its own copy. `--all` also deletes `.venv` and the `teams-tap` build. Data (recordings, transcripts, plans, models) is never deleted.
 
 ## Acceptance criterion

@@ -123,6 +123,10 @@ def build_user_message(transcript: Transcript, meeting: Meeting, user_name: str 
         header.append(Prompt.MEETING_TITLE.format(title=meeting.title))
     if meeting.duration_seconds:
         header.append(Prompt.MEETING_DURATION.format(minutes=int(meeting.duration_seconds // 60)))
+    if transcript.roster:
+        header.append(Prompt.ROSTER.format(names=", ".join(transcript.roster)))
+    if transcript.user_label:
+        header.append(Prompt.SPEAKER_LABELS.format(label=transcript.user_label))
     return "\n".join(header) + Prompt.TRANSCRIPT_HEADER + transcript.as_timestamped_text()
 
 

@@ -1,7 +1,7 @@
 # User story drafts and publishing
 
 > **Commands:** `trec stories [--date YYYY-MM-DD]`, `trec publish [--date YYYY-MM-DD] [--only 1,3]` · drafting also runs right after `trec plan` when `[stories] enabled = true` (so the 6 pm planner drafts them), and publishing right after drafting when `[stories] publish = true`
-> **Module:** User stories · **Generated:** 2026-10-10 · **Status:** delivered (drafts; Backlog.md board), publishing by hand (`publish = false`) until the user approves the stories on the board. Requirements and design: `tasks/prd-story-publishing/`
+> **Module:** User stories · **Generated:** 2026-10-10 · **Status:** delivered (drafts; Backlog.md board), publishing by hand (`publish = false`) until the user approves the stories on the board. Requirements and design: `docs/tasks/prd-story-publishing/`
 
 ## Overview
 Turns the day's new actions into user story drafts for the user's backlog, written by the rules of the user's own instructions document (the story guide), and publishes them to a board where the user approves or rejects each one. The drafts document records each story and where it was published.

@@ -1,4 +1,4 @@
-# Synthetic meeting corpus for the LLM wiki evaluation (tasks/prd-llm-wiki/evaluation.md §4).
+# Synthetic meeting corpus for the LLM wiki evaluation (docs/tasks/prd-llm-wiki/evaluation.md §4).
 # Everything here is fictional: companies, people, projects and numbers. The user is Felipe,
 # as in config.toml, so the analysis attributes his commitments to him.
 #

@@ -1,6 +1,7 @@
 """Domain entities and value objects. No I/O, no external dependencies."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
@@ -45,6 +46,31 @@ class Segment:
     start: float
     end: float
     text: str
+    speaker: str | None = None   # display name of who said it, when known (domain/speakers.label_segments)
+
+
+_WORD = re.compile(r"\w+")
+_ANNOTATION = re.compile(r"^[\[(*♪].*[\])*♪]$")   # whisper's non-speech markers: [BLANK_AUDIO], (música), *risos*, ♪
+
+
+def is_speech(text: str) -> bool:
+    """Whether a segment carries spoken words: not empty, and not a non-speech marker such as [BLANK_AUDIO]."""
+    stripped = text.strip()
+    return bool(_WORD.search(stripped)) and not _ANNOTATION.match(stripped)
+
+
+@dataclass(frozen=True)
+class LabelSummary:
+    """What speaker labelling did to a transcript (domain/speakers.label_segments); absent on transcripts made before it."""
+
+    labelled: int              # eligible segments that got a label
+    eligible: int              # segments with speech text and a positive duration
+    reason: str | None = None  # a SpeakerReason when labelled == 0, else None
+
+    @property
+    def share(self) -> float | None:
+        """Labelled over eligible; None when no segment was eligible."""
+        return self.labelled / self.eligible if self.eligible else None
 
 
 @dataclass(frozen=True)
@@ -111,6 +137,9 @@ class Transcript:
     segments: list[Segment] = field(default_factory=list)
     language: str = "pt"
     health: TranscriptHealth | None = None  # None: transcribed before the health check existed
+    roster: tuple[str, ...] = ()            # names seen in the Teams meeting window, in order of first appearance
+    user_label: str | None = None           # the label the recording owner's lines carry, when labelling ran
+    labels: LabelSummary | None = None      # None: labelling never ran (transcripts made before speaker attribution)
 
     @property
     def text(self) -> str:
@@ -120,8 +149,20 @@ class Transcript:
     def duration_seconds(self) -> float:
         return self.segments[-1].end if self.segments else 0.0
 
+    @property
+    def speakers(self) -> list[str]:
+        """Distinct speaker labels, in order of first appearance."""
+        return list(dict.fromkeys(s.speaker for s in self.segments if s.speaker))
+
     def as_timestamped_text(self) -> str:
-        return "\n".join(f"[{clock_time(s.start)}] {s.text.strip()}" for s in self.segments)
+        """One line per segment: "[HH:MM:SS] text", or "[HH:MM:SS] Name: text" when the segment has a speaker."""
+        return "\n".join(timestamped_line(s) for s in self.segments)
+
+
+def timestamped_line(segment: Segment) -> str:
+    """A transcript line as transcript.txt and the model messages show it."""
+    speaker = f"{segment.speaker}: " if segment.speaker else ""
+    return f"[{clock_time(segment.start)}] " + speaker + segment.text.strip()
 
 
 def clock_time(seconds: float) -> str:

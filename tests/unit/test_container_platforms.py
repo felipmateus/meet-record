@@ -8,11 +8,13 @@ from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfir
 from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecordingConfirmation
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
+from teams_recorder.adapters.outbound.energy_ffmpeg import FfmpegEnergyMeter
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
+from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Files, Platform, Stories, StoryDestination
-from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_tap_binary
+from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_speakers_binary, teams_tap_binary
 from teams_recorder.domain.status import TAP_STATS
 from tests.fakes import FakeStoryPublisher
 
@@ -33,6 +35,41 @@ def test_macos_container(tmp_path: Path):
     c = build_container(load_settings(tmp_path, platform=Platform.MACOS))
     assert isinstance(c.process_capture, CoreAudioTapCapture) and isinstance(c.detector, PmsetCallDetector)
     assert isinstance(c.notifier, MacOSNotifier) and isinstance(c.confirmation, DialogRecordingConfirmation)
+
+
+def test_ut060_macos_builds_the_observer_only_when_speakers_are_enabled(tmp_path: Path):
+    s = load_settings(tmp_path, platform=Platform.MACOS)
+    observer = build_container(s).speakers
+    assert isinstance(observer, AxSpeakerObserver)
+    assert observer.binary == teams_speakers_binary(tmp_path.resolve()) == tmp_path.resolve() / "native/teams-speakers/.build/release/teams-speakers"
+    assert observer.run_dir == s.data_dir / "run" and observer.log_path == s.data_dir / "log" / "speakers.log"
+
+    (tmp_path / "config.toml").write_text("[speakers]\nenabled = false\n")
+    assert build_container(load_settings(tmp_path, platform=Platform.MACOS)).speakers is None
+
+
+def test_ut060_windows_passes_no_observer_even_when_enabled(tmp_path: Path):
+    s = load_settings(tmp_path, platform=Platform.WINDOWS)
+    assert s.speakers_enabled and build_container(s).speakers is None
+
+
+def test_both_platforms_get_the_energy_meter(tmp_path: Path):
+    for platform in Platform:
+        meter = build_container(load_settings(tmp_path, platform=platform)).energy
+        assert isinstance(meter, FfmpegEnergyMeter)
+
+
+def test_the_recording_use_cases_receive_the_observer_and_the_energy_meter(tmp_path: Path):
+    c = build_container(load_settings(tmp_path, platform=Platform.MACOS))
+    assert c.start_recording().speakers is c.speakers is not None
+    assert c.cancel_recording().speakers is c.speakers
+    stop = c.stop_recording()
+    assert stop.speakers is c.speakers and stop.energy is c.energy is not None
+    assert c.pipeline().stop.speakers is c.speakers
+
+    windows = build_container(load_settings(tmp_path, platform=Platform.WINDOWS))
+    assert windows.start_recording().speakers is None and windows.stop_recording().speakers is None
+    assert windows.stop_recording().energy is windows.energy is not None
 
 
 def test_headless_has_no_dialog_on_either_platform(tmp_path: Path):
@@ -112,6 +149,7 @@ def test_first_pass_gets_max_context_and_the_retry_adds_vad(tmp_path: Path):
     assert retry is not None and retry.max_context == 0 and retry.vad_model_path == tmp_path / "models" / "ggml-silero-v5.1.2.bin"
     use_case = c.transcribe_meeting()
     assert use_case.retry is retry and use_case.notifier is c.notifier and use_case.max_loop_share == 0.10
+    assert use_case.clock is c.clock and use_case.user_name == c.settings.user_name   # the speaker labels and their daily notice
 
 
 def test_no_retry_when_it_would_repeat_the_first_pass(tmp_path: Path):
