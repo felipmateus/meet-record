@@ -6,7 +6,7 @@
 #                      [--no-agent] [--yes] [--dry-run]
 #
 # Steps: check macOS and the project location, Homebrew packages (ffmpeg, whisper-cpp),
-# Xcode Command Line Tools, Python virtualenv, the teams-tap capture binary, the whisper model,
+# Xcode Command Line Tools, Python virtualenv, the teams-tap capture and teams-speakers binaries, the whisper model,
 # config.toml ([user] name, llm provider), .env (API provider only), trec doctor, and the
 # LaunchAgents (daemon + 6 pm planner). Installing Homebrew itself and logging in to Claude Code
 # are left to you: both need your password or browser.
@@ -18,7 +18,7 @@ TREC="$VENV/bin/trec"
 MIN_MACOS="14.2"                       # Core Audio Process Tap
 BREW_PACKAGES=(ffmpeg whisper-cpp)
 TEAMS_APP="/Applications/Microsoft Teams.app"
-PRIVACY_PANES=(Privacy_Microphone Privacy_ScreenCapture)
+PRIVACY_PANES=(Privacy_Microphone Privacy_ScreenCapture Privacy_Accessibility)
 
 NAME=""
 PROVIDER=""
@@ -135,9 +135,10 @@ run "$VENV/bin/python" -m pip install --quiet -e "$PROJECT_DIR"
 ok "teams-recorder installed in .venv (command: $TREC)"
 
 # ---------------------------------------------------------------------------------------------
-step "Capture binary (teams-tap)"
+step "Native binaries (teams-tap, teams-speakers)"
 run "$PROJECT_DIR/scripts/build-native.sh" >/dev/null
 ok "built native/teams-tap/.build/release/teams-tap"
+ok "built native/teams-speakers/.build/release/teams-speakers"
 
 # ---------------------------------------------------------------------------------------------
 step "Settings (config.toml)"
@@ -228,11 +229,20 @@ fi
 # ---------------------------------------------------------------------------------------------
 step "macOS permissions"
 cat <<TXT
-  On the first recorded call macOS asks for two permissions. Allow both, or the Teams track
-  comes out silent or the microphone track empty:
+  Three permissions in System Settings > Privacy & Security. The first two are requested by
+  macOS on the first recorded call; allow both, or the Teams track comes out silent or the
+  microphone track empty:
     - Microphone
     - Screen & System Audio Recording (System Audio Recording Only is enough)
-  Both live in System Settings > Privacy & Security.
+  The third is for the speaker labels (who said each line, read from the Teams window) and
+  macOS does NOT ask for it by itself:
+    - Accessibility, for the helper $PROJECT_DIR/native/teams-speakers/.build/release/teams-speakers
+      Open the Accessibility pane, press the + button, press Cmd+Shift+G, paste that path, choose
+      Open and switch the entry on. The daemon runs the helper as its own launchd job, so the
+      grant must be on the helper itself (granting a terminal or Python does not cover it).
+      A rebuild of the helper (scripts/build-native.sh) may require adding it again.
+  Without the Accessibility permission recordings still work; the lines just carry no names.
+  Run '$TREC doctor' afterwards: its "speaker labels" line says whether the permission holds.
 TXT
 if [ "$DRY_RUN" = 0 ] && interactive && confirm "Open those settings pages now?" n; then
   for pane in "${PRIVACY_PANES[@]}"; do open "x-apple.systempreferences:com.apple.preference.security?$pane"; done
