@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from teams_recorder.domain import (
-    Action, Analysis, CaptureStats, ClaimRef, DailyPlan, Meeting, StoryDrafts, Transcript, TranscriptHealth, UserStory, Verification,
+    Action, Analysis, CaptureStats, ClaimRef, DailyPlan, EnergyTimeline, Meeting, SpeakerLog, StoryDrafts, Transcript, TranscriptHealth,
+    UserStory, Verification,
 )
 
 
@@ -46,6 +47,7 @@ class ActiveRecording:
     meeting: Meeting
     process_handle: CaptureHandle
     mic_handle: CaptureHandle
+    speakers_handle: CaptureHandle | None = None   # the speaker observer; None when it did not start (reason in speakers.jsonl)
 
 
 @runtime_checkable
@@ -63,6 +65,30 @@ class MicCapture(Protocol):
     def start(self, device: str, out: Path, epoch: float | None = None) -> CaptureHandle: ...
     def stop(self, handle: CaptureHandle) -> Path: ...
     def is_running(self, handle: CaptureHandle) -> bool: ...
+
+
+@runtime_checkable
+class SpeakerObserver(Protocol):
+    def start(self, out: Path, epoch: float) -> CaptureHandle:
+        """Starts reading the Teams windows into `out` (JSON lines); `epoch` is the Unix time every event is relative to.
+        Raises SpeakersUnavailable(reason) when it cannot."""
+        ...
+    def stop(self, handle: CaptureHandle) -> Path: ...
+    def stop_stale(self) -> None:
+        """Stops an observer left running with no handle to name it (a start that crashed or was interrupted before its
+        handle was persisted); nothing when none is. Never raises for an absent one."""
+        ...
+    def is_running(self, handle: CaptureHandle) -> bool: ...
+    def problems(self) -> list[str]:
+        """What keeps it from running (binary missing, permission missing); empty when ready. Shown by `trec doctor`."""
+        ...
+
+
+@runtime_checkable
+class EnergyMeter(Protocol):
+    def measure(self, track: Path) -> EnergyTimeline:
+        """RMS level per fixed step over the whole track. Raises CaptureError on failure."""
+        ...
 
 
 @runtime_checkable
@@ -171,6 +197,21 @@ class MeetingRepository(Protocol):
     def load_capture_stats(self, meeting_id: str) -> CaptureStats | None:
         """teams-tap's counters for the Teams track; None when the recorder wrote none (Windows, or before 2026-10-14)."""
         ...
+    def write_speakers_unavailable(self, meeting_id: str, reason: str) -> None:
+        """Replaces speakers.jsonl atomically with the single line saying why the observer could not start."""
+        ...
+    def load_speaker_log(self, meeting_id: str, fallback_epoch: float, end: float) -> SpeakerLog | None:
+        """The observer's record; None when there is no speakers.jsonl, RepositoryError when it cannot be read. Times are
+        seconds since the epoch of its start event, or since `fallback_epoch` (the meeting's start) without one."""
+        ...
+    def save_energy(self, meeting_id: str, energy: dict[str, EnergyTimeline]) -> None: ...
+    def load_energy(self, meeting_id: str) -> dict[str, EnergyTimeline]:
+        """Levels per raw track name (tap.wav, mic.wav); {} when there is no energy.json, RepositoryError when unreadable."""
+        ...
+    def last_notice_day(self, key: str) -> date | None:
+        """The day a once-a-day notice last fired; None when it never did or the record cannot be read."""
+        ...
+    def save_notice_day(self, key: str, day: date) -> None: ...
     def save_transcript(self, meeting_id: str, transcript: Transcript) -> None: ...
     def load_transcript(self, meeting_id: str) -> Transcript: ...
     def save_analysis(self, meeting_id: str, analysis: Analysis) -> None: ...

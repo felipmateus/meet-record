@@ -5,14 +5,15 @@ import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from teams_recorder.application.ports import MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
+from teams_recorder.application.ports import Clock, MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
 from teams_recorder.application.use_cases.verification import VerifyAnalysis
-from teams_recorder.constants import Audio, Transcription
+from teams_recorder.constants import Audio, Speakers, Transcription
 from teams_recorder.domain import (
-    Analysis, CaptureStats, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, rate_mismatch, transcript_health,
+    Analysis, CaptureStats, RepositoryError, SpeakerReason, Transcript, TranscriptHealth, TranscriptionError, label_segments, rate_mismatch,
+    transcript_health, user_label,
 )
-from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
-from teams_recorder.messages import Err, Log, Notify
+from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK, TRANSCRIPT_JSON
+from teams_recorder.messages import Err, Log, Minutes, Notify
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ class TranscribeMeeting:
     domain/health.rate_mismatch) is garbled before whisper sees it, so its transcript is flagged in the
     health and the user is notified, instead of the minutes silently resting on hallucinations. The
     counters are read before transcribing, and such a track gets no retry: VAD cannot repair it.
+
+    Last, the segments are labelled with who said them (domain/speakers.py), from the observer's events and the
+    tracks' energy the recording left in the folder. The labels are advisory: a failure to compute them saves the
+    transcript as whisper made it. A meeting whose observer was wired but left no label, for a reason the user can
+    fix, raises one notification per calendar day (the day of the transcription, `clock`).
     """
 
     repo: MeetingRepository
@@ -48,6 +54,8 @@ class TranscribeMeeting:
     notifier: Notifier | None = None
     max_short_pad_share: float = Audio.MAX_SHORT_PAD_SHARE
     rate_check_min_seconds: float = Audio.RATE_CHECK_MIN_SECONDS
+    clock: Clock | None = None   # the day of the daily notice (clock.now().date() at transcription); None: no notice
+    user_name: str = ""          # [user] name: the label of the user's own lines when set
 
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
@@ -58,7 +66,9 @@ class TranscribeMeeting:
             transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration, allow_retry=mismatch is None)
             if transcript.health is not None and mismatch is not None:
                 transcript.health = replace(transcript.health, rate_mismatch=True, short_padding_share=mismatch.short_padding_share)
+            transcript = self._label(meeting_id, transcript, duration)
             self.repo.save_transcript(meeting_id, transcript)
+        self._notify_no_labels(meeting_id, transcript)
         health = transcript.health
         if health is not None and health.degraded and self.notifier is not None:
             gaps = Notify.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""
@@ -67,6 +77,45 @@ class TranscribeMeeting:
         if health is not None and health.rate_mismatch and self.notifier is not None:
             self.notifier.notify(Notify.RATE_MISMATCH, Notify.RATE_MISMATCH_BODY.format(meeting_id=meeting_id, share=health.short_padding_share))
         return transcript
+
+    def _label(self, meeting_id: str, transcript: Transcript, duration: float | None) -> Transcript:
+        """The transcript with its speaker labels; the transcript as it is when they cannot be computed."""
+        try:
+            started = self.repo.load_meta(meeting_id).started_at.timestamp()
+            end = duration or max((s.end for s in transcript.segments), default=0.0)
+            speaker_log = self.repo.load_speaker_log(meeting_id, started, end)
+            energy = self.repo.load_energy(meeting_id)
+            user = user_label(self.user_name, speaker_log, Minutes.SPEAKER_USER_FALLBACK)
+            labelled = label_segments(transcript, speaker_log, energy.get(MIC_TRACK), energy.get(TAP_TRACK), user)
+        except Exception as exc:  # noqa: BLE001 - advisory step that runs before the transcript is saved: whisper's work is never lost to it
+            log.warning(Log.SPEAKERS_LABEL_FAILED, meeting_id, exc)
+            return transcript
+        summary = labelled.labels
+        if summary is not None:
+            log.info(Log.SPEAKERS_LABELLED, meeting_id, summary.labelled, summary.eligible, ", ".join(labelled.speakers))  # literal-ok: list separator
+        return labelled
+
+    def _notify_no_labels(self, meeting_id: str, transcript: Transcript) -> None:
+        """The once-a-day notice for a wired observer that produced no label. `no-observer` (nothing was wired) is
+        silent and `no-match` only logs. The marker is written after the notification went out."""
+        summary = transcript.labels
+        if summary is None or summary.reason is None:
+            return
+        reason = SpeakerReason(summary.reason)
+        if reason is SpeakerReason.NO_OBSERVER:
+            return
+        body = Notify.NO_SPEAKER_LABELS_REASON.get(reason.value, reason.value)
+        log.warning(Log.NO_SPEAKER_LABELS, meeting_id, reason.value)
+        if not reason.notifies or self.clock is None or self.notifier is None:
+            return
+        today = self.clock.now().date()
+        try:
+            if self.repo.last_notice_day(Speakers.NOTICE_KEY) == today:
+                return
+            self.notifier.notify(Notify.NO_SPEAKER_LABELS, Notify.NO_SPEAKER_LABELS_BODY.format(meeting_id=meeting_id, reason=body))
+            self.repo.save_notice_day(Speakers.NOTICE_KEY, today)
+        except (RepositoryError, OSError) as exc:   # advisory: the transcript is saved already
+            log.warning(Log.SPEAKERS_NOTICE_FAILED, meeting_id, exc)
 
     def _rate_mismatch(self, meeting_id: str) -> CaptureStats | None:
         """The Teams track's counters when they show a sample-rate mismatch, else None. Read before transcribing,

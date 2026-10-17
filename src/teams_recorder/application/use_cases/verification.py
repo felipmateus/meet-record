@@ -1,4 +1,4 @@
-"""Claim verification after the analysis (tasks/prd-fidelity-guard, tasks 3.0 and 7.0)."""
+"""Claim verification after the analysis (docs/tasks/prd-fidelity-guard, tasks 3.0 and 7.0)."""
 from __future__ import annotations
 
 import logging

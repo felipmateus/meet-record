@@ -68,6 +68,7 @@ class Bin:
     LAUNCHCTL = "launchctl"
     SWIFT = "swift"
     TEAMS_TAP = "teams-tap"
+    TEAMS_SPEAKERS = "teams-speakers"   # the Accessibility reader of the Teams window (native/teams-speakers)
     POWERSHELL = "powershell"     # Windows PowerShell 5.1, present on every Windows 10/11
     SCHTASKS = "schtasks"
     DOTNET = "dotnet"
@@ -99,6 +100,8 @@ class Files:
     CAPTURE_LOG = "capture.log"
     LLM_USAGE_LOG = "llm_usage.jsonl"
     NATIVE_BINARY = Path("native") / "teams-tap" / ".build" / "release" / "teams-tap"
+    SPEAKERS_BINARY = Path("native") / "teams-speakers" / ".build" / "release" / "teams-speakers"
+    SPEAKERS_LOG = "speakers.log"                     # in the log dir: the helper's stderr
     BUILD_NATIVE_SCRIPT = "scripts/build-native.sh"
     DOWNLOAD_MODEL_SCRIPT = "scripts/download-model.sh"
     NATIVE_BINARY_WINDOWS = Path("native") / "teams-tap-win" / "bin" / "Release" / "net8.0" / "win-x64" / "publish" / "teams-tap.exe"
@@ -124,6 +127,7 @@ class Files:
     STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
     STORIES_JSON = "{day}.stories.json"
     STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
+    NOTICES_DIR = "notices"                          # in the data dir: one file per once-a-day notice, holding the day it last fired
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
@@ -139,6 +143,8 @@ def ggml_model_file(name: str) -> str:
 class Launchd:
     DAEMON_LABEL = f"local.{APP_NAME}.daemon"
     PLANNER_LABEL = f"local.{APP_NAME}.planner"
+    SPEAKERS_LABEL = f"local.{APP_NAME}.speakers"              # the helper, one job per recording (at most one at a time)
+    SPEAKERS_CHECK_LABEL = f"local.{APP_NAME}.speakers-check"  # its short-lived `--check` job, run by the doctor
     PATH = ":".join(["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
     THROTTLE_SECONDS = 10
     BOOTSTRAP_RETRIES = 10
@@ -147,6 +153,7 @@ class Launchd:
     BOOTOUT_POLL_SECONDS = 0.5
     PLANNER_WEEKDAYS = range(1, 6)  # Monday..Friday in StartCalendarInterval
     DOMAIN = "gui/{uid}"            # launchctl target domain for the logged-in user
+    TIMEOUT_EXIT = 124              # the exit code a launchctl call that timed out is reported with (the `timeout(1)` convention)
     DAEMON_ARGS = ("daemon",)       # `trec` arguments run by each agent
     PLANNER_ARGS = ("plan", "--purge")
 
@@ -204,7 +211,7 @@ class VerdictSupport(StrEnum):
 
 
 class Verify:
-    """Claim verification (tasks/prd-fidelity-guard, tasks 3.0 and 7.0). The patterns are data about meetings held in
+    """Claim verification (docs/tasks/prd-fidelity-guard, tasks 3.0 and 7.0). The patterns are data about meetings held in
     Brazilian Portuguese, matched against normalized text (lower case, no accents); taken from the prototype
     in scripts/fidelity_eval.py (SENSITIVE, the participant check), measured in evaluation §14.3."""
 
@@ -227,7 +234,7 @@ class Verify:
 
 
 class Transcription:
-    """Defaults of [transcription] that guard against whisper hallucination loops (tasks/prd-fidelity-guard)."""
+    """Defaults of [transcription] that guard against whisper hallucination loops (docs/tasks/prd-fidelity-guard)."""
 
     # whisper -mc: text tokens of the previous window kept as context. 0 = none, so a hallucinated line
     # cannot carry over into the next window: on a real 86-minute meeting it removed a loop that covered
@@ -247,6 +254,10 @@ class Parse:
     FFMPEG_MAX_VOLUME = r"max_volume: (-?[\d.]+) dB"
     LAUNCHCTL_PID = "pid = "
     LAUNCHCTL_STATE = "state = "
+    LAUNCHCTL_LAST_EXIT = "last exit code = "    # "(never exited)" while the job has not exited
+    LAUNCHCTL_RUNNING = "running"                # the `state` of a job whose process is alive
+    ENERGY_TIME = r"pts_time:(\d+(?:\.\d+)?)"     # ametadata prints integers without decimals (pts_time:1)
+    ENERGY_LEVEL = r"lavfi\.astats\.Overall\.RMS_level=(-?inf|-?\d+(?:\.\d+)?)"
     OSASCRIPT_NOTIFY = 'display notification "{body}" with title "{title}" subtitle "{subtitle}"'
     OSASCRIPT_CONFIRM = (
         'display dialog "{body}" with title "{title}" buttons {{"{discard}", "{keep}"}} '
@@ -332,6 +343,7 @@ class Proc:
     SPAWN_RETRIES = 12
     SPAWN_RETRY_DELAY = 0.5
     STOP_TIMEOUT = 10.0
+    STOP_POLL = 0.1                 # seconds between the checks that a stopped process is gone
     WARMUP_TIMEOUT = 15.0
     NOTIFY_TIMEOUT = 5.0
     WORKER_JOIN_TIMEOUT = 30.0      # daemon waits this long for post-processing threads on shutdown
@@ -366,6 +378,32 @@ class BacklogMd:
     GIT_IGNORED, GIT_NOT_IGNORED = 0, 1    # `git check-ignore -q` exit codes; anything else is an error
     TIMEOUT = 60.0
     TAIL_LINES = 3
+
+
+class Speakers:
+    """Speaker attribution from the Teams window (docs/tasks/speaker-attribution)."""
+
+    NOTICE_KEY = "speaker-labels"   # the once-a-day "no labels" notification, under Files.NOTICES_DIR
+    EVENTS_VERSION = 1              # version of the speakers.jsonl format the helper writes
+    ENABLED = True                  # [speakers] enabled
+    INTERVAL = 0.5                  # seconds between the helper's passes over the Teams windows (--interval)
+    ENERGY_STEP = 0.1               # seconds per level of an energy timeline (asetnsamples n=1600 at 16 kHz)
+    ENERGY_FILTER = ("aresample=16000,asetnsamples=n=1600,astats=metadata=1:reset=1,"
+                     "ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=-")
+    STARTUP_GRACE = 1.5             # seconds the helper's job is watched after bootstrap; an exit inside it fails the start
+    STARTUP_POLL = 0.1              # seconds between the `launchctl print` reads of that watch
+    CHECK_TIMEOUT = 10.0            # seconds the `--check` job gets to exit
+    CHECK_POLL = 0.1
+    STOP_TIMEOUT = 10.0             # seconds the helper gets to leave after its job was booted out
+    EXIT_PERMISSION = 3             # the helper's exit code when the Accessibility permission is missing
+    EXIT_GRANTED = 0
+    TAIL_LINES = 3                  # lines of the helper's log quoted in a start failure
+    WINDOW_LOST = "lost"            # `window` event states that close the window's open turns (the helper writes `found` too)
+    WINDOW_FROZEN = "frozen"
+    HEARTBEAT_EVENT = "heartbeat"   # the helper's proof of life, every 5 s
+    MAX_LEVEL_DB = 100.0            # a level above this is a damaged energy.json (real RMS levels never exceed a few dB over 0)
+    LAUNCHCTL_PRINT_TIMEOUT = 5.0   # seconds a `launchctl print` may take: the daemon asks on every tick, so it must stay short
+    LAUNCHCTL_TIMEOUT = 20.0        # seconds the other launchctl calls get (bootout waits for the helper to leave)
 
 
 class Stories:
