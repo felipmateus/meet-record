@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. Humans: see `README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` (requirements + architecture) and `prd/` (product requirements).
+Guidance for coding agents working in this repository. Humans: see `README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` (requirements + architecture) and `docs/prd/` (product requirements).
 
 ## What this is
 
@@ -106,7 +106,7 @@ Key invariants:
 2. Implement it in `adapters/outbound/<capability>_<tech>.py`. Translate every external failure into a domain error (`CaptureError`, `TranscriptionError`, `AnalysisError`, `RepositoryError`) with a message that tells the user what to do. Keep SDK/CLI shapes in one method (e.g. `command()` / `_request()`) so tests can inspect them.
 3. Add a fake in `tests/fakes/__init__.py` (in-memory, records calls) and unit tests for the adapter with a scripted stand-in if it spawns processes (`tests/fixtures/fake_*.py`, wait for a readiness file).
 4. Register it in `container.py` (`build_container` or a `build_<x>()` helper) and, if selectable, add the switch to `config.toml` + `config.Settings` with a test in `tests/unit/test_config.py`.
-5. Surface it in `trec doctor` when it depends on an external binary or model, update `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 notes and the relevant `prd/` page.
+5. Surface it in `trec doctor` when it depends on an external binary or model, update `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 notes and the relevant `docs/prd/` page.
 
 ## Working conventions
 
@@ -115,7 +115,7 @@ Key invariants:
 - Commits are grouped in **waves** per phase, one commit per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`), imperative English messages with a body explaining the decision. See `docs/COMMITS.md`. Each commit must leave the tree importable.
 - Never commit `.env`, `data/`, `backlog/`, `backlog.config.yml`, `native/teams-tap/.build/`, `native/teams-tap-win/bin|obj/` or `.venv/` (already ignored). `backlog/` is the user's real board of stories built from meetings: never publish test stories there; tests use throwaway boards. `.env` holds `ANTHROPIC_API_KEY`; never read or print its value.
 - Ask before: installing/uninstalling/restarting the LaunchAgent on the user's Mac, deleting anything under `data/recordings`, changing macOS permissions, or running tests that spend API credit. The daemon is installed and running on the development machine and records the user's real meetings.
-- Keep `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase status + notes) and `prd/` in sync when a phase or a behavior changes.
+- Keep `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase status + notes) and `docs/prd/` in sync when a phase or a behavior changes.
 - When a skill is run, the organization requires a `RUN_LOG-<user>-<date>.md` in `docs/run-logs/` listing questions asked and answers given.
 
 ## Environment quirks (dev Mac)

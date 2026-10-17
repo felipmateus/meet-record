@@ -369,7 +369,7 @@ Operated through the CLI only (there is no UI): `trec doctor` (helper build and 
 
 - Added: `[speakers] enabled` (default `true`, bool). Read in `config.load_settings`; `Settings.speakers_enabled`. Unknown or non-bool values follow the existing `bool(...)` coercion of the other flags.
 - Changed: none. Removed: none.
-- Documented in `config.toml` (comment block), README (permissions and configuration tables), `prd/pages/01-manual-recording.md` and `02-transcription.md`.
+- Documented in `config.toml` (comment block), README (permissions and configuration tables), `docs/prd/pages/01-manual-recording.md` and `02-transcription.md`.
 - Tests: `tests/unit/test_config.py` (default and override).
 
 ## Testing Approach
@@ -463,7 +463,7 @@ Slices for the task breakdown: slice 1 = steps 0–5 minus the roster/title part
 - `src/teams_recorder/application/use_cases/verification.py:30-72` — `VerifyAnalysis`: the code checks only lower a verdict; the roster reaches the verifier through the transcript.
 - `src/teams_recorder/domain/health.py:42-45` — `is_speech`, the eligibility predicate, moved to `models.py` and re-exported here (health imports models, so the share cannot import health).
 - `tests/unit/test_verifier_claude.py:151-166` and `scripts/fidelity_eval.py` (`VERIFY_SYSTEM`) — the pin that the shipped verifier prompt equals the measured prototype up to two replacements; the label sentence becomes the third (the §14.3 numbers predate it).
-- `prd/appendix/integrations.md:21` — records that the Microphone grant went to the daemon's Python, the evidence behind task 0.
+- `docs/prd/appendix/integrations.md:21` — records that the Microphone grant went to the daemon's Python, the evidence behind task 0.
 - `src/teams_recorder/adapters/outbound/process_control.py:48-66` — `spawn` raises on an exit inside the startup grace; the observer adapter runs `--check` before spawning so an early exit is `start-failed`.
 - `src/teams_recorder/adapters/outbound/llm_schema.py:116-127` — `build_user_message`: the roster header goes here.
 - `src/teams_recorder/adapters/outbound/verifier_claude.py:77-103` — `transcript_for`: renders lines with labels.
@@ -474,7 +474,7 @@ Slices for the task breakdown: slice 1 = steps 0–5 minus the roster/title part
 - `src/teams_recorder/config.py:60-110,220-290` — `Settings` and `load_settings` for `[speakers]`.
 - `src/teams_recorder/constants.py`, `src/teams_recorder/messages.py` — where every new identifier and text goes (`Speakers`, `Files`, `Bin`, `Err`, `Log`, `Cli`, `Notify`, `Prompt`, `Minutes`).
 - `tests/fakes/__init__.py`, `tests/fixtures/fake_recorder.py`, `tests/unit/test_recording_use_cases.py`, `tests/unit/test_processing_use_cases.py`, `tests/unit/test_llm_claude.py:149-160`, `tests/unit/test_no_hardcoded_strings.py` — the fakes, stand-ins and pinned tests to extend.
-- `scripts/install.sh:20-22,228-240`, `README.md:196-205`, `AGENTS.md` (ports table, commands), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10, `prd/pages/01-manual-recording.md`, `prd/pages/02-transcription.md` — documentation targets.
+- `scripts/install.sh:20-22,228-240`, `README.md:196-205`, `AGENTS.md` (ports table, commands), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10, `docs/prd/pages/01-manual-recording.md`, `docs/prd/pages/02-transcription.md` — documentation targets.
 
 ### External References
 
