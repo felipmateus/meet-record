@@ -6,7 +6,7 @@ A loop is a line repeated close together: `LOOP_REPEATS` copies within `LOOP_WIN
 segments, which also catches loops cycling through several lines (up to 7 with these values).
 Counting repeats over the whole meeting instead would also count natural fillers ("Entendeu?", "Tá"):
 they reached 9.8% of the segments of a healthy real meeting, against 0% with the window
-(tasks/prd-fidelity-guard, task 1.0).
+(docs/tasks/prd-fidelity-guard, task 1.0).
 
 A track recorded at the wrong sample rate is broken before whisper sees it: when the output device ran at
 16 kHz (a Bluetooth headset in a call) and teams-tap wrote its buffers as 48 kHz, the writer fell behind the
@@ -19,13 +19,12 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from .models import CaptureStats, Segment, Transcript, TranscriptHealth
+from .models import CaptureStats, Segment, Transcript, TranscriptHealth, is_speech  # noqa: F401 - is_speech re-exported
 
 LOOP_REPEATS = 5   # copies of the same text that make a loop...
 LOOP_WINDOW = 30   # ...within this many consecutive segments
 
 _WORD = re.compile(r"\w+")
-_ANNOTATION = re.compile(r"^[\[(*♪].*[\])*♪]$")   # whisper's non-speech markers: [BLANK_AUDIO], (música), *risos*, ♪
 
 
 def _key(text: str) -> str:
@@ -37,12 +36,6 @@ def _key(text: str) -> str:
             words = words[:period]
             break
     return " ".join(words) or text.strip()
-
-
-def is_speech(text: str) -> bool:
-    """Whether a segment carries spoken words: not empty, and not a non-speech marker such as [BLANK_AUDIO]."""
-    stripped = text.strip()
-    return bool(_WORD.search(stripped)) and not _ANNOTATION.match(stripped)
 
 
 def loop_flags(segments: list[Segment], repeats: int = LOOP_REPEATS, window: int = LOOP_WINDOW) -> list[bool]:

@@ -9,6 +9,14 @@ class CaptureError(TeamsRecorderError):
     """Failed to start, stop or mix an audio capture."""
 
 
+class SpeakersUnavailable(CaptureError):
+    """The speaker observer cannot run; `reason` is a SpeakerReason value (binary-missing, permission-missing, start-failed)."""
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(detail or reason)
+        self.reason = reason
+
+
 class TranscriptionError(TeamsRecorderError):
     """Audio transcription failed."""
 

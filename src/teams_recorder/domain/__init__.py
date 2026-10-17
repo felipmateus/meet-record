@@ -4,6 +4,7 @@ from .errors import (
     MeetingNotFound,
     PublishError,
     RepositoryError,
+    SpeakersUnavailable,
     TeamsRecorderError,
     TranscriptionError,
 )
@@ -21,6 +22,7 @@ from .models import (
     DailyPlan,
     Deadline,
     Decision,
+    LabelSummary,
     Meeting,
     MeetingType,
     Priority,
@@ -43,17 +45,25 @@ from .models import (
     strongest_priority,
     clock_time,
     task_card,
+    is_speech,
+    timestamped_line,
 )
 from .health import loop_flags, rate_mismatch, transcript_health
+from .speakers import (
+    SILENCE_DB, EnergyTimeline, LabelRules, SpeakerEvent, SpeakerLog, SpeakerReason, SpeakerTurn, label_segments, no_label_reason,
+    turns_from_events, user_label, window_subject,
+)
 from .verification import checked_criteria, claim_refs, claims, combine, said_at, unconfirmed, unconfirmed_reason, verifications, normalized, participant_heard, sensitive_data, with_verifications
 from .status import MeetingStatus, derive_status, next_step
 
 __all__ = [
     "Claim", "ClaimKind", "ClaimRef", "Criterion", "SUGGESTION", "checked_criteria", "said_at", "claim_refs", "claims", "clock_time", "combine", "unconfirmed", "unconfirmed_reason", "verifications", "normalized", "participant_heard", "sensitive_data", "with_verifications",
     "Action", "ActionKind", "ActionRoute", "ActionStatus", "Analysis", "DailyPlan", "Deadline", "Decision", "Meeting", "MeetingType", "Priority", "Topic",
-    "Segment", "Transcript", "TranscriptHealth", "CaptureStats", "loop_flags", "rate_mismatch", "transcript_health", "meeting_id_for", "merge_open_actions",
+    "Segment", "Transcript", "TranscriptHealth", "LabelSummary", "is_speech", "timestamped_line",
+    "SILENCE_DB", "EnergyTimeline", "LabelRules", "SpeakerEvent", "SpeakerLog", "SpeakerReason", "SpeakerTurn", "label_segments",
+    "no_label_reason", "turns_from_events", "user_label", "window_subject", "CaptureStats", "loop_flags", "rate_mismatch", "transcript_health", "meeting_id_for", "merge_open_actions",
     "Publication", "SkippedAction", "StoryDrafts", "UserStory", "Verification", "VerificationStatus", "earliest_due", "route_of", "story_kind", "strongest_priority", "task_card",
     "MeetingStatus", "derive_status", "next_step",
-    "AnalysisError", "CaptureError", "MeetingNotFound", "PublishError", "RepositoryError",
+    "AnalysisError", "CaptureError", "MeetingNotFound", "PublishError", "RepositoryError", "SpeakersUnavailable",
     "TeamsRecorderError", "TranscriptionError",
 ]
