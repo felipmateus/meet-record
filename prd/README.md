@@ -18,6 +18,7 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | Transcription | transcribe | Convert the audio into timestamped text, locally | Delivered (phase 3) |
 | Analysis | analyze | Extract summary, decisions, actions, deadlines and questions from the transcript | Delivered (phase 4) |
 | Automation | daemon, agent | Detect Teams calls and chain recording → transcription → analysis with no intervention | Delivered (phase 5) |
+| Speaker labels | (inside recording and transcription) | Read who is speaking from the Teams window and label each transcript line with the person's name; the user's own lines from the two tracks | Delivered on macOS (2026-10-17); gates on real meetings pending |
 | Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
 | Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
 | User stories | stories, publish | Draft user stories from the plan's new actions, following the user's guide, and publish them to a board for review | Delivered: drafts and the Backlog.md board; publishing by hand until the user approves the stories, then automatic (GitHub and Azure later) |
@@ -45,13 +46,13 @@ Appendices: [state and enumeration dictionary](./appendix/enum-dictionary.md) ·
 There is no database. Each meeting is a folder at `<data_dir>/recordings/<id>/` (see the data layout for where `<data_dir>` lives), and the meeting's state is derived from which files exist in it (see the dictionary). Any step can be repeated from the existing files; failures are recorded in `error.txt` inside the meeting folder and do not affect other meetings.
 
 ### Meeting identity
-The id is the start instant in the format `YYYY-MM-DD_HH-MM-SS`. There is no automatic title; the `title` field is only filled when provided manually through `trec start --title`. `[TBC]` Calendar integration to name meetings was dropped in the requirements interview (decision 9), but the field exists in the model.
+The id is the start instant in the format `YYYY-MM-DD_HH-MM-SS`. The `title` field is filled through `trec start --title`, or, for a recording with none, with the meeting subject the speaker observer read from the Teams window when the recording stops. `[TBC]` Calendar integration to name meetings was dropped in the requirements interview (decision 9), but the field exists in the model.
 
 ### Configuration
 `config.toml` at the project root, with no secrets; `.env` holding the API key (git-ignored, permission 600 recommended). Environment variables override specific points: `TEAMS_RECORDER_DIR` (project folder), `TREC_LLM_PROVIDER` (api | claude-code), `TREC_TEAMS_PROCESS` (name of the watched process; used in tests).
 
 ### macOS permissions
-Two permissions are required and requested on the first recording: **Microphone** and **Screen & System Audio Recording**. Without the second, the Teams track comes out silent and the mix proceeds with the microphone only.
+Two permissions are required and requested on the first recording: **Microphone** and **Screen & System Audio Recording**. Without the second, the Teams track comes out silent and the mix proceeds with the microphone only. A third, **Accessibility**, is optional: it lets `teams-speakers` read the Teams window for speaker labels. macOS does not ask for it on its own (a background job's request creates no entry): the user adds `native/teams-speakers/.build/release/teams-speakers` to the list with the **+** button, and `trec doctor` checks it. Without it recordings are unchanged and only the user's own lines are labelled.
 
 ### Interaction patterns
 - Processing commands (`transcribe`, `analyze`) with no argument act on **all** meetings pending that step and keep going even when one fails; they exit with code 1 if any failed.
@@ -74,8 +75,9 @@ Analysis and plan content (summaries, actions, the daily Markdown plan) is produ
 | 1–5 | Recording, transcription, analysis, automation, operations | Delivered and validated with real Teams calls on 2026-10-05 |
 | 6 | Daily planner (`trec plan`), scheduling at 6 pm, open-action updates | Delivered 2026-10-05; validation with a real meeting pending |
 | 7 | `install.sh`, `trec status` with the month's spend, installation README | Pending |
+| — | Speaker labels from the Teams window (`teams-speakers`, track energy, labelling at transcription) | Implemented 2026-10-17; gates G1–G5 on real meetings pending (`docs/tasks/speaker-attribution/prd.md`) |
 
 ## 6. Out of scope and user responsibilities
-- Speaker identification (diarization): not implemented; the model infers speakers from context.
+- Voice identification (a voiceprint per person) and voice clustering (diarization): not implemented, and not planned: the people in the user's meetings change constantly. Speaker attribution from the Teams window **ships on macOS** (2026-10-17): the names come from the meeting window, the user's lines from the microphone track; where the window cannot be read (no permission, covered window, Windows) the lines stay unlabelled and the model infers speakers from context as before. Windows parity (UI Automation) is a separate, later task.
 - Notifying participants and complying with company policy and LGPD (Brazil's data protection law): the user's responsibility. The project offers a sensitive-term filter only as a future improvement (risk R5 in `docs/REQUIREMENTS-AND-ARCHITECTURE.md`).
 - Integration with Microsoft To Do, Obsidian or the calendar: deferred until after phase 7.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic meeting corpus for the LLM wiki evaluation (tasks/prd-llm-wiki/evaluation.md).
+"""Synthetic meeting corpus for the LLM wiki evaluation (docs/tasks/prd-llm-wiki/evaluation.md).
 
 Runs the whole chain on fictional meetings, from audio to scored answers:
 

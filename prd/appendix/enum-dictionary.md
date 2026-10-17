@@ -17,7 +17,9 @@ Note: `audio.m4a` may have been deleted by retention without changing `transcrib
 | `meta.json` | always | id, start, end, target PID, title |
 | `tap.wav`, `mic.wav` | only during recording | raw tracks (deleted after the mix) |
 | `audio.m4a` | after `stop` | mono AAC 48 kHz mix |
-| `transcript.json`, `transcript.txt` | after `transcribe` | segments / timestamped text |
+| `speakers.jsonl` | during recording (macOS, observer wired) | who spoke when, names seen, meeting subject; not part of the status |
+| `energy.json` | after `stop` | level of each raw track per 100 ms; not part of the status |
+| `transcript.json`, `transcript.txt` | after `transcribe` | segments (with `speaker` when known) / timestamped text, plus the labelling summary |
 | `analysis.json` | after `analyze` | structured record |
 | `error.txt` | after a failure | `step: message` |
 | `.lock` | during a step | PID of the process doing the processing |

@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository. Humans: see `README.md`, 
 
 ## What this is
 
-`teams-recorder` is a macOS (and Windows, untested on real hardware) background tool that records Microsoft Teams calls (Teams audio + microphone), transcribes them locally with whisper.cpp, extracts decisions/actions with Claude, and will build a daily plan. Python 3.11 orchestrates; a small Swift binary (`native/teams-tap`) does the Core Audio capture, and a C# binary (`native/teams-tap-win`) does the WASAPI capture on Windows. `Settings.platform` (from `sys.platform`) makes `container.py` pick the macOS or Windows adapters. There is no database: **the state of a meeting is the set of files in its folder** (`src/teams_recorder/domain/status.py`).
+`teams-recorder` is a macOS (and Windows, untested on real hardware) background tool that records Microsoft Teams calls (Teams audio + microphone), transcribes them locally with whisper.cpp, extracts decisions/actions with Claude, and will build a daily plan. Python 3.11 orchestrates; a small Swift binary (`native/teams-tap`) does the Core Audio capture, a second one (`native/teams-speakers`) reads who is speaking from the Teams window through the Accessibility API (macOS), and a C# binary (`native/teams-tap-win`) does the WASAPI capture on Windows. `Settings.platform` (from `sys.platform`) makes `container.py` pick the macOS or Windows adapters. There is no database: **the state of a meeting is the set of files in its folder** (`src/teams_recorder/domain/status.py`).
 
 ## Commands
 
@@ -26,7 +26,7 @@ scripts/fidelity_eval.py <setup|oracle|inject|defend|report|gate|stories|verify-
 scripts/install.sh [--dry-run]         # idempotent installer (deps, .venv, teams-tap, model, config, LaunchAgents); install.command wraps it for Finder
 scripts/uninstall.sh [--all]           # removes this copy's LaunchAgents (+ .venv/build with --all); never data
 scripts\install.ps1 / uninstall.ps1    # Windows counterparts (install.cmd wraps the installer); config edits go through scripts/config_tool.py
-scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap
+scripts/build-native.sh                # swift build -c release → native/teams-tap/.build/release/teams-tap and native/teams-speakers/.build/release/teams-speakers (refuses a helper source that sets an accessibility attribute)
 scripts/build-native-windows.sh        # dotnet publish → native/teams-tap-win/bin/Release/net8.0/win-x64/publish/teams-tap.exe (Windows port, same CLI; untested)
 scripts/download-model.sh [name]       # ggml models into data/models (default large-v3-turbo-q5_0; silero-v5.1.2 for VAD)
 scripts/recover-rate-mismatch.sh <meeting dir>   # audio.recovered.m4a for a meeting whose Teams track was recorded at the wrong rate (never touches audio.m4a)
@@ -38,10 +38,12 @@ trec daemon --once                     # one detector reading
 trec status                            # also prints the data dir (paths.data_dir in config.toml; currently ./data)
 trec agent install|restart|status|uninstall   # LaunchAgent local.teams-recorder.daemon
 native/teams-tap/.build/release/teams-tap --list   # which processes are Core Audio clients right now
+native/teams-speakers/.build/release/teams-speakers --check   # Accessibility permission of the context it runs from (a terminal's grant, not the daemon's: trec doctor checks it as the helper's own launchd job)
 ```
 
 Rules that bite:
-- **After changing Python code, run `trec agent restart`** or the running daemon keeps the old code. The Swift binary is re-spawned per recording, so a rebuild is enough.
+- **After changing Python code, run `trec agent restart`** or the running daemon keeps the old code. The Swift binaries are re-spawned per recording, so a rebuild is enough. The speaker observer and the energy measurement are Python code in the daemon: they take effect only after `trec agent restart`, which needs the user's approval (a recording may be in progress).
+- `teams-speakers` needs the **Accessibility** permission on the helper itself: the daemon runs it as its own launchd job (`local.teams-recorder.speakers`), because a helper spawned by the daemon's Python is judged by the Python's grant. macOS creates no list entry for a background job's request, so the user adds `native/teams-speakers/.build/release/teams-speakers` with the **+** button, and a rebuild (ad-hoc signature) may require adding it again. Changing it falls under "ask before changing macOS permissions" below; tests use `tests/fixtures/fake_speakers.py` and a fake `launchctl`, never the real launchd.
 - Do not run two pytest sessions at once; subprocess-based tests time out under contention.
 - Windows adapters must import and be testable on macOS: keep `ctypes`/`winreg` calls under `if sys.platform == "win32":` and inject the OS call (reader, message box, runner, kill) so tests fake it. Nothing Windows-specific has run on real Windows yet; say so when reporting.
 - Env overrides for testing: `TEAMS_RECORDER_DIR` (project dir), `TREC_LLM_PROVIDER` (`api`|`claude-code`), `TREC_TEAMS_PROCESS` (process name the detector watches; `tests/fixtures/fake_call.py` simulates a Teams call under the name `python3.11`).
@@ -66,6 +68,8 @@ Ports and their adapters (`application/ports.py`):
 | `MeetingRepository` | `repository_fs.FsMeetingRepository` (folder per meeting, atomic writes, `.lock`, `current_recording.json`) |
 | `ProcessAudioCapture` | `capture_coreaudio.CoreAudioTapCapture` → `teams-tap --pid` (target + descendant audio clients; Teams' main process emits no audio). Windows: `capture_wasapi.WasapiTapCapture` → `teams-tap.exe --pid --stop-file` |
 | `MicCapture` | `capture_mic_coreaudio` (default, `teams-tap --mic`, survives device reconfiguration) or `capture_mic_ffmpeg`. Windows: `capture_wasapi.WasapiMicCapture` |
+| `SpeakerObserver` | `speakers_ax.AxSpeakerObserver` → `teams-speakers --out speakers.jsonl --epoch T`, run as its own launchd job per recording (`start` takes about 1.5 s: the startup grace, then the job's state decides; exit 3 = `permission-missing`; `stop` boots the job out, and `stop_stale()` does the same without a handle for a job left by a start that crashed inside the grace; every `launchctl` call has a timeout; `problems()` runs `--check` as a short-lived job for `trec doctor`). Raises `SpeakersUnavailable(reason)` (`binary-missing`, `permission-missing`, `start-failed`), which `StartRecording` records as one `unavailable` line in `speakers.jsonl` and never raises. `None` when `[speakers] enabled = false` and on Windows. Labelling (`domain/speakers.py`, pure, thresholds in `LabelRules`) runs in `TranscribeMeeting` from `speakers.jsonl` + `energy.json`; every transcript carries a `speakers` summary with the reason when nothing was labelled |
+| `EnergyMeter` | `energy_ffmpeg.FfmpegEnergyMeter` (RMS per 100 ms of a raw track; `StopRecording.finalize` saves both tracks as `energy.json` before deleting them, all or nothing, and a failure never blocks mixing; the user's own lines are labelled from it) |
 | `AudioMixer` | `mixer_ffmpeg` (per-track highpass+afftdn, amix, loudnorm, limiter; keeps raw tracks in `debug/` on anomaly) |
 | `Transcriber` | `transcriber_whispercpp` (ffmpeg → 16 kHz WAV → whisper-cli `-mc 0 -oj`; optional Silero VAD). A second instance (`container.build_retry_transcriber`: `-mc 0` + VAD) retranscribes a transcript `domain/health.py` finds degraded by a hallucination loop, except when the Teams track's capture counters show a wrong sample rate (no second pass can repair that audio) |
 | `MeetingAnalyzer` | `llm_claude.ClaudeAnalyzer` over a `StructuredTransport`: `llm_transport.ApiTransport` (structured output, cached system prompt, server-side fallback) or `llm_transport.ClaudeCodeTransport` (`claude -p`, subscription), chosen by `llm.provider`; the same transport instance serves the planner |
