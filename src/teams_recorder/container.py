@@ -14,6 +14,7 @@ from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfir
 from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecordingConfirmation
 from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
 from teams_recorder.adapters.outbound.disk_space import DataDirDiskSpace
+from teams_recorder.adapters.outbound.energy_ffmpeg import FfmpegEnergyMeter
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
@@ -24,6 +25,7 @@ from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
+from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
 from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
@@ -35,6 +37,7 @@ from teams_recorder.application.ports import (
     ClaimVerifier,
     Clock,
     DiskSpace,
+    EnergyMeter,
     MeetingAnalyzer,
     MeetingRepository,
     MicCapture,
@@ -43,6 +46,7 @@ from teams_recorder.application.ports import (
     Planner,
     ProcessAudioCapture,
     RecordingConfirmation,
+    SpeakerObserver,
     StoryPublisher,
     StoryRenderer,
     StoryWriter,
@@ -71,6 +75,10 @@ def teams_tap_binary(project_dir: Path, platform: Platform = Platform.MACOS) -> 
     return project_dir / (Files.NATIVE_BINARY_WINDOWS if platform is Platform.WINDOWS else Files.NATIVE_BINARY)
 
 
+def teams_speakers_binary(project_dir: Path) -> Path:
+    return project_dir / Files.SPEAKERS_BINARY
+
+
 @dataclass
 class _PlatformAdapters:
     notifier: Notifier
@@ -78,6 +86,7 @@ class _PlatformAdapters:
     mic_capture: MicCapture
     detector: CallDetector
     confirmation: RecordingConfirmation | None
+    speakers: SpeakerObserver | None   # None: Windows, or [speakers] enabled = false
 
 
 @dataclass
@@ -101,20 +110,22 @@ class Container:
     disk: DiskSpace | None = None
     retry_transcriber: Transcriber | None = None   # anti-loop pass for a degraded transcript; None: no retry
     verifier: ClaimVerifier | None = None   # checks each analysis's claims against the transcript; None: [verification] off (code checks only)
+    speakers: SpeakerObserver | None = None   # reads who speaks from the Teams window; None: Windows, or [speakers] enabled = false
+    energy: EnergyMeter | None = None   # level of each raw track per 100 ms, for the user's own lines
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
-                              self.settings.raw_bytes_per_hour)
+                              self.settings.raw_bytes_per_hour, self.speakers)
 
     def stop_recording(self) -> StopRecording:
-        return StopRecording(self.repo, self.process_capture, self.mic_capture, self.mixer, self.notifier, self.clock)
+        return StopRecording(self.repo, self.process_capture, self.mic_capture, self.mixer, self.notifier, self.clock, self.speakers, self.energy)
 
     def cancel_recording(self) -> CancelRecording:
-        return CancelRecording(self.repo, self.process_capture, self.mic_capture, self.notifier)
+        return CancelRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.speakers)
 
     def transcribe_meeting(self) -> TranscribeMeeting:
         return TranscribeMeeting(self.repo, self.transcriber, self.settings.language, self.settings.max_loop_share,
-                                 self.retry_transcriber, self.notifier)
+                                 self.retry_transcriber, self.notifier, clock=self.clock, user_name=self.settings.user_name)
 
     def analyze_meeting(self) -> AnalyzeMeeting:
         # Without a verifier ([verification] off) the two code checks still run: they need no model call (PRD decision 11).
@@ -158,7 +169,15 @@ def _macos_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
         mic_capture=mic_capture,
         detector=PmsetCallDetector(settings.teams_process_name),
         confirmation=DialogRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
+        speakers=build_speaker_observer(settings),
     )
+
+
+def build_speaker_observer(settings: Settings) -> SpeakerObserver | None:
+    """The helper's observer; None when [speakers] enabled is false. macOS only: the Windows adapters pass None."""
+    if not settings.speakers_enabled:
+        return None
+    return AxSpeakerObserver(teams_speakers_binary(settings.project_dir), settings.data_dir / Files.RUN_DIR, log_path=settings.speakers_log)
 
 
 def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
@@ -170,6 +189,7 @@ def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
         mic_capture=WasapiMicCapture(binary, stop_dir, log_path=settings.capture_log, bit_depth=settings.bit_depth),   # audio.mic_backend is macOS-only
         detector=MicUsageCallDetector(settings.teams_process_name),
         confirmation=MessageBoxRecordingConfirmation(settings.confirm_timeout_seconds) if settings.confirm_recording and not headless else None,
+        speakers=None,   # the helper reads the macOS Accessibility API
     )
 
 
@@ -202,6 +222,8 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         story_publishers=build_story_publishers(settings),
         confirmation=platform.confirmation,
         disk=DataDirDiskSpace(settings.data_dir),
+        speakers=platform.speakers,
+        energy=FfmpegEnergyMeter(ffmpeg=ffmpeg),
     )
 
 

@@ -17,9 +17,10 @@ import threading
 import time
 from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Protocol
 
-from teams_recorder.application.ports import ActiveRecording, CallState, ConfirmAnswer
+from teams_recorder.application.ports import ActiveRecording, CallDetector, CallState, CaptureHandle, ConfirmAnswer
 from teams_recorder.constants import Audio, Confirm, Detector, Proc
 from teams_recorder.container import Container
 from teams_recorder.domain import Meeting, TeamsRecorderError, derive_status
@@ -27,6 +28,10 @@ from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
 from teams_recorder.messages import Err, Log, Notify
 
 log = logging.getLogger(__name__)
+
+
+class _Watchable(Protocol):
+    def is_running(self, handle: CaptureHandle) -> bool: ...
 
 
 @dataclass
@@ -91,6 +96,11 @@ class Daemon:
         if self.active is not None:
             self._watch_capturers()
             self._watch_disk()
+        self._handle_state(detector, state)
+        if self.active is not None:
+            self._watch_observer()   # last: whatever it does or costs, the call state above was already handled
+
+    def _handle_state(self, detector: CallDetector, state: CallState) -> None:
         if state == CallState.UNKNOWN:
             return  # reading failed; counts for neither side
         if state == CallState.IN_CALL:
@@ -122,17 +132,39 @@ class Daemon:
     def _watch_capturers(self) -> None:
         """Warn (once per capturer) if a capture process died during the call."""
         assert self.active is not None
-        checks = (
-            (Log.CAPTURER_TAP, self.container.process_capture, self.active.process_handle),
-            (Log.CAPTURER_MIC, self.container.mic_capture, self.active.mic_handle),
-        )
-        for name, capture, handle in checks:
-            key = f"{self.active.meeting.id}:{name}"
-            if key in self.warned_dead:
-                continue
-            if not capture.is_running(handle):
+        settings = self.container.settings
+        checks: list[tuple[str, _Watchable, CaptureHandle, Path]] = [
+            (Log.CAPTURER_TAP, self.container.process_capture, self.active.process_handle, settings.capture_log),
+            (Log.CAPTURER_MIC, self.container.mic_capture, self.active.mic_handle, settings.capture_log),
+        ]
+        for name, capture, handle, log_path in checks:
+            self._warn_if_dead(name, capture, handle, log_path)
+
+    def _watch_observer(self) -> None:
+        """Warn (once) if the speaker observer died during the call. The observer is an extra: its check asks launchd (a
+        subprocess), so nothing it raises may reach the tick, which has the call's end to detect. An error is logged once per
+        call and the check is tried again on the next tick."""
+        assert self.active is not None
+        speakers = getattr(self.container, "speakers", None)   # absent on the Windows container and in test doubles
+        handle = self.active.speakers_handle
+        if speakers is None or handle is None:
+            return
+        try:
+            self._warn_if_dead(Log.CAPTURER_SPEAKERS, speakers, handle, self.container.settings.speakers_log)
+        except Exception as exc:  # noqa: BLE001 - see above
+            key = f"{self.active.meeting.id}:{Log.CAPTURER_SPEAKERS}:{Log.SPEAKERS_CHECK_FAILED}"
+            if key not in self.warned_dead:
                 self.warned_dead.add(key)
-                log.warning(Log.CAPTURER_DIED, name, handle.pid, self.active.meeting.id, self.container.settings.capture_log)
+                log.warning(Log.SPEAKERS_CHECK_FAILED, self.active.meeting.id, exc)
+
+    def _warn_if_dead(self, name: str, capture: _Watchable, handle: CaptureHandle, log_path: Path) -> None:
+        assert self.active is not None
+        key = f"{self.active.meeting.id}:{name}"
+        if key in self.warned_dead:
+            return
+        if not capture.is_running(handle):
+            self.warned_dead.add(key)
+            log.warning(Log.CAPTURER_DIED, name, handle.pid, self.active.meeting.id, log_path)
 
     def _start_call(self, pid: int | None) -> None:
         if pid is None:
@@ -236,7 +268,23 @@ class Daemon:
                 log.exception(Log.ORPHAN_DISCARDED)
                 self.container.cancel_recording().execute(active)
         else:
+            self._stop_leftover_observer(active)
             repo.clear_active()
+
+    def _stop_leftover_observer(self, active: ActiveRecording) -> None:
+        """A recording that left no track still may have left the observer's launchd job running, with or without the
+        handle: a crash during the observer's startup grace leaves the job and no persisted handle."""
+        speakers = getattr(self.container, "speakers", None)
+        if speakers is None:
+            return
+        handle = active.speakers_handle
+        try:
+            if handle is None:
+                speakers.stop_stale()
+            else:
+                speakers.stop(handle)
+        except Exception as exc:  # noqa: BLE001 - recovery goes on
+            log.warning(Log.SPEAKERS_STOP_FAILED, handle.pid if handle is not None else None, exc)
 
     def _last_write(self, active: ActiveRecording) -> datetime | None:
         """When the recorders last wrote: the real end of a call the daemon did not see end."""

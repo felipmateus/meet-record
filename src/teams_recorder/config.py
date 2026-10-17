@@ -24,6 +24,7 @@ from teams_recorder.constants import (
     MicBackend,
     Planner,
     Platform,
+    Speakers,
     Stories,
     StoryDestination,
     Transcription,
@@ -106,6 +107,7 @@ class Settings:
     verify_model: str = Verify.DEFAULT_API_MODEL
     verify_cli_model: str = Verify.DEFAULT_CLI_MODEL
     verify_effort: Effort = Verify.DEFAULT_EFFORT
+    speakers_enabled: bool = Speakers.ENABLED   # [speakers]: read who speaks from the Teams window during each recording
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -151,6 +153,10 @@ class Settings:
     @property
     def capture_log(self) -> Path:
         return self.log_dir / Files.CAPTURE_LOG
+
+    @property
+    def speakers_log(self) -> Path:
+        return self.log_dir / Files.SPEAKERS_LOG
 
 
 def _parse_enum(kind: type[E], value: object, template: str) -> E:
@@ -236,6 +242,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     confirmation = raw.get("confirmation", {})
     stories = raw.get("stories", {})
     verification = raw.get("verification", {})
+    speakers = raw.get("speakers", {})
     backlog_md = stories.get("backlog_md", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
@@ -290,6 +297,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         verify_model=str(verification.get("model", Verify.DEFAULT_API_MODEL)),
         verify_cli_model=str(verification.get("cli_model", Verify.DEFAULT_CLI_MODEL)),
         verify_effort=_parse_enum(Effort, verification.get("effort", Verify.DEFAULT_EFFORT), Err.INVALID_VERIFY_EFFORT),
+        speakers_enabled=bool(speakers.get("enabled", Speakers.ENABLED)),
     )
 
 
