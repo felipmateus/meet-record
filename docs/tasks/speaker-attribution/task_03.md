@@ -34,7 +34,7 @@ Settles which process identity macOS holds responsible for the helper's Accessib
 
 ### Relevant Files
 
-- `prd/appendix/integrations.md:21` — the record that the Microphone grant went to the daemon's Python.
+- `docs/prd/appendix/integrations.md:21` — the record that the Microphone grant went to the daemon's Python.
 - `docs/SPEAKER-ATTRIBUTION.md` §6 run 1 and `scripts/ax-speaker-probe.swift:100` — the spike relied on the terminal's grant.
 - `src/teams_recorder/adapters/outbound/launchd.py`, `src/teams_recorder/adapters/inbound/cli.py:449-515` — how the daemon is installed and restarted, for the daemon-context check.
 - `native/teams-tap/Package.swift` — the embedded-plist mechanism whose TCC effect is in question.

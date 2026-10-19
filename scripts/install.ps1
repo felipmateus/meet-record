@@ -59,6 +59,11 @@ function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 }
 function Winget-Install($id) {
+    # Asked only when something is missing, so a machine that already has everything (or the
+    # offline bundle, which brings it) needs no winget.
+    if (-not $DryRun -and -not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Die "winget is missing (needed to install $id). Install 'App Installer' from the Microsoft Store, then run this script again."
+    }
     Run { winget install -e --id $id --silent --accept-package-agreements --accept-source-agreements } "winget install $id"
     Refresh-Path
 }
@@ -92,6 +97,21 @@ function Find-Whisper {
     }
     return $null
 }
+# A dotnet on PATH may be the .NET runtime alone (other apps install it), which cannot build:
+# dotnet publish then fails with "No .NET SDKs were found". Returns a dotnet.exe that has SDK 8+.
+function Find-DotnetSdk {
+    $ErrorActionPreference = "Continue"
+    $candidates = @(Join-Path $env:ProgramFiles "dotnet\dotnet.exe")
+    $onPath = Get-Command dotnet -ErrorAction SilentlyContinue
+    if ($onPath) { $candidates = @($onPath.Source) + $candidates }
+    foreach ($exe in $candidates) {
+        if (-not (Test-Path $exe)) { continue }
+        $sdks = & $exe --list-sdks 2>$null
+        if ($LASTEXITCODE -ne 0) { continue }
+        if ($sdks | Where-Object { $_ -match '^(\d+)\.' -and [int]$Matches[1] -ge 8 }) { return $exe }
+    }
+    return $null
+}
 function Task-Owner {
     $ErrorActionPreference = "Continue"
     $xml = schtasks /Query /TN $DaemonTask /XML 2>$null
@@ -116,10 +136,7 @@ if (Get-AppxPackage -Name MSTeams -ErrorAction SilentlyContinue) { Ok "Microsoft
 else { Warn "the new Microsoft Teams app was not found; install it before your first call." }
 
 # -------------------------------------------------------------------------------------------
-Step "Packages (winget)"
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-    Die "winget is missing. Install 'App Installer' from the Microsoft Store, then run this script again."
-}
+Step "Packages (Python, ffmpeg)"
 $python = Find-Python
 if ($python) { Ok "Python: $($python -join ' ')" }
 else {
@@ -171,7 +188,13 @@ Ok "teams-recorder installed in .venv (command: $Trec)"
 Step "Capture program (teams-tap.exe)"
 if (Test-Path $TeamsTap) { Ok "teams-tap.exe present" }
 else {
-    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Winget-Install "Microsoft.DotNet.SDK.8" }
+    $dotnet = Find-DotnetSdk
+    if (-not $dotnet) {
+        Winget-Install "Microsoft.DotNet.SDK.8"
+        $dotnet = Find-DotnetSdk
+        if (-not $dotnet -and -not $DryRun) { Die "the .NET 8 SDK is still not found ('dotnet --list-sdks' lists none); open a new terminal and run this script again." }
+    }
+    if ($dotnet) { $env:Path = (Split-Path -Parent $dotnet) + ";" + $env:Path; Ok ".NET SDK: $dotnet" }
     Run { & (Join-Path $ProjectDir "scripts\build-native-windows.ps1") } "build teams-tap.exe"
     Ok "built $TeamsTap"
 }

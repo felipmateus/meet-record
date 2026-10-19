@@ -16,7 +16,7 @@ Prove the whole flow on real inputs (a real plan, the real model, a real Backlog
 - An opt-in end-to-end test (`-m slow`, `TREC_REAL_CLAUDE_CLI=1` and `TREC_REAL_BACKLOG=1`) over a fixture plan where the same topic appears on two days: the second day produces no duplicate story, and the first day's stories land in Triagem of a temporary Backlog.md project.
 - Manual validation with the user on the plan of 2026-10-09, only with the user's approval (it uses the Claude Code subscription and real meeting content): draft, publish, review on the board (`backlog board` or `backlog browser`), adjust `prompts/user_story_guide.md` until the user accepts the quality.
 - After the user's OK, `config.toml` switches publishing on (`publish = true`, `destinations = ["backlog-md"]`, `project_dir = "."`).
-- Documentation in sync per AGENTS.md: `prd/pages/08-user-stories.md` (publishing section), `prd/README.md` (module status), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 notes, `README.md` (one-time Backlog.md setup and `trec publish`), `AGENTS.md` (ports table with `StoryPublisher` / `BacklogMdPublisher`, the `TREC_REAL_BACKLOG` command), `docs/COMMITS.md` (wave row).
+- Documentation in sync per AGENTS.md: `docs/prd/pages/08-user-stories.md` (publishing section), `docs/prd/README.md` (module status), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 notes, `README.md` (one-time Backlog.md setup and `trec publish`), `AGENTS.md` (ports table with `StoryPublisher` / `BacklogMdPublisher`, the `TREC_REAL_BACKLOG` command), `docs/COMMITS.md` (wave row).
 - The full suite and `mypy` clean; nothing under `backlog/` tracked by Git.
 </requirements>
 
@@ -49,4 +49,4 @@ See PRD §7 (success criteria), techspec §12 (test matrix) and §13 (order). Th
 
 - `tests/fixtures/` (fixture plans and analyses), `tests/integration/test_story_publishing_e2e_real.py` (new)
 - `prompts/user_story_guide.md`, `config.toml`
-- `prd/pages/08-user-stories.md`, `prd/README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md`, `README.md`, `AGENTS.md`, `docs/COMMITS.md`
+- `docs/prd/pages/08-user-stories.md`, `docs/prd/README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md`, `README.md`, `AGENTS.md`, `docs/COMMITS.md`

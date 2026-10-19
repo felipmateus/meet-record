@@ -91,7 +91,7 @@ An application-hosted media bot receives each participant's audio unmixed with t
 - `adapters/outbound`: `speakers_ax` (macOS helper) and later `speakers_uia` (Windows); the energy timeline through ffmpeg or the WAV reader.
 - Use cases: `StopRecording.finalize` writes the energy timeline before deleting the tracks; `TranscribeMeeting` labels segments from `speakers.jsonl` and the timeline.
 - Prompts and renderers: labels in the transcript given to the analyser and the verifier; owners taken from labels; the minutes show who said what.
-- `prd/README.md` §6 still says diarization is out of scope; it changes when B lands.
+- `docs/prd/README.md` §6 still says diarization is out of scope; it changes when B lands.
 
 ## 6. Spike runs
 

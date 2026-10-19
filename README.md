@@ -674,7 +674,7 @@ TREC_TEAMS_PROCESS=python3.11 trec daemon --once   # while tests/fixtures/fake_c
 2. Implement it in `adapters/outbound/<capability>_<tech>.py`, translating every external failure into a domain error with a message that tells the user what to do.
 3. Add a fake in `tests/fakes/` and tests (with a scripted stand-in in `tests/fixtures/` if it spawns processes).
 4. Register it in `container.py`. If it is selectable, add the switch to `config.toml` and `config.Settings`, with a test.
-5. Surface it in `trec doctor` if it depends on an external binary, and update `docs/` and `prd/`.
+5. Surface it in `trec doctor` if it depends on an external binary, and update `docs/` and `docs/prd/`.
 
 ### Conventions
 
@@ -760,7 +760,7 @@ Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure 
 
 | Document | Content |
 |---|---|
-| [`prd/README.md`](prd/README.md) | Product requirements: modules, flows, global rules, with one page per flow and appendices (states, integrations, data layout) |
+| [`docs/prd/README.md`](docs/prd/README.md) | Product requirements: modules, flows, global rules, with one page per flow and appendices (states, integrations, data layout) |
 | [`docs/REQUIREMENTS-AND-ARCHITECTURE.md`](docs/REQUIREMENTS-AND-ARCHITECTURE.md) | Requirements, architecture, risks and per-phase implementation notes |
 | [`docs/SPEAKER-ATTRIBUTION.md`](docs/SPEAKER-ATTRIBUTION.md) | Investigation and spike runs behind the speaker labels; PRD in [`docs/tasks/speaker-attribution/`](docs/tasks/speaker-attribution/) |
 | [`docs/tasks/prd-story-publishing/`](docs/tasks/prd-story-publishing/) | PRD, tech spec and tasks for story publishing |
