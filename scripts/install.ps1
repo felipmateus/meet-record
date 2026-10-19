@@ -25,7 +25,11 @@ $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $Trec = Join-Path $Venv "Scripts\trec.exe"
 $TeamsTap = Join-Path $ProjectDir "native\teams-tap-win\bin\Release\net8.0\win-x64\publish\teams-tap.exe"
 $ToolsDir = Join-Path $ProjectDir "tools"
-$WhisperZip = "https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip"
+# Since v1.9.3 whisper.cpp attaches no binaries to its vX.Y.Z releases, so releases/latest has no
+# zip (404). They live on the build tag of the same commit (b5454 = v1.9.5); pinned, with its hash.
+$WhisperTag = "b5454"
+$WhisperZip = "https://github.com/ggml-org/whisper.cpp/releases/download/$WhisperTag/whisper-bin-x64.zip"
+$WhisperSha256 = "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"
 $MinBuild = 19041
 $DaemonTask = "\teams-recorder\daemon"
 $script:Step = 0
@@ -134,10 +138,14 @@ if ($whisper) { Ok "whisper-cli: $whisper" }
 else {
     $zip = Join-Path $env:TEMP "whisper-bin-x64.zip"
     Run { Invoke-WebRequest -Uri $WhisperZip -OutFile $zip -UseBasicParsing } "download $WhisperZip"
+    Run {
+        $hash = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash
+        if ($hash -ne $WhisperSha256) { throw "SHA-256 is $hash, expected $WhisperSha256" }
+    } "verify whisper-bin-x64.zip"
     Run { Expand-Archive -Force -Path $zip -DestinationPath (Join-Path $ToolsDir "whisper") } "unpack into tools\whisper"
     $whisper = Find-Whisper
     if ($whisper) { Ok "whisper-cli: $whisper" }
-    elseif (-not $DryRun) { Warn "whisper-cli.exe was not found in the downloaded archive; see https://github.com/ggml-org/whisper.cpp/releases" }
+    elseif (-not $DryRun) { Warn "whisper-cli.exe was not found in the downloaded archive; see https://github.com/ggml-org/whisper.cpp/releases/tag/$WhisperTag" }
 }
 
 # -------------------------------------------------------------------------------------------
