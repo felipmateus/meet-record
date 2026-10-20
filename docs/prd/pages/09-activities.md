@@ -1,14 +1,14 @@
 # Activities document
 
 > **Commands:** `trec activities [--open]`, `trec activities curate <id>… | --since YYYY-MM-DD [--yes]`, `trec activities undo [--yes]` · automatic after each analyzed meeting, through the daemon's curator worker and the curation step of `trec analyze`
-> **Module:** Activities · **Status:** delivered as a **shadow** (slice 1 of `docs/tasks/activities-curator/`): it runs beside the daily plan, which stays until the user decides the plan goes; the plan's removal is not documented here yet
+> **Module:** Activities · **Status:** delivered (`docs/tasks/activities-curator/`); on 2026-10-20 it replaced the daily plan, which was removed (see [Daily plan](./06-daily-plan.md))
 
 ## Overview
 One Markdown document, `<data_dir>/activities/atividades.md`, lists everything still open for the user: their own actions, what they wait on from others, dates, and recent context, each line linked to the meeting it came from. A few minutes after a meeting is analyzed, a curator agent (one Claude call) updates it. An item leaves the document only by being archived with a reason, and only the user ticks or unticks one. The user opens the file in an editor, ticks what is done, writes their own lines, and the next pass reads those edits and respects them.
 
-It exists because the plan has no section for an open action that is neither new nor overdue, shows an overdue action once, never accumulates other people's actions, ignores meetings analyzed after 6 pm, and only the model can close an action. Not every meeting activity is a task or a story, so the document also keeps decisions, questions, risks and ownerless items.
+It replaced the daily plan, which had no section for an open action that was neither new nor overdue, showed an overdue action once, never accumulated other people's actions, ignored meetings analyzed after 6 pm, and let only the model close an action. Not every meeting activity is a task or a story, so the document also keeps decisions, questions, risks and ownerless items.
 
-During the shadow the daily plan, `open_actions.json` and the story drafting after the plan are unchanged. The curator reads neither of them: its inputs are the document, the new analyses, transcript excerpts, a calendar and the user's edits.
+The curator's inputs are the document, the new analyses, transcript excerpts, a calendar and the user's edits. It never read the old plans or `open_actions.json`, which stay on disk unread.
 
 ## The document (`atividades.md`)
 Content is Brazilian Portuguese, written by the model; markers and headings are the labels in `messages.ActivityDoc`.
@@ -25,7 +25,7 @@ Content is Brazilian Portuguese, written by the model; markers and headings are 
 
 Markers, only three: 💬 a suggestion about something a meeting said (who, meeting, `hh:mm:ss`, the literal quote, and "mark [x] if done"), ⚠️ not confirmed (`a confirmar: <reason>`), 💤 not mentioned for about three weeks (`sem menção desde <date> — ainda vale?`). Item lines carry absolute dates with the weekday; at most two sub-lines per item.
 
-What the user may do in the file: tick, untick, delete lines, reword, change a date, add own lines, sub-lines and `##` sections, write `#história` on an item. All of it is the user's decision at the next pass. A line typed inside the box is moved to the right section; one the pass did not move, or typed while a pass was running, is put at the top of `## Minhas ações` by the app, unchanged.
+What the user may do in the file: tick, untick, delete lines, reword, change a date, add own lines, sub-lines and `##` sections, write `#história` on an item (see [User story drafts](./08-user-stories.md): `trec stories` turns the tag into a link to a draft). All of it is the user's decision at the next pass. A line typed inside the box is moved to the right section; one the pass did not move, or typed while a pass was running, is put at the top of `## Minhas ações` by the app, unchanged.
 
 ### Rules the curator follows
 - **Completion is the user's.** A meeting that says something is done, cancelled or reassigned adds a 💬 sub-line on the item; it never ticks, unticks or archives an open item.
@@ -75,10 +75,10 @@ The curator uses its own transport on the `[llm]` provider and logs to `llm_usag
 Claude through the existing structured transport (API or headless Claude Code, 900 s timeout); macOS `open` / Windows `os.startfile` for `--open`. No new external service.
 
 ## Relationships
-- **From:** [Analysis](./03-analysis.md) (state `analyzed`; the progress statements and `for_whom` it extracts, and the minutes each line links to). **To:** the user's editor. `trec stories` still reads the plan during the shadow; reading tagged `#história` items from the document is a later slice.
-- [Daily plan](./06-daily-plan.md) runs beside it until the user decides it goes.
+- **From:** [Analysis](./03-analysis.md) (state `analyzed`; the progress statements and `for_whom` it extracts, and the minutes each line links to). **To:** the user's editor, and [User story drafts](./08-user-stories.md): `trec stories` reads the items tagged `#história` and replaces each tag with a link to its draft, through the same lock (`ActivityStore.rewrite_document`, no version files and no pass-log line, so `undo` is unaffected).
+- Replaces the [daily plan](./06-daily-plan.md), removed on 2026-10-20.
 - Files and the pass log: [data layout](../appendix/data-layout.md).
 
 ## Business rules
 - Only the transcript text, excerpts of it and the analyses leave the Mac, as for the analysis.
-- Rollout: the curator runs in the shadow of the planner for about a week before the user decides; the quality checks before it (progress-statement precision and a synthetic sequence of days) are task 8 of the plan and run with the user's approval.
+- Rollout: the curator ran beside the planner from 2026-10-20, and the user then removed the planner the same day (the full shadow week was waived). The quality checks planned before it (progress-statement precision and a synthetic sequence of days, task 8 of the plan) were not run; they spend the subscription and need the user's approval.

@@ -4,13 +4,12 @@
 <data_dir>/                           # paths.data_dir in config.toml (relative = inside the project; currently ./data); empty = automatic (Application Support under iCloud/Documents/Desktop/Downloads, else ./data)
 ├── current_recording.json            # pointer to the active recording (at most one)
 ├── recordings/<YYYY-MM-DD_HH-MM-SS>/ # one folder per meeting (see dictionary); curation_error.txt when the last curator pass for it failed
-├── activities/                       # the activities document and the curator's state (shadow slice)
+├── activities/                       # the activities document and the curator's state
 │   ├── atividades.md                 # the document the user edits by hand
 │   ├── arquivo/YYYY-MM.md            # append-only archive: what left the document, with date and reason
 │   └── .curator/                     # internal: lock, base.md, versions/
-├── plans/                           # daily plans
-│   ├── YYYY-MM-DD.md / .json         # daily plan (phase 6)
-│   └── open_actions.json            # accumulated open actions
+├── plans/                            # story drafts only (the folder name is from the daily-plan era)
+│   └── YYYY-MM-DD.stories.md / .json # drafts of the stories asked for with `trec stories` on that day, and where each was published
 ├── models/                           # ggml-*.bin (whisper, VAD)
 └── log/
     ├── teams-recorder.log            # daemon (daily rotation, 30 days)
@@ -92,10 +91,17 @@ One JSON object per pass, appended last, so the line is the commit point of a pa
 ```
 `during_edits` is the diff of what the user changed in the body while the pass ran; `carried_edits` is the part of it the pass received from the previous one; `undoes` names the version an `undo` record restored; `error` holds the reason of a `failed` record.
 
-## `plans/YYYY-MM-DD.json` (phase 6)
+## `plans/YYYY-MM-DD.stories.json`
+The structured drafts of one day; the `.md` next to it is the review document rendered from it (nothing else is read to render it). Drafts of the same day are merged, new stories appended.
 ```json
-{"day": "2026-10-06", "markdown": "# …", "priorities": ["…"], "new_actions": [Action…], "completed_action_ids": ["…"], "overdue_action_ids": ["…"]}
+{"day": "2026-10-20",
+ "stories": [{"id": "…", "title": "…", "narrative": "…", "acceptance_criteria": [{"text": "…", "source": "00:03:10"}], "details": "…", "open_questions": ["…"],
+              "source_action_ids": [], "source_meetings": ["2026-10-19_09-30-11"], "priority": "high", "due": "2026-10-23",
+              "publications": [{"destination": "backlog-md", "ref": "TASK-1", "published_at": "2026-10-20T18:02:11"}],
+              "kind": "feature", "source_text": "- [ ] **…** #história\n  note under the item"}],
+ "skipped": [{"action_id": "b2", "reason": "…", "duplicate_of": null, "source_line": "- [ ] **…** #história"}]}
 ```
+A criterion's `source` is the transcript time of what was said or `"suggestion"` (shown as "(sugestão)" in the documents); a draft from before 2026-10-14 stores plain strings. `source_text` is the tagged item as the user wrote it (its first line is what a later run matches to know it was drafted); `source_line` is the tagged line of an item that did not become a story, and `action_id` the item's ref in that run. **Files written before 2026-10-20 (from a daily plan)** have `source_action_ids` and no `source_text` / `source_line`, may have a `verification` on a task card, and are still read and published. Plan files of that era (`plans/YYYY-MM-DD.md` and `.json`) and `open_actions.json` are no longer read or written; they stay on disk.
 
 ## `llm_usage.jsonl` (one line per call)
 ```json

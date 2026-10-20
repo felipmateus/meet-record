@@ -99,6 +99,7 @@ Interaction: analysis → curator pass → document; the user edits the document
 ## Open Questions
 
 - None blocking. Evaluation thresholds (Part II › Testing Approach) may be tuned after the first sequence run; the user decides go/no-go after the shadow week.
+- Resolved 2026-10-20: the user decided **go** ("pode remover o plano das 18h"), waiving the full shadow week (Q-003) and not running Q-001/Q-002 (they need approval and spend the subscription). Bootstrap evidence: 9 passes over 19 meetings, 0 edits on reruns. Slice 2 (tasks 13 to 15) is unblocked; see `task_12.md` › Completion Notes.
 
 ---
 

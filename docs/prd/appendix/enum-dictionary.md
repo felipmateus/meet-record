@@ -4,7 +4,7 @@
 | Value | Condition (precedence from top to bottom) | Next step |
 |---|---|---|
 | `failed` | `error.txt` exists | fix and repeat the step (the pipeline clears the error when resuming) |
-| `analyzed` | `analysis.json` exists | none (goes into the daily plan and the activities document) |
+| `analyzed` | `analysis.json` exists | none (the curator takes it into the activities document) |
 | `transcribed` | `transcript.json` exists | `analyze` |
 | `recorded` | `audio.m4a` exists | `transcribe` |
 | `recording` | only `meta.json` (and raw tracks) | `stop` |
@@ -37,8 +37,20 @@ Note: `audio.m4a` may have been deleted by retention without changing `transcrib
 | Value | Meaning |
 |---|---|
 | `open` | pending |
-| `done` | completed (marked by the daily plan) |
-| `overdue` | deadline passed as of the plan date |
+| `done` | completed |
+| `overdue` | **decode only**: the planner that set it was removed on 2026-10-20; old `analysis.json` files may hold it, and nothing sets or reads it any more |
+
+## Action kind (`ActionKind`, in `analysis.json` actions and in `plans/<day>.stories.json` stories)
+| Value | Meaning | In a story draft |
+|---|---|---|
+| `feature` | a change in how the product behaves | user story |
+| `bug` | something that should work and does not | user story (the guide's bug format) |
+| `technical` | engineering work without direct user value: estimate, spike, mock | task card |
+| `operation` | deploy, access, infrastructure, environment | task card |
+| `management` | process, reports, metrics, prioritisation | not drafted: left out with "<tipo>: não vira história nem card" |
+| `communication` | e-mail, meeting, follow-up, review | not drafted, same |
+
+The analysis gives every action a kind (older analyses have none); nothing routes by it any more. The story writer sets the kind of each story from the item the user tagged.
 
 ## Progress change (`StatusChange`, in `analysis.json` `status_updates`)
 | Value | Meaning | Minutes label |
@@ -99,4 +111,4 @@ Note: `audio.m4a` may have been deleted by retention without changing `transcrib
 | 2 | command from a phase not yet available |
 
 ## macOS notifications
-Shown verbatim in Portuguese, as the user sees them: "Recording started", "Recording stopped" (recording ended, with minutes), "Recording cancelled", "Transcription failed", "Analysis failed", "Daily plan ready" (plan of the day ready; phase 6), "Activities updated" (the body is the curator's one-line summary in Portuguese) and "Activity curation failed".
+Shown verbatim in Portuguese, as the user sees them: "Recording started", "Recording stopped" (recording ended, with minutes), "Recording cancelled", "Transcription failed", "Analysis failed", "Activities updated" (the body is the curator's one-line summary in Portuguese) and "Activity curation failed".

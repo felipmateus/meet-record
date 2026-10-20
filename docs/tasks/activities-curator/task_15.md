@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Task 15: Documentation of the planner removal"
 type: docs
 complexity: low
@@ -28,9 +28,9 @@ Removes the daily plan from the project's documentation and describes what repla
 
 ## Subtasks
 
-- [ ] 15.1 `AGENTS.md`.
-- [ ] 15.2 PRD pages and appendices.
-- [ ] 15.3 REQUIREMENTS §10 and README.
+- [x] 15.1 `AGENTS.md`.
+- [x] 15.2 PRD pages and appendices.
+- [x] 15.3 REQUIREMENTS §10 and README.
 
 ## Implementation Details
 

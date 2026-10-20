@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Task 12: Shadow week review and the go decision"
 type: qa
 complexity: medium
@@ -27,10 +27,10 @@ complexity: medium
 
 ## Subtasks
 
-- [ ] 12.1 Compute the shadow week's retry rate, failure rate, unaccounted refs and document size from the pass log.
-- [ ] 12.2 Ask the user for the misses they saw (wrong item, duplicate, missing item, unwanted notification) and record them.
-- [ ] 12.3 Fix in-spec issues found (tests first), asking before commits and restarts.
-- [ ] 12.4 Ask the user for the go/no-go decision and record it with its date in this task's completion notes and in `_spec.md` › Open Questions.
+- [x] 12.1 Compute the shadow week's retry rate, failure rate, unaccounted refs and document size from the pass log. (Waived with Q-003: no week of passes was measured and `log/activities.jsonl` was not read; the bootstrap figures in the completion notes stand in.)
+- [x] 12.2 Ask the user for the misses they saw (wrong item, duplicate, missing item, unwanted notification) and record them. (Waived: the user gave the go before a shadow week; no misses were listed.)
+- [x] 12.3 Fix in-spec issues found (tests first), asking before commits and restarts. (None found; no code changed.)
+- [x] 12.4 Ask the user for the go/no-go decision and record it with its date in this task's completion notes and in `_spec.md` › Open Questions.
 
 ## Implementation Details
 
@@ -51,8 +51,33 @@ complexity: medium
 
 Cases assigned from `_tests.md` — read the definition before starting.
 
-- [ ] Q-003 — the shadow week on real meetings; the user's go/no-go.
+- [x] Q-003 — the shadow week on real meetings; the user's go/no-go. (Not run as a week: the user waived the comparison and gave the go; see the completion notes.)
 
 ## Success Criteria
 
 - The task is completed only with the user's "go" recorded. With a "no-go", it stays `pending` (or `in_progress`) and slice 2 is not dispatched.
+
+## Completion Notes
+
+### Decision: GO (2026-10-20)
+
+- The user, in their own message on 2026-10-20, in this session: "pode remover o plano das 18h" ("you can remove the 18:00 plan"). This is an explicit go for the planner removal and the stories on demand (ADR-002); it unblocks task_13, task_14 and task_15.
+- The go came from the user, not from an agent message. The user chose to give it immediately instead of waiting for a full shadow week.
+
+### What Q-003 was and was not
+
+- Q-003 (the shadow week compared on real meetings) was **not run as a week**. The user waived it with the go above: no week of side-by-side passes was collected, no misses were listed, and the pass-log thresholds (retry rate < 10%, failure rate < 2%, document <= ~8k tokens) were not measured over a week.
+- Q-001 and Q-002 were also not run. The user was told they need approval and spend the Claude subscription, and chose not to run them. No quality evaluation was run for this task.
+- Task_08 (quality gate and shadow rollout) is still `pending` in its file; this task does not change it.
+
+### Evidence available (the bootstrap, not a shadow week)
+
+- The daemon was restarted with the curator on 2026-10-20.
+- A bootstrap `trec activities curate --since 2026-10-06` ran 9 passes successfully: 19 meetings curated, producing 37 own actions, 9 waiting on others and 13 context items.
+- Reruns of already-curated meetings produced 0 edits.
+- These figures were reported to this task by the caller. This task did not read `data/` or `log/activities.jsonl`, so retry rate, failure rate, unaccounted refs and document size are not computed here.
+
+### Scope
+
+- No code, test, prompt or `data/` change. Documentation touched: this file, `_spec.md` › Open Questions, `memory/task_12.md`, `memory/MEMORY.md`.
+- Slice 2 (tasks 13 to 15) can now be dispatched. The 18:00 planner and its LaunchAgent are still installed and running until task_15 removes them; the go does not change running behavior by itself.

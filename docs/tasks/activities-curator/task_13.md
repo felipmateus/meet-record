@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Task 13: Stories from tagged lines; publishing without plans"
 type: feature
 complexity: high
@@ -30,12 +30,12 @@ Stories stop being drafted automatically from the daily plan: `trec stories` dra
 
 ## Subtasks
 
-- [ ] 13.1 Model fields (`source_text`, `source_line`), codec round trip, `is_task_card` on stored `kind`; delete `ActionRoute` / `route_of` / `task_card`.
-- [ ] 13.2 `use_cases/stories.py` with the moved publishing helpers (no plan input) and `StoryRenderer.render(drafts, existing, degraded)`.
-- [ ] 13.3 `tagged_blocks`, `replace_tag`, `TaggedBlock` in `domain/activities.py`.
-- [ ] 13.4 `StoryWriter.draft_from_blocks` in `stories_claude.py` and the prompt; remove plan-based drafting.
-- [ ] 13.5 `DraftStoriesFromTags`; `trec stories` without `--date`; `[stories] publish` after drafting; remove drafting from `trec plan`; ignore `[stories] enabled`.
-- [ ] 13.6 Tests, including the busy-lock journeys on a real `flock`.
+- [x] 13.1 Model fields (`source_text`, `source_line`), codec round trip, `is_task_card` on stored `kind`; delete `ActionRoute` / `route_of` / `task_card`.
+- [x] 13.2 `use_cases/stories.py` with the moved publishing helpers (no plan input) and `StoryRenderer.render(drafts, existing, degraded)`.
+- [x] 13.3 `tagged_blocks`, `replace_tag`, `TaggedBlock` in `domain/activities.py`.
+- [x] 13.4 `StoryWriter.draft_from_blocks` in `stories_claude.py` and the prompt; remove plan-based drafting.
+- [x] 13.5 `DraftStoriesFromTags`; `trec stories` without `--date`; `[stories] publish` after drafting; remove drafting from `trec plan`; ignore `[stories] enabled`.
+- [x] 13.6 Tests, including the busy-lock journeys on a real `flock`.
 
 ## Implementation Details
 
@@ -67,14 +67,14 @@ Stories stop being drafted automatically from the daily plan: `trec stories` dra
 
 Cases assigned from `_tests.md` — read each assigned definition before editing.
 
-- [ ] UT-016, UT-017 — `tagged_blocks`, `replace_tag`.
-- [ ] UT-070, UT-071, UT-072, UT-074, UT-075 — a tagged block drafted and merged, numbering, duplicate, nothing tagged, a skip.
-- [ ] UT-073, UT-076, UT-077, UT-122 — edited lines, busy lock and deferred replacement, never re-drafted.
-- [ ] UT-078, UT-079, UT-124 — planner-era drafts merged and rendered, stored `kind`, persisted `source_line`.
-- [ ] UT-121, UT-111 — publishing with no plan; `[stories] publish`.
-- [ ] UT-093 — `[stories] enabled` ignored.
-- [ ] IT-009, IT-017 — `trec stories` on a real store; a child holding the `flock`.
-- [ ] E2E-004 — tag a line of the E2E-001 document and draft it.
+- [x] UT-016, UT-017 — `tagged_blocks`, `replace_tag`.
+- [x] UT-070, UT-071, UT-072, UT-074, UT-075 — a tagged block drafted and merged, numbering, duplicate, nothing tagged, a skip.
+- [x] UT-073, UT-076, UT-077, UT-122 — edited lines, busy lock and deferred replacement, never re-drafted.
+- [x] UT-078, UT-079, UT-124 — planner-era drafts merged and rendered, stored `kind`, persisted `source_line`.
+- [x] UT-121, UT-111 — publishing with no plan; `[stories] publish`.
+- [x] UT-093 — `[stories] enabled` ignored.
+- [x] IT-009, IT-017 — `trec stories` on a real store; a child holding the `flock`.
+- [x] E2E-004 — tag a line of the E2E-001 document and draft it.
 
 ## Success Criteria
 

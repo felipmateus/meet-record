@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: "Task 14: Remove the planner; audio retention in the daemon"
 type: refactor
 complexity: high
@@ -32,12 +32,12 @@ Deletes the 18:00 planner now that the activities document replaces it: the use 
 
 ## Subtasks
 
-- [ ] 14.1 Delete the planner code and constants; `constants.Legacy`; `ActionStatus.OVERDUE` decode-only.
-- [ ] 14.2 `use_cases/retention.py`; the daemon's daily purge.
-- [ ] 14.3 `[audio] retention_days` with fallback; remove `[planner]`; `config_tool.py`, Windows installer config.
-- [ ] 14.4 `agent install` / `restart` / `uninstall` remove the legacy job (macOS and Windows); `agent status` without the planner line.
-- [ ] 14.5 Installer and uninstall scripts; evaluation scripts off plan files.
-- [ ] 14.6 Delete or rewrite the planner tests (`test_planner_claude.py`, plan parts of `test_planning_use_cases.py`, `test_launchd.py` planner cases); new tests.
+- [x] 14.1 Delete the planner code and constants; `constants.Legacy`; `ActionStatus.OVERDUE` decode-only.
+- [x] 14.2 `use_cases/retention.py`; the daemon's daily purge.
+- [x] 14.3 `[audio] retention_days` with fallback; remove `[planner]`; `config_tool.py`, Windows installer config.
+- [x] 14.4 `agent install` / `restart` / `uninstall` remove the legacy job (macOS and Windows); `agent status` without the planner line.
+- [x] 14.5 Installer and uninstall scripts; evaluation scripts off plan files.
+- [x] 14.6 Delete or rewrite the planner tests (`test_planner_claude.py`, plan parts of `test_planning_use_cases.py`, `test_launchd.py` planner cases); new tests.
 
 ## Implementation Details
 
@@ -63,12 +63,12 @@ Deletes the 18:00 planner now that the activities document replaces it: the use 
 
 Cases assigned from `_tests.md` — read each assigned definition before editing.
 
-- [ ] UT-090 — `trec plan` is gone.
-- [ ] UT-091, UT-095, UT-096, IT-011 — legacy planner job removed by install, restart, uninstall (macOS and Windows), only through `Legacy` identifiers.
-- [ ] UT-092 — `[audio]` / `[planner]` retention fallback.
-- [ ] UT-094, UT-097, UT-098 — the daemon's daily purge, `PurgeOldAudio` in `retention.py`, a failing purge.
-- [ ] UT-056 — a legacy `"overdue"` action still decodes.
-- [ ] IT-018 — `scripts/install.sh --dry-run` without the 6 pm planner.
+- [x] UT-090 — `trec plan` is gone.
+- [x] UT-091, UT-095, UT-096, IT-011 — legacy planner job removed by install, restart, uninstall (macOS and Windows), only through `Legacy` identifiers.
+- [x] UT-092 — `[audio]` / `[planner]` retention fallback.
+- [x] UT-094, UT-097, UT-098 — the daemon's daily purge, `PurgeOldAudio` in `retention.py`, a failing purge.
+- [x] UT-056 — a legacy `"overdue"` action still decodes.
+- [x] IT-018 — `scripts/install.sh --dry-run` without the 6 pm planner.
 
 ## Success Criteria
 

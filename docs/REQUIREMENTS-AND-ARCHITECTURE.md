@@ -4,7 +4,7 @@ Date: 2026-10-04 · Author: Felipe Mateus de Carvalho (interview conducted with 
 
 ## 1. Goal
 
-Automatically record the audio of every Microsoft Teams meeting on the MacBook, transcribe it locally, extract actions and decisions with an LLM, and generate a daily activity plan. Everything runs in the background, with no user intervention, at near-zero cost.
+Automatically record the audio of every Microsoft Teams meeting on the MacBook, transcribe it locally, extract actions and decisions with an LLM, and keep one living activities document (until 2026-10-20 the goal was a daily activity plan; see §10). Everything runs in the background, with no user intervention, at near-zero cost.
 
 ## 2. Interview decisions
 
@@ -20,7 +20,7 @@ Automatically record the audio of every Microsoft Teams meeting on the MacBook, 
 | 8 | Tests | pytest with fixtures, 70% target | Fake adapters for LLM and audio |
 | 9 | Call detection | System heuristic (pmset + microphone) | No calendar access |
 | 10 | Audio retention | Delete after 30 days | Transcript and analysis are kept |
-| 11 | Plan output | Local Markdown | Integrations deferred to phase 2 |
+| 11 | Plan output | Local Markdown | Integrations deferred to phase 2. Since 2026-10-20 the output is the activities document, still local Markdown; the daily plan is gone |
 | 12 | Language | Portuguese only (pt-BR) | Whisper pinned to `pt` |
 
 ## 3. Functional requirements
@@ -33,13 +33,14 @@ Automatically record the audio of every Microsoft Teams meeting on the MacBook, 
 | FR04 | Allow cancelling an in-progress recording via a CLI command; partial audio is discarded. |
 | FR05 | Transcribe the audio in Portuguese with per-segment timestamps, producing `transcript.txt` and `transcript.json`. |
 | FR06 | Send the transcript to the Claude API and receive a structured analysis: summary, decisions, the user's actions, third-party actions to follow up on, deadlines, open questions, upcoming meetings. |
-| FR07 | Generate, once a day at a configurable time, a Markdown plan consolidating the day's analyses, the previous plan and the still-open actions. |
-| FR08 | Maintain an accumulated list of open actions in `plans/open_actions.json`, updated with each plan. |
-| FR09 | Notify via the macOS Notification Center at the start and end of a recording and when the daily plan is ready. |
-| FR10 | Reprocess any stage via a CLI command from the existing files (`trec transcribe`, `trec analyze`, `trec plan`). |
-| FR11 | Delete `audio.m4a` of meetings older than 30 days that already have a transcript. |
+| FR07 | Keep one Markdown document, `activities/atividades.md`, current: after each analyzed meeting a curator agent adds what is new, suggests (never applies) what the meeting said is done, and keeps everything the user wrote. Replaced on 2026-10-20 the original FR07, a plan generated once a day at a configurable time from the day's analyses, the previous plan and the open actions. |
+| FR08 | Keep what the document drops in an append-only archive (`activities/arquivo/<YYYY-MM>.md`, with date and reason) and the last passes restorable (`trec activities undo`); no item is deleted. Replaced the accumulated list `plans/open_actions.json`, which is no longer read. |
+| FR09 | Notify via the macOS Notification Center at the start and end of a recording and when a curator pass changed something of the user's. |
+| FR10 | Reprocess any stage via a CLI command from the existing files (`trec transcribe`, `trec analyze`, `trec activities curate`, `trec stories`). |
+| FR11 | Delete `audio.m4a` of meetings older than 30 days (`[audio] retention_days`) that already have a transcript; the daemon does it once a day. |
 | FR12 | Show status via CLI: daemon running, last meeting, pending stages, API key validity. |
 | FR13 | Log every stage with date, meeting and result. |
+| FR14 | Draft a user story on demand for each item of the activities document the user tags `#história` (`trec stories`), and publish the drafts to a board (`trec publish`). Nothing is drafted without a tag. Added on 2026-10-20; stories used to be drafted from the daily plan. |
 
 ## 4. Non-functional requirements
 
@@ -58,6 +59,8 @@ Automatically record the audio of every Microsoft Teams meeting on the MacBook, 
 
 ## 5. Hexagonal architecture
 
+> The design below is the one of 2026-10-04. The planner in it (`BuildDailyPlan`, `ClaudePlanner`, the `Planner` port, `DailyPlan`, `trec plan` and the 18:00 scheduler entry) was removed on 2026-10-20 and the lines below name what took its place. The current ports and files are in `AGENTS.md`.
+
 ```
                      ┌──────────────────────────────────────────────┐
   inbound            │                 APPLICATION                  │        outbound
@@ -65,12 +68,12 @@ Automatically record the audio of every Microsoft Teams meeting on the MacBook, 
  ┌───────────┐       │                                              │       ┌────────────────────┐
  │ daemon    │──────▶│  StartRecording   StopRecording              │──────▶│ CoreAudioTapCapture│ (Swift)
  │ (launchd) │       │  TranscribeMeeting AnalyzeMeeting            │──────▶│ FfmpegMicCapture   │
- └───────────┘       │  BuildDailyPlan   PurgeOldAudio              │──────▶│ FfmpegMixer        │
+ └───────────┘       │  CurateMeetings   PurgeOldAudio              │──────▶│ FfmpegMixer        │
  ┌───────────┐       │                                              │──────▶│ WhisperCppTranscr. │
  │ CLI trec  │──────▶│           ┌──────────────────┐               │──────▶│ ClaudeAnalyzer     │
- └───────────┘       │           │      DOMAIN      │               │──────▶│ ClaudePlanner      │
+ └───────────┘       │           │      DOMAIN      │               │──────▶│ ClaudeCurator      │
  ┌───────────┐       │           │ Meeting, Action, │               │──────▶│ FsMeetingRepository│
- │ scheduler │──────▶│           │ Analysis, Plan   │               │──────▶│ MacOSNotifier      │
+ │ scheduler │──────▶│           │ Analysis, Op     │               │──────▶│ MacOSNotifier      │
  │ (launchd) │       │           └──────────────────┘               │──────▶│ PmsetCallDetector  │
  └───────────┘       └──────────────────────────────────────────────┘       └────────────────────┘
 ```
@@ -82,7 +85,7 @@ Pure Python, no I/O.
 - `Transcript`: list of `Segment(start, end, text)`.
 - `Analysis`: `summary`, `decisions[]`, `my_actions[]`, `others_actions[]`, `deadlines[]`, `open_questions[]`, `next_meetings[]`.
 - `Action`: description, owner, optional deadline, origin (meeting id), status.
-- `DailyPlan`: date, priorities, new actions, completed, overdue, Markdown text.
+- Activities document (`domain/activities.py`): the document, its edit operations (`replace`, `insert_after`, `move`, `archive`) and the rules that apply them. Replaced `DailyPlan` (date, priorities, new actions, completed, overdue, Markdown text).
 - `MeetingStatus`: enum derived from which files exist (`RECORDING`, `RECORDED`, `TRANSCRIBED`, `ANALYZED`, `FAILED`).
 
 ### 5.2 Ports (`application/ports.py`)
@@ -95,7 +98,8 @@ Pure Python, no I/O.
 | `AudioMixer` | `mix(tracks, out)` | `FfmpegMixer` |
 | `Transcriber` | `transcribe(audio, lang) -> Transcript` | `WhisperCppTranscriber` |
 | `MeetingAnalyzer` | `analyze(transcript, ctx) -> Analysis` | `ClaudeAnalyzer` |
-| `Planner` | `plan(analyses, prev, open) -> DailyPlan` | `ClaudePlanner` |
+| `ActivityCurator` | `curate(CuratorInput) -> CuratorOutput`, `repair(...)` | `ClaudeCurator` (replaced `Planner`, `plan(analyses, prev, open) -> DailyPlan`) |
+| `ActivityStore` | `lock`, `commit`, `read_document`, `rewrite_document`, `passes`, `version` | `FsActivityStore` |
 | `MeetingRepository` | `create`, `save_*`, `load_*`, `list(status)` | `FsMeetingRepository` |
 | `Notifier` | `notify(title, body)` | `MacOSNotifier` |
 | `RecordingConfirmation` | `ask(meeting) -> ConfirmAnswer` (keep, discard, no answer) | `DialogRecordingConfirmation` |
@@ -109,15 +113,16 @@ Every port has a fake adapter in `tests/fakes/` so tests run without hardware or
 - `StopRecording`: stops the captures, mixes, writes `audio.m4a`, removes the raw tracks, notifies, enqueues transcription.
 - `TranscribeMeeting`: reads `audio.m4a`, produces `transcript.txt` and `transcript.json`; computes the transcript's health (`domain/health.py`), retranscribes a degraded one once with the anti-loop transcriber, keeps the healthier result and notifies when it is still degraded. It also reads the Teams track's capture counters (`tap.stats.json`, `MeetingRepository.load_capture_stats`), marks the health `rate_mismatch` and notifies when they show the track was recorded at the wrong sample rate; counters it cannot read skip that check and never fail the transcription.
 - `AnalyzeMeeting`: reads the transcript, calls the analyzer, writes `analysis.json`.
-- `BuildDailyPlan`: reads the day's analyses, the previous plan and the open actions; writes `plans/AAAA-MM-DD.md` and updates `open_actions.json`.
-- `PurgeOldAudio`: deletes `audio.m4a` older than 30 days when a transcript is present.
+- `CurateMeetings`: reads the document and the new analyses, asks the curator for edits, applies them and commits the pass (document, archive, versions, pass log). Replaced `BuildDailyPlan`.
+- `DraftStoriesFromTags`: sends the items tagged `#história` to the story writer and writes `plans/AAAA-MM-DD.stories.{md,json}`.
+- `PurgeOldAudio`: deletes `audio.m4a` older than 30 days when a transcript is present; the daemon runs it once a day.
 - `Pipeline`: chains Stop → Transcribe → Analyze with per-stage error handling.
 
 ### 5.4 Inbound adapters (`adapters/inbound/`)
 
 - `daemon.py`: detection loop every 1 s (was 3 s); starts recording on the first positive reading (was 2) and stops after 5 negative ones (~5 s, was ~15 s), avoiding false positives from flapping.
-- `cli.py` (Typer): `trec start|stop|cancel|transcribe|analyze|plan|purge|status|doctor`.
-- Scheduler: launchd entry that calls `trec plan` at the configured time.
+- `cli.py` (Typer): `trec start|stop|cancel|transcribe|analyze|activities|stories|publish|purge|status|doctor`.
+- Scheduler: the launchd entry of the daemon. The second entry, which called `trec plan` at 18:00, was removed on 2026-10-20.
 
 ### 5.5 Outbound adapters (`adapters/outbound/`)
 
@@ -130,7 +135,7 @@ Every port has a fake adapter in `tests/fakes/` so tests run without hardware or
 
 **`WhisperCppTranscriber`**: `whisper-cli -m ggml-large-v3-turbo.bin -l pt -mc 0 -oj`; parses the JSON into a `Transcript`. The container builds a second instance for the retry of a degraded transcript (`-mc 0` with Silero VAD).
 
-**`ClaudeAnalyzer` / `ClaudePlanner`** (`anthropic` SDK 1.x):
+**`ClaudeAnalyzer` / `ClaudeCurator`** (`anthropic` SDK 1.x):
 - model `claude-opus-5-5`; adaptive thinking (model default); configurable `output_config.effort`, default `high` for analysis;
 - structured output via `client.messages.parse(..., output_format=<Pydantic>)`; the Pydantic schema lives in the adapter and is converted to the domain;
 - streaming for long transcripts, `max_tokens` 16000;
@@ -163,9 +168,11 @@ The only place that instantiates concrete adapters from `config.py`. Tests swap 
 │       ├── analysis.json
 │       ├── .lock              # present only while processing
 │       └── error.txt          # present only if some stage failed
+├── activities/
+│   ├── atividades.md          # the activities document (replaced plans/<day>.md and open_actions.json)
+│   └── arquivo/2026-10.md     # what left the document, with date and reason
 ├── plans/
-│   ├── 2026-10-06.md
-│   └── open_actions.json
+│   └── 2026-10-06.stories.md  # story drafts (and .stories.json)
 └── log/
     └── teams-recorder.log     # daily rotation, 30 days
 ```
@@ -179,13 +186,14 @@ teams-recorder/
 ├── pyproject.toml              # teams_recorder package, trec CLI, deps: anthropic, pydantic, typer, python-dotenv
 ├── .env.example                # ANTHROPIC_API_KEY=
 ├── .gitignore                  # .env, data/, native/.build
-├── config.toml                 # mic device, plan time, whisper model, retention, effort
+├── config.toml                 # mic device, whisper model, retention, effort
 ├── README.md
 ├── docs/
 │   └── REQUIREMENTS-AND-ARCHITECTURE.md
 ├── prompts/
 │   ├── analyze_system.md
-│   └── plan_system.md
+│   ├── curate_system.md
+│   └── stories_system.md
 ├── native/teams-tap/           # Swift Package
 │   ├── Package.swift
 │   └── Sources/teams-tap/main.swift
@@ -202,8 +210,9 @@ teams-recorder/
 │   │       ├── stop_recording.py
 │   │       ├── transcribe_meeting.py
 │   │       ├── analyze_meeting.py
-│   │       ├── build_daily_plan.py
-│   │       └── purge_old_audio.py
+│   │       ├── activities.py
+│   │       ├── stories.py
+│   │       └── retention.py
 │   ├── adapters/
 │   │   ├── inbound/
 │   │   │   ├── cli.py
@@ -226,8 +235,7 @@ teams-recorder/
 │   ├── unit/                   # domain and use cases
 │   └── integration/            # real whisper (marked slow), repository in tmp_path
 ├── launchd/
-│   ├── com.felipe.teams-recorder.plist   # daemon at login, KeepAlive
-│   └── com.felipe.teams-planner.plist    # StartCalendarInterval 18:00, Mon–Fri
+│   └── com.felipe.teams-recorder.plist   # daemon at login, KeepAlive (the 18:00 planner entry was removed on 2026-10-20)
 └── scripts/
     ├── install.sh              # brew whisper-cpp, model, pip -e ., swift build, launchctl load
     └── status.sh
@@ -268,9 +276,10 @@ teams-recorder/
 | 3 | `WhisperCppTranscriber`; `trec transcribe` | Portuguese transcript of the phase 2 audio with acceptable errors | Completed on 2026-10-04. Synthesized speech (Luciana voice) transcribed with no errors using `large-v3-turbo-q5_0` |
 | 4 | `ClaudeAnalyzer`; `trec analyze`; prompts | Valid `analysis.json` with real actions from the test meeting | Completed on 2026-10-05 |
 | 5 | `PmsetCallDetector` + daemon + launchd + notifications | Real meeting recorded without touching the keyboard | Completed on 2026-10-05 with a simulated call (a process that holds a power assertion and is an audio client) under launchd. Validation with real Teams pending the next meeting |
-| 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Markdown plan generated at 18:00 with accumulated actions | Completed on 2026-10-05; validation with real content pending the first real meeting |
+| 6 | `ClaudePlanner`; `trec plan`; scheduler; `PurgeOldAudio` | Markdown plan generated at 18:00 with accumulated actions | Completed on 2026-10-05; validation with real content pending the first real meeting. The planner, `trec plan` and the 18:00 scheduler entry were removed on 2026-10-20 (see the activities rows below); `PurgeOldAudio` stayed and runs in the daemon |
 | 7 | `install.sh`, `trec doctor/status`, README | Installation from scratch for another user of the Mac works | Completed on 2026-10-05 for the installer: a from-scratch install in a fresh copy passed every step except the ones skipped on purpose (model download, LaunchAgents). Still pending from the plan: the month's LLM spend in `trec status` |
-| — | Activities document, shadow slice (`docs/tasks/activities-curator/`, tasks 1–7, 9–11): progress statements in the analysis, `ActivityCurator`, `ActivityStore`, `CuratorWorker`, `trec activities`, doctor and status lines | The document `data/activities/atividades.md` is updated by an agent after each analyzed meeting, the user's edits and ticks survive, and `trec activities undo` restores a pass | Implemented on 2026-10-20 and passing on fakes, the file adapters and a scripted Claude Code CLI. Pending from the user: the quality checks on real data (task 8), `trec agent restart`, a shadow week, then the go decision (tasks 12 to 15 remove the planner) |
+| — | Activities document, slice 1 (`docs/tasks/activities-curator/`, tasks 1–7, 9–11): progress statements in the analysis, `ActivityCurator`, `ActivityStore`, `CuratorWorker`, `trec activities`, doctor and status lines | The document `data/activities/atividades.md` is updated by an agent after each analyzed meeting, the user's edits and ticks survive, and `trec activities undo` restores a pass | Implemented on 2026-10-20 and passing on fakes, the file adapters and a scripted Claude Code CLI; ran beside the planner until the go below |
+| — | Activities document, slice 2 (tasks 12–15): the go decision, stories from tagged items, planner removal, audio retention in the daemon, documentation | The planner is gone, `trec stories` drafts only from `#história` items, the daemon purges old audio once a day | Implemented on 2026-10-20 (user's go: "pode remover o plano das 18h"); passing on fakes, file adapters and scripted CLIs. Not run: the real-model stories test, the fidelity evaluations and `scripts/fidelity_eval.py`'s new curator and stories paths (they spend the subscription), and anything on Windows. The installed `local.teams-recorder.planner` job goes when the user runs `trec agent restart` (needs approval) |
 
 ### Phase 2 notes
 
@@ -541,7 +550,7 @@ teams-recorder/
 
 ### Activities curator in shadow (2026-10-20)
 
-- Slice 1 of `docs/tasks/activities-curator/` (spec, DX contract, tests, ADR-001 to ADR-003 there; reviews 001 to 005 resolved). Motivation: the tasks were scattered over one plan per day, the minutes, the story drafts and an invisible `open_actions.json`, and work from earlier days vanished while unfinished (the plan has no section for an open action that is neither new nor overdue, shows an overdue one once, never accumulates others' actions, and ignores meetings analyzed after 6 pm). The planner is **not** removed in this slice: it still runs at 6 pm, `open_actions.json` is still written, and the curator reads neither. Tasks 12 to 15 (shadow week review and the go decision, stories from tagged lines, planner removal with audio retention moved to the daemon, documentation of the removal) wait for the user's decision after a shadow week.
+- Slice 1 of `docs/tasks/activities-curator/` (spec, DX contract, tests, ADR-001 to ADR-003 there; reviews 001 to 005 resolved). Motivation: the tasks were scattered over one plan per day, the minutes, the story drafts and an invisible `open_actions.json`, and work from earlier days vanished while unfinished (the plan has no section for an open action that is neither new nor overdue, shows an overdue one once, never accumulates others' actions, and ignores meetings analyzed after 6 pm). In this slice the planner was **not** removed: it still ran at 6 pm, `open_actions.json` was still written, and the curator read neither (slice 2 below removed it). Tasks 12 to 15 (shadow week review and the go decision, stories from tagged lines, planner removal with audio retention moved to the daemon, documentation of the removal) wait for the user's decision after a shadow week.
 - **What shipped.**
   - Analyzer: `status_updates` (what a meeting said about earlier work: `done`, `in_progress`, `blocked`, `delayed`, `due_changed`, `reassigned`, `cancelled`, with who, the literal quote and the time) and `Action.for_whom`; `ClaimKind.STATUS_UPDATE` in the verifier (an intention or a hedge does not support `done`); a `🔄 Andamento informado` section in `minutes.md`; `domain/excerpts.excerpt_window`, shared by the verifier and the curator.
   - Domain `domain/activities.py` (pure): the edit ops (`replace`, `insert_after`, `move`, `archive`), `apply_ops` with the one code rule (only an `archive` removes a checkbox line; a `replace` neither drops one nor changes how many are ticked), the box, the link block, the diff, the 14-day calendar and the working-day arithmetic. Unmatched lines are preserved byte for byte.
@@ -552,4 +561,14 @@ teams-recorder/
 - **Design decisions (ADRs in the task folder).** ADR-001: the curator edits the document and code only applies the edits and enforces one rule (the open-line rule); there is no deterministic task store, so the model matches, places and focuses. ADR-002: the planner is to be removed, there is no scheduled pass (a pass follows each analysis and the box uses absolute dates) and stories become on demand; only the first part of that, the curator beside the planner, is built so far. ADR-003: one OS lock (`fcntl.flock`, `msvcrt.locking` on Windows) serialises passes, undo and the worker, and a pass commits in a recoverable order (version files, archive entries, the document, `base.md`, then the pass-log line as the commit point); the box's closing marker carries the pass's version stamp, which tells `lock()` after a hard stop whether the document was replaced (roll forward) or not (roll back).
 - **Where the build differs from the spec** (decided and recorded in `docs/tasks/activities-curator/memory/`). (a) `ActivityStore.log_pass(record)` is a port method the spec lacked: a `failed` or `skipped_empty` pass writes only a pass-log line, never version files, so `undo` targets the last `meeting` record no `undo` record names. (b) `UndoPreview` has no `archive_stays`: no store method can know the archive size before the commit, so the result reports `archive_left_in_place` after the fact. (c) `DocFormat` has one field beyond the spec, `label_re`. (d) The curation step of `trec analyze` batches the analyzed ids oldest first (mixed days allowed); `trec activities curate --since` runs one pass per day. (e) CLI weekdays are English (`Mon 19/10`) and the focus lines and the curator's summary are the only model-written Portuguese echoed into English output (`AGENTS.md`).
 - **Known edges, not handled.** A new item inserted after a section heading the model wrote with a blank line under it splits the list by one blank line until the next pass (the skeleton has none). If `commit` raises after the document was replaced (three retries of `base.md` or the log line failed), the pass counts as failed and the batch is re-run one meeting at a time against a stale `base.md`; the next `lock()` completes the first pass. An `undo` killed between the `base.md` write and the log line, whose restored text has no stamp, leaves `base.md` on the old base; a retried `undo` is idempotent. The Windows lock branch and `os.startfile` have not run on Windows, and the worker's in-flight `claude -p` child is not signalled on shutdown (the next start rebuilds the pass).
-- **Verification so far.** Fakes, `FsActivityStore`, `FsMeetingRepository`, a real `Daemon` with the curator worker and the scripted Claude Code CLI (`tests/fixtures/fake_claude_cli.py`); no real model call and no `trec` command against the real data folder. **Pending.** (1) Q-001 (precision of the progress statements) and Q-002 (the curator over a synthetic sequence of days, at `medium` and `high` effort, which fixes the default) through `scripts/fidelity_eval.py`: each spends the Claude subscription and is run only with the user's approval. (2) `trec agent restart`, with the user's approval (a recording may be in progress), for the daemon to start the worker. (3) The shadow week (Q-003) and the go decision; until then the planner stays.
+- **Verification so far.** Fakes, `FsActivityStore`, `FsMeetingRepository`, a real `Daemon` with the curator worker and the scripted Claude Code CLI (`tests/fixtures/fake_claude_cli.py`); no real model call and no `trec` command against the real data folder. **Pending.** (1) Q-001 (precision of the progress statements) and Q-002 (the curator over a synthetic sequence of days, at `medium` and `high` effort, which fixes the default) through `scripts/fidelity_eval.py`: each spends the Claude subscription and is run only with the user's approval. (2) `trec agent restart`, with the user's approval (a recording may be in progress), for the daemon to start the worker. (3) The shadow week (Q-003) and the go decision; until then the planner stays. (Slice 2, below, records the outcome: the user gave the go on 2026-10-20; the daemon had already been restarted with the curator and the bootstrap run.)
+
+### Planner removed, stories on demand, retention in the daemon (2026-10-20)
+
+- Slice 2 of `docs/tasks/activities-curator/` (tasks 12 to 15). **The go:** on 2026-10-20 the user wrote "pode remover o plano das 18h" and the planner went the same day (ADR-002 of the task folder). Evidence behind it, as the user reported it: the daemon restarted with the curator, and `trec activities curate --since 2026-10-06` built the document in 9 passes over 19 meetings (37 items of the user's, 9 waiting on others, 13 of context), with reruns of curated meetings making 0 edits. **Waived or not run:** the user waived the full shadow week (Q-003, no list of misses); Q-001 (precision of the progress statements) and Q-002 (the curator over a synthetic sequence) were not run, because each spends the subscription, and no quality evaluation backs the decision. Task 8 stays `pending` in its file.
+- **Removed (hard cut, no shim):** `planner_claude.py`, `prompts/plan_system.md`, `use_cases/planning.py` (`BuildDailyPlan`, `DraftUserStories`), the `Planner` port, `DailyPlan`, `merge_open_actions`, `is_overdue_on`, the plan and open-actions repository methods, `trec plan`, `LaunchAgent.planner` / `ScheduledTask.planner`, `[planner] hour` and `[stories] enabled`. `ActionStatus.OVERDUE` stays, decode only, for old `analysis.json` files. The user's own state stays on disk, unread: `data/plans/*.md` and `*.json` of earlier days and `open_actions.json`.
+- **The 18:00 job.** `trec agent install`, `restart` and `uninstall` and the installers remove the job an older version installed (`local.teams-recorder.planner`, Windows task `planner`), through `constants.Legacy`, and say so only when it existed. Until the user runs `trec agent restart` (needs approval), the installed job keeps running `trec plan --purge` at 18:00 and now fails (the command no longer exists).
+- **Stories on demand.** `trec stories` takes no date: `DraftStoriesFromTags` (`use_cases/stories.py`) drafts a story for each item of `atividades.md` tagged `#história`, replaces the tag with a link to the draft under `lock(wait=False)`, and never sends an item to the writer twice (the drafts file is the only memory). The writer (`draft_from_blocks`) now sets each story's kind, priority and due date. Publishing reads only `plans/<day>.stories.json`, and a day already published can receive new stories. Build differences from the spec: `tagged_blocks(fmt, document, tag)` and `replace_tag(document, line, tag, replacement)` own the tag syntax; `UserStory.source_text` / `SkippedAction.source_line` persist the block; new port methods `ActivityStore.rewrite_document` and `MeetingRepository.story_drafts_path`; `BacklogMdPublisher` words a block story's origin as "atividades de <day>", not as a plan. `[stories] enabled` is ignored.
+- **Retention.** `PurgeOldAudio` moved to `use_cases/retention.py`; `Daemon._schedule_purge` runs it in the background on the first tick of each day (the day is recorded first, so a failure is retried tomorrow). `[audio] retention_days` replaces `[planner] retention_days`, which is still read as a fallback for one release. This takes effect after `trec agent restart`.
+- **Tooling.** `scripts/fidelity_eval.py` now runs the curator per day and drafts stories from tagged lines (`run_curation_and_stories`), and its wiki writer overrides `draft_from_blocks`; compiled and unit-checked only. `scripts/install.sh` / `install.ps1` stop offering the 6 pm planner; `install.ps1 -RetentionDays N`.
+- **Known leftovers, not changed here.** `prompts/user_story_guide.md` (the user's own guide) still says in line 8 that management and communication items "stay in the daily plan". `prompts/analyze_system.md` still explains `kind` by where actions "go" (stories, task cards, the daily plan), and a few code strings still name the plan (the `trec status` help line, a `messages.py` docstring). Windows parts have not run on Windows.
