@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. Humans: see `README.md`, `docs/REQUIREMENTS-AND-ARCHITECTURE.md` (requirements + architecture) and `docs/prd/` (product requirements).
+Guidance for coding agents working in this repository. Humans: see `README.md` (a short overview), `docs/guide/` (user and developer guides: install, commands, configuration, troubleshooting…), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` (requirements + architecture) and `docs/prd/` (product requirements).
 
 ## What this is
 
