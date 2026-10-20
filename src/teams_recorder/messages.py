@@ -24,6 +24,9 @@ class Notify:
     RECORDING_CANCELLED_BODY = "Meeting {meeting_id} discarded"
     STEP_FAILED = "{step} failed"                       # step: "Transcription" / "Analysis"
     STEP_FAILED_BODY = "Meeting {meeting_id}: {error}"
+    ACTIVITIES_UPDATED = "Activities updated"            # body: the curator's one-line summary
+    ACTIVITIES_FAILED = "Activity curation failed"
+    ACTIVITIES_FAILED_BODY = "{title} ({meeting_id}): {error}. It will be retried; or run trec activities curate {meeting_id}."
     PLAN_READY = "Daily plan ready"
     PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
     STORIES_READY = "User story drafts ready"
@@ -155,6 +158,16 @@ class Err:
     STORIES_ALREADY_PUBLISHED = "the stories of {day} were already published; drafting them again would put the same work on the board twice. Edit them on the board instead"
     # repository
     FILE_MISSING = "file not found: {path}"
+    CURATION_FAILED = "Activity curation failed: {reason}"   # content of curation_error.txt
+    CURATION_NO_MATCH = "{count} edits did not match the document ({target}…)"   # reason inside CURATION_FAILED
+    CURATION_BREAKS_RULE = "an edit would change a checkbox without archiving: {target}"   # reason inside CURATION_FAILED
+    CURATOR_BUSY = "the curator is working; try again in a few minutes"
+    NOTHING_TO_UNDO = "No pass to undo."
+    UNDO_STALE = "A new pass ran while you were deciding; run trec activities undo again."
+    ACTIVITY_COMMIT_INCOMPLETE = ("the activities pass {version} replaced the document but could not finish ({step}: {error}); "
+                                  "the next pass completes it")
+    ACTIVITY_STORE_IO = "the activities files could not be read or written ({error}); check the free disk space and the folder's permissions"
+    ACTIVITY_LOG_LINE = "line {line} of the pass log is not a pass record"   # detail inside BAD_JSON
     BAD_JSON = "invalid JSON in {path}: {error}"
     BAD_VERIFICATION = "a verification must be an object, not {value!r}"         # detail inside BAD_JSON
     BAD_REASON = "verification reason must be text, not {value!r}"               # detail inside BAD_JSON
@@ -178,6 +191,8 @@ class Err:
     INVALID_MIC_BACKEND = "invalid audio.mic_backend: {value!r}; use one of {options}"
     INVALID_EFFORT = "invalid llm.effort: {value!r}; use one of {options}"
     INVALID_VERIFY_EFFORT = "invalid verification.effort: {value!r}; use one of {options}"
+    INVALID_ACTIVITIES_EFFORT = "invalid activities.effort: {value!r}; use one of {options}"
+    INVALID_KEEP_VERSIONS = "invalid activities.keep_versions: {value!r}; use a whole number of at least 1"
     INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
     INVALID_LOOP_SHARE = "invalid transcription.max_loop_share: {value!r}; use a fraction above 0 and up to 1 (e.g. 0.10)"
     NO_DETECTOR = "daemon without a configured detector"
@@ -221,7 +236,7 @@ class Cli:
     MEETING_DEGRADED = "  ⚠ degraded transcript ({loop:.0%} in repetition loops)"
     MEETING_UNREADABLE = "  {meeting_id}  [unreadable: {error}]"
     ACTIVE_UNREADABLE = "Recording in progress: unreadable ({error})"
-    OPEN_ACTIONS_UNREADABLE = "Open actions: unreadable ({error})"
+    ACTIVITIES_STATUS_UNREADABLE = "Activities: unreadable ({error})"
     STORIES_WAITING_UNREADABLE = "Stories waiting to be published: unreadable ({error})"
     DEGRADED_TRANSCRIPTS = "Degraded transcripts: {count}"
     MEETING_RATE_MISMATCH = "  ⚠ Teams audio recorded at the wrong sample rate ({share:.0%} short padding)"
@@ -233,8 +248,18 @@ class Cli:
     MEETING_SPEAKERS_NONE = "  · speakers 0% ({reason})"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
-    OPEN_ACTIONS = "Open actions: {count}"
+    ACTIVITIES_STATUS = "Activities: {counts}{last}"
+    ACTIVITIES_STATUS_LAST = " (last pass {when})"
+    ACTIVITIES_STATUS_NO_COUNTS = "document has no actions or waiting sections"
+    ACTIVITIES_STATUS_NONE = "Activities: not created yet (trec activities curate --since YYYY-MM-DD)"
     # doctor
+    DOCTOR_ACTIVITIES = "[{mark}] Activities document: {path} ({state})"
+    DOCTOR_ACTIVITIES_OK = "ok, last pass {when}"
+    DOCTOR_ACTIVITIES_OK_NO_PASS = "ok, no pass recorded"
+    DOCTOR_ACTIVITIES_NONE = "not created yet (trec activities curate --since YYYY-MM-DD)"
+    DOCTOR_ACTIVITIES_NOT_CURATED = "{count} meetings not curated (trec activities)"
+    DOCTOR_ACTIVITIES_NOT_CURATED_ONE = "1 meeting not curated (trec activities)"
+    DOCTOR_ACTIVITIES_UNREADABLE = "[{mark}] Activities document: unreadable ({error})"
     CHECK = "[{mark}] {name}: {value}"
     DISK_LINE = "[{mark}] free disk: {free:.1f} GB (about {hours:.1f} h of recording) in {path}"
     OK, MISSING_MARK, INFO, WARNING = "ok ", "MISSING", "info", "WARNING"
@@ -334,6 +359,69 @@ class Cli:
     FILE_PATH = "  File: {path}"
     MINUTES_PATH = "  Minutes: {path}"
     TITLE_LINE = "  Title: {title}"
+    # activities (the document the curator keeps) and the curation step of `trec analyze`
+    ACTIVITIES_HELP = "The activities document: where it stands, rerun the curator for a meeting, bootstrap it from past meetings."
+    ACTIVITIES_OPEN_HELP = "Also open the document with the default application."
+    CURATE_CMD_HELP = "Rerun the activities curator for analyzed meetings, or build the document from the meetings since a date."
+    CURATE_ARG_HELP = "Meeting IDs to curate (analyzed meetings)."
+    CURATE_SINCE_HELP = "Curate every analyzed meeting held on or after this day (YYYY-MM-DD), a pass per day (up to 4 meetings)."
+    CURATE_YES_HELP = "Do not ask for confirmation (with --since)."
+    CURATE_NEEDS_TARGET = "give meeting IDs or --since YYYY-MM-DD"
+    CURATE_ONE_TARGET = "give meeting IDs or --since, not both"
+    CURATE_NOT_ANALYZED = "Meeting {meeting_id} is {state}, not analyzed: run trec analyze {meeting_id} first."
+    CURATE_CONFIRM = "Curate {meetings} meetings in {passes} passes {via} (~{minutes} min)?"
+    CURATE_VIA = {
+        "claude-code": "using your Claude subscription",
+        "api": "using the Anthropic API (spends API credit)",
+    }
+    CURATE_DECLINED = "Nothing curated."
+    CURATE_NOTHING_SINCE = "No analyzed meeting since {since}."
+    CURATE_WAITING = "waiting for the curator…"
+    CURATING = "Curating {meetings}…"
+    CURATING_MEETING = "{title} ({day:%d/%m})"
+    CURATING_SEPARATOR = ", "
+    CURATED_OK = " ok ({edits} edits)"
+    CURATED_SUMMARY = " — {summary}"
+    CURATION_FAILED = " failed: {reason}"
+    CURATION_UNFINISHED = "The document was updated, but the pass could not be fully recorded: {reason}"
+    CURATION_DEFERRED = "Deferred {meeting}: an earlier pass is unfinished; it will be curated at the next pass."
+    ACTIVITIES_NO_DOCUMENT = "No activities document yet. Build it from past meetings: trec activities curate --since YYYY-MM-DD"
+    ACTIVITIES_DOCUMENT = "Document: {path}"
+    ACTIVITIES_UPDATED = "Updated {when}{after}"
+    ACTIVITIES_AFTER = " after {titles}"
+    ACTIVITIES_FOCUS = "Focus:"
+    ACTIVITIES_FOCUS_LINE = "  {line}"
+    ACTIVITIES_OPEN = "Open: {counts}"
+    ACTIVITIES_COUNT_ACTIONS = "{count} yours"
+    ACTIVITIES_COUNT_WAITING = "{count} waiting on others"
+    ACTIVITIES_COUNT_AGENDA = "{count} agenda"
+    ACTIVITIES_COUNT_CONTEXT = "{count} context"
+    ACTIVITIES_COUNT_SEPARATOR = " · "
+    ACTIVITIES_LAST_PASS = "Last pass: {when}{summary}"
+    ACTIVITIES_NO_PASS = "Last pass: none recorded"
+    ACTIVITIES_NOT_CURATED = "Not curated:"
+    ACTIVITIES_NOT_CURATED_LINE = "  {meeting_id}{title}: {reason} → trec activities curate {meeting_id}"
+    ACTIVITIES_NOT_CURATED_TITLE = " ({title})"
+    ACTIVITIES_NOT_ATTEMPTED = "not attempted yet"
+    ACTIVITIES_OPEN_FAILED = "could not open {path}: {error}"
+    UNDO_CMD_HELP = "Restore the activities document to before the last pass (showing what changes first)."
+    UNDO_YES_HELP = "Do not ask for confirmation."
+    UNDO_LAST_PASS = "Last pass: {when}{after}{summary}"
+    UNDO_SUMMARY = " ({summary})"
+    UNDO_DIFF_NOW = "--- now"
+    UNDO_DIFF_BEFORE = "+++ before the pass"
+    UNDO_EDITED_AFTER = "This also discards {count} lines you edited after the pass."
+    UNDO_EDITED_AFTER_ONE = "This also discards 1 line you edited after the pass."
+    UNDO_CONFIRM = "Restore the document to before this pass?"
+    UNDO_DECLINED = "Nothing restored."
+    UNDO_RESTORED = "Restored. Run trec activities curate {meeting_ids} to curate {that} again."
+    UNDO_THAT_ONE = "that meeting"
+    UNDO_THOSE = "those meetings"
+    UNDO_ARCHIVE_CHANGED = "The archive changed after this pass; its entries were left in place."
+    UNDO_BUSY = "The curator is working; try again in a few minutes."
+    STARTFILE = "startfile"   # the os function that opens a file on Windows
+    WEEKDAYS_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    WHEN = "{weekday} {at:%d/%m %H:%M}"
     # daemon / agent
     DAEMON_ONCE_HELP = "Run a single detection iteration and exit (diagnostics)."
     DETECTOR_STATE = "detector ({name}): {state}; pid={pid}"
@@ -425,6 +513,20 @@ class Log:
     STOPPED_NOT_MIXED = "meeting %s was stopped but not mixed; mixing it now"
     MIX_TIMEOUT = "mixing %s s of audio with a %.0f s time limit"
     RESUME_FAILED = "failed to resume pending work"
+    AFTER_ANALYSIS_FAILED = "the after-analysis hook failed for meeting %s"
+    WORKER_STARTED = "activities curator worker started"
+    WORKER_STOPPING = "activities curator worker told to stop; a pass in flight is not awaited"
+    WORKER_STOPPED = "activities curator worker stopped"
+    WORKER_QUEUE = "activities curator: %d meeting(s) to curate (%d queued, %d pending): %s"
+    WORKER_QUEUE_PENDING_FAILED = "activities curator: pending meetings could not be listed: %s"
+    WORKER_QUEUE_FILTER_FAILED = "activities curator: the queued meetings could not be checked against the pass log: %s"
+    WORKER_QUEUE_DONE = "activities curator: %d queued meeting(s) already curated, dropped: %s"
+    WORKER_PASS_START = "activities curator pass %d/%d: %s"
+    WORKER_LOCK_WAIT = "activities curator pass %s waits for the document lock"
+    WORKER_PASS_END = "activities curator pass %s done: %d curated, %d failed, %d deferred, %d edit(s)"
+    WORKER_PASS_FAILED = "activities curator pass %s raised"
+    WORKER_PENDING_ENQUEUED = "activities curator: %d meeting(s) without a pass queued at start: %s"
+    WORKER_PENDING_FAILED = "activities curator: the meetings without a pass could not be queued: %s"
     STEP_FAILED = "%s failed for meeting %s"
     NOTIFICATION_FAILED = "notification failed: %s"
     LOG_NOTIFICATION = "[%s] %s"
@@ -457,6 +559,25 @@ class Log:
     SPEAKERS_BOOTOUT_FAILED = "launchctl bootout of %s failed (%s); stopping pid %d directly"
     SPEAKERS_STALE_STOPPED = "booted out the speaker observer job %s that no recording owned (pid %s)"
     SPEAKERS_CHECK_FAILED = "speaker observer check of %s failed: %s; the recording goes on (not logged again for this call)"
+    ACTIVITIES_ROLLED_FORWARD = "activities pass %s was interrupted after it replaced the document; completed it"
+    ACTIVITIES_ROLLED_BACK = "activities pass %s was interrupted before it replaced the document; rolled it back"
+    ACTIVITIES_COMMIT_RETRY = "activities pass %s: %s failed (%s); attempt %d/%d"
+    ACTIVITIES_LOG_TORN = "the last line of the activities pass log %s is cut short; ignoring it"
+    ACTIVITIES_ARCHIVE_CHANGED = "archive %s is no longer the size the pass left (%d, now %d); its entries stay in place"
+    CURATE_PASS_DONE = "activities pass %s committed: %d edit(s)%s"
+    CURATE_PASS_UNFINISHED = "activities pass %s replaced the document but is not fully recorded: %s"
+    CURATE_RETRIED = " after one repair round"
+    CURATE_PASS_EMPTY = "activities pass %s: nothing to curate in %s"
+    CURATE_PASS_FAILED = "activities pass %s failed: %s"
+    CURATE_ISOLATING = "activities pass of %d meetings failed; running them one at a time"
+    CURATE_WAITING = "the activities curator is busy; waiting for it"
+    CURATE_STEP_FAILED = "activities pass %s: could not %s: %s"
+    CURATE_STEP_LOG = "log the failed pass"
+    CURATE_STEP_ERROR_FILE = "write the curation error of %s"
+    CURATE_STEP_CLEAR = "clear the curation error of %s"
+    CURATE_STEP_NOTIFY = "send the notification"
+    CURATE_SKIP_DAMAGED = "meeting %s has no readable meta.json; it is left out of the curation window: %s"
+    ACTIVITIES_ROTATE_FAILED = "old activities versions in %s could not be removed: %s"
 
 
 class Prompt:
@@ -496,6 +617,16 @@ class Prompt:
                           "exactly the listed participants when the message lists participants seen in the meeting window")
     FIELD_TOPICS = "Main discussion topics in order, each with its key points"
     FIELD_RISKS = "Risks, blockers or issues raised"
+    FIELD_FOR_WHOM = "Who receives the result or waits for it, when the meeting said so (a name, or 'the client'); otherwise null"
+    FIELD_STATUS_UPDATES = ("What the meeting said about work that already existed before it: done, in progress, blocked, delayed, "
+                            "new date, reassigned or cancelled; not new tasks and not intentions (see the rules)")
+    FIELD_STATUS_ABOUT = "The work referred to, in the meeting's words, specific enough to be matched to a task later"
+    FIELD_STATUS_CHANGE = "done, in_progress, blocked, delayed, due_changed, reassigned or cancelled (see the rules)"
+    FIELD_STATUS_WHO = ("Whose work it is; '{self_owner}' for the recording owner (and for lines labelled with the owner's label); "
+                        "another person only when the transcript makes it evident; '{unknown}' otherwise")
+    FIELD_STATUS_EVIDENCE = "The literal words that say it, at most 20 words, hedges kept (acho que, quase)"
+    FIELD_STATUS_NEW_DUE = "The new date in ISO format (YYYY-MM-DD) for due_changed and delayed when one was said; otherwise null"
+    FIELD_STATUS_NEW_OWNER = "The person the work passes to, for reassigned; otherwise null"
     FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
     FIELD_PLAN_PRIORITIES = "3 to 5 priorities, one sentence each"
     FIELD_PLAN_COMPLETED = "ids of open actions that the day's analyses show as completed"
@@ -532,6 +663,66 @@ class Prompt:
     FIELD_TENTATIVE = "true when the transcript presents it tentatively rather than as decided"
     FIELD_SENSITIVE = "true when the claim carries sensitive personal data or a personal judgment about someone"
     FIELD_REASON = "one short sentence in Brazilian Portuguese explaining the verdict"
+    # The curator's message (adapters/outbound/curator_claude.py); prompts/curate_system.md explains every part of it.
+    CURATE_OPEN = "<{name}{attrs}>"
+    CURATE_CLOSE = "</{name}>"
+    CURATE_ATTR = ' {name}="{value}"'
+    CURATE_NOW = "Now: {weekday} {date} {time}"
+    CURATE_WHEN = "{date} {time}"
+    CURATE_NONE = "(none)"
+    CURATE_HEALTH_DEGRADED = "degraded"
+    CURATE_HEALTH_RATE = "wrong_sample_rate"
+    CURATE_REF = "{n}.{kind}{i}"
+    CURATE_LINE = "{ref} {text}"
+    CURATE_STATUS = "{ref} {change}: {about}"
+    CURATE_OWNER = " | owner: {owner}"
+    CURATE_WHO = " | who: {who}"
+    CURATE_DUE = " | due: {due}"
+    CURATE_DATE = " | date: {date}"
+    CURATE_PRIORITY = " | priority: {priority}"
+    CURATE_FOR = " | for: {name}"
+    CURATE_NEW_DATE = " | new date: {date}"
+    CURATE_NEW_OWNER = " | new owner: {owner}"
+    CURATE_QUOTE = ' | quote: "{evidence}"'
+    CURATE_AT = " | at: {at}"
+    CURATE_UNCONFIRMED = " | ⚠️ unconfirmed: {reason}"
+    CURATE_UNCONFIRMED_NO_REASON = " | ⚠️ unconfirmed"
+    CURATE_FAILURE = "[{index}] {error}{detail}\n{op}"
+    CURATE_FAILURE_DETAIL = " ({detail})"
+    CURATE_TASK = (
+        "Do this pass, in order:\n"
+        "1. Apply the user's edits and the box lines.\n"
+        "2. Add or update the document from each ref of each meeting.\n"
+        "3. Housekeeping: ticked items, past agenda entries, old context, 💤, the limit of two sub-lines.\n"
+        "4. Account for every ref: it appears in the `refs` of an edit or in `ignored`.\n"
+        "5. Copy every target and anchor exactly from `<document>`, from its body only (never the box or the link block).\n"
+        "6. Remove or change no checkbox line except with `archive`; every reorder is a `move`.\n"
+        "7. Write all content in Brazilian Portuguese."
+    )
+    CURATE_REPAIR_TASK = (
+        "The edits in `<failed_edits>` of your previous answer did not apply. `<document>` is the text as it stands now, "
+        "with the edits that did apply already in it. For each failed edit, return a corrected edit in `ops`: copy every "
+        "target and anchor exactly from `<document>`, keep the `refs`, and respect the checkbox rule. Leave out an edit "
+        "that no longer makes sense because its effect is already in the document. Return only `ops`."
+    )
+    # JSON Schema field descriptions of the curator's answer (part of the contract with the model)
+    FIELD_CURATE_OPS = "Edits to the document, applied in order, each to the text the previous ones left"
+    FIELD_OP_KIND = "replace, insert_after, move or archive"
+    FIELD_OP_TARGET = ("Whole line or lines of the document body, copied character by character; for move and archive "
+                       "the whole item (main line and sub-lines); for insert_after one line")
+    FIELD_OP_TEXT = "replace and insert_after: the new text; an empty string in replace removes the lines; null for move and archive"
+    FIELD_OP_REASON = "archive: the reason, in Brazilian Portuguese; null for the other edits"
+    FIELD_OP_ANCHOR = "move: one whole line of the document body, after which the item is pasted; null for the other edits"
+    FIELD_OP_REFS = "Refs of the meeting items this edit accounts for, for example 1.a1; empty when it accounts for none"
+    FIELD_CURATE_REMOVED = "Items the user deleted from the document since the last pass; the app archives them as removed by the user"
+    FIELD_REMOVED_TEXT = "The deleted item exactly as the user edits show it, main line and sub-lines"
+    FIELD_REMOVED_NOTE = "One short note in Brazilian Portuguese for the archive entry"
+    FIELD_CURATE_FOCUS = "3 to 5 lines in Brazilian Portuguese, without numbers: what to do next, items in bold, and why now"
+    FIELD_CURATE_SUMMARY = "One line in Brazilian Portuguese saying what this pass changed"
+    FIELD_CURATE_NOTIFY = "true when the pass added an action of the user's, added a 💬, changed a date of the user's, removed an item other than by a tick, or suspects an editor overwrite"
+    FIELD_CURATE_IGNORED = "Refs that need no edit, each with the reason"
+    FIELD_IGNORED_REF = "The ref, for example 1.o2"
+    FIELD_IGNORED_WHY = "Why it needs no edit, in Brazilian Portuguese"
 
 
 class Minutes:
@@ -566,6 +757,20 @@ class Minutes:
     ACTIONS_HEADER = "| # | Ação | Responsável | Prazo | Prioridade | Dito em |\n|---|---|---|---|---|---|"
     ACTION_ROW = "| {n} | {description} | {owner} | {due} | {priority} | {at} |"
     NO_ACTIONS = "Nenhuma ação registrada."
+    STATUS_UPDATES = "### 🔄 Andamento informado"
+    STATUS_LINE = "- {who}: {change} — {about}{detail} · \"{evidence}\"{at}{mark}"
+    STATUS_AT = " [{at}]"
+    STATUS_NEW_DUE = " (nova data {date})"
+    STATUS_NEW_OWNER = " (para {owner})"
+    STATUS_WHO_SELF = "Você"
+    STATUS_WHO_UNKNOWN = "Alguém"
+    STATUS_MARK = " ⚠️ não confirmado: {reason}"
+    STATUS_MARK_NO_REASON = " ⚠️ não confirmado"
+    STATUS_CHANGE_LABELS = {
+        "done": "concluído", "in_progress": "em andamento", "blocked": "bloqueado", "delayed": "atrasado",
+        "due_changed": "prazo alterado", "reassigned": "reatribuído", "cancelled": "cancelado",
+    }
+    WEEKDAYS_SHORT = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
     RISKS = "### ⚠️ Riscos e bloqueios"
     QUESTIONS = "### ❓ Perguntas em aberto"
     NEXT_STEPS = "### 🔜 Próximos passos"
@@ -647,3 +852,28 @@ class StoryDoc:
         "operation": "Operação", "management": "Gestão", "communication": "Comunicação",
     }
     FOOTER = "---\n_Rascunho gerado automaticamente seguindo o guia de user stories. Confira cada história antes de publicar._"
+
+
+class ActivityDoc:
+    """Markers, headings and labels of data/activities/atividades.md. Portuguese on purpose, like `Minutes`: it is a
+    document for the user, and the model writes its content in Portuguese."""
+
+    BOX_START = "<!-- curador:início (reescrito a cada passada; escreva fora desta caixa) -->"
+    BOX_END_PREFIX = "<!-- curador:fim"       # the closing marker is prefix + (" " + stamp) + suffix
+    BOX_END_SUFFIX = " -->"
+    LINKS_START = "<!-- links:início (gerado automaticamente) -->"
+    LINKS_END = "<!-- links:fim -->"
+    HEADING_ACTIONS = "## Minhas ações"
+    HEADING_WAITING = "## Aguardando outros"
+    HEADING_AGENDA = "## Agenda e prazos"
+    HEADING_CONTEXT = "## Contexto recente"
+    UPDATED = "Atualizado"
+    AFTER = "após"
+    FOCUS = "Foco"
+    WEEKDAYS = Minutes.WEEKDAYS_SHORT
+    TODAY = "(hoje)"
+    TITLE = "# Atividades"
+    REMOVED_BY_USER = "removido por você"      # archive reason of an item the user deleted
+    ARCHIVE_PREFIX = "### "                    # an archive entry starts with this heading marker
+    ARCHIVE_HEADER = ARCHIVE_PREFIX + "{date} — {reason}"
+    LINK_DEFINITION = "[{label}]: {target}"

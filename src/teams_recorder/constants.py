@@ -74,6 +74,7 @@ class Bin:
     DOTNET = "dotnet"
     BACKLOG = "backlog"           # Backlog.md CLI (npm i -g backlog.md / brew install backlog-md)
     GIT = "git"
+    OPEN = "open"                 # macOS: opens a file with its default application
 
 
 # --- files and folders -------------------------------------------------------
@@ -86,6 +87,7 @@ class Files:
     PLAN_PROMPT = "plan_system.md"
     STORIES_PROMPT = "stories_system.md"
     VERIFY_PROMPT = "verify_system.md"
+    CURATE_PROMPT = "curate_system.md"
     STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
@@ -128,6 +130,26 @@ class Files:
     STORIES_JSON = "{day}.stories.json"
     STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
     NOTICES_DIR = "notices"                          # in the data dir: one file per once-a-day notice, holding the day it last fired
+    ACTIVITIES_DIR = "activities"                    # in the data dir: the curated document, its archive and the curator's own state
+    ACTIVITIES_DOC = "atividades.md"
+    ARCHIVE_DIR = "arquivo"                          # in the activities dir: append-only, one file per month
+    ARCHIVE_MONTH = "{month}.md"                     # month: YYYY-MM
+    CURATOR_DIR = ".curator"                         # in the activities dir: lock, base.md and the versions
+    CURATOR_LOCK = "lock"                            # flock target, always empty
+    CURATOR_BASE = "base.md"                         # the document as the last pass left it
+    VERSIONS_DIR = "versions"                        # in the curator dir
+    VERSION_FILE = "{version}_{part}"                # part: a VersionPart value
+    ACTIVITIES_LOG = "activities.jsonl"              # in the log dir: one PassRecord per line, the commit point of a pass
+
+
+class VersionPart(StrEnum):
+    """The files a pass leaves in `.curator/versions/` (named `<version>_<part>`)."""
+
+    BEFORE = "before.md"      # the document the pass read
+    AFTER = "after.md"        # the document the pass wrote
+    BASE = "base.md"          # base.md after the pass; absent when the pass left none
+    PREVBASE = "prevbase.md"  # base.md as the pass found it; absent when there was none
+    PASS = "pass.json"        # the PassRecord, with the archive sizes
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
@@ -271,6 +293,9 @@ class Parse:
     BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
     DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
     DIALOG_GAVE_UP = "gave up:true"
+    ACTIVITY_OPEN = r"^\s*[-*+] \[ \] "            # an open checkbox line of the activities document
+    ACTIVITY_TICKED = r"^\s*[-*+] \[[xX]\] "       # a ticked one
+    ACTIVITY_LABEL = r"\]\[([^\]\s]+)\]"            # the label of a reference link: `[text][label]`
 
 
 # --- detection -------------------------------------------------------------------
@@ -404,6 +429,61 @@ class Speakers:
     MAX_LEVEL_DB = 100.0            # a level above this is a damaged energy.json (real RMS levels never exceed a few dB over 0)
     LAUNCHCTL_PRINT_TIMEOUT = 5.0   # seconds a `launchctl print` may take: the daemon asks on every tick, so it must stay short
     LAUNCHCTL_TIMEOUT = 20.0        # seconds the other launchctl calls get (bootout waits for the helper to leave)
+
+
+class Activities:
+    ENABLED = True                       # [activities] enabled: the daemon's worker and the curation step of `trec analyze`
+    DEFAULT_CLI_MODEL = "opus"           # [activities] cli_model, with provider = "claude-code" ([activities] model defaults to the analyzer's)
+    DEFAULT_EFFORT = Effort.MEDIUM       # [activities] effort
+    NOTIFY = True                        # [activities] notify
+    WORKER_DRAIN = 3                     # ids the daemon's worker takes from its queue after the one it woke up for (one batch in all)
+    SKELETON_STAMP = "00000000-000000"   # the stamp in the closing marker of the skeleton's box; no pass version equals it
+    KEEP_VERSIONS = 50                   # passes whose version files are kept for undo
+    ARCHIVE_LINK_UP = "../"              # the archive sits one folder below the document: its link targets go one level further up
+    ARCHIVE_ENTRY_LIMIT = 60             # recent archive entries shown to the curator
+    COMMIT_ATTEMPTS = 3                  # tries of base.md and the pass-log line once the document has been replaced
+    LOCK_POLL = 0.1                      # seconds between tries of the Windows lock
+    DATE_FORMAT = "%d/%m/%Y"             # date in an archive entry's heading
+    MONTH_FORMAT = "%Y-%m"               # archive file name
+    VERSION_FORMAT = "%Y%m%d-%H%M%S"     # a pass's version: its version files' name and the stamp in the box's closing marker
+    BATCH_SIZE = 4                       # meetings curated by one pass (oldest first)
+    MAX_ATTEMPTS = 2                     # failed passes a meeting curated alone may cost before the daemon stops retrying it
+    RETRY_WORKING_DAYS = 2               # `pending()` looks this many working days back (today is day 0)
+    LISTING_WORKING_DAYS = 10            # `not_curated()` (the `trec activities` listing) looks this many working days back
+    EXCERPT_WINDOW = 60                  # seconds of transcript kept before and after each status update
+    TARGET_CHARS = 60                    # characters of an edit's target quoted in a failure message
+    EST_SECONDS_PER_PASS = 160           # the bootstrap's time estimate per pass (`trec activities curate --since`)
+    ESTIMATE_STEP_MINUTES = 5            # the estimate is rounded up to a multiple of this
+
+
+class Curator:
+    """The curator's call: tags of its user message and the letters of its refs (the data contract with
+    prompts/curate_system.md), the usage tags, and the formats of the dates it is shown."""
+
+    DOCUMENT = "document"
+    MEETING = "meeting"
+    EXCERPTS = "excerpts"
+    EXCERPT = "excerpt"
+    CALENDAR = "calendar"
+    USER_EDITS = "user_edits"
+    BOX_LINES = "box_lines"
+    LAST_PASS = "last_pass"
+    RECENT_ARCHIVE = "recent_archive"
+    TASK = "task"
+    FAILED_EDITS = "failed_edits"
+    REF_MY_ACTION = "a"       # refs are `<meeting n>.<letter><i>`: 1.a1, 1.o2, ...
+    REF_OTHERS_ACTION = "o"
+    REF_STATUS = "u"
+    REF_DEADLINE = "p"
+    REF_NEXT_MEETING = "n"
+    REF_DECISION = "d"
+    REF_QUESTION = "q"
+    REF_RISK = "r"
+    TAG = "curate"            # llm_usage.jsonl tag: curate:<first meeting id>
+    REPAIR_TAG = "curate-repair"
+    DATE_FORMAT = "%d/%m/%Y"
+    TIME_FORMAT = "%H:%M"
+    HEALTH_SEPARATOR = ", "
 
 
 class Stories:

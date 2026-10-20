@@ -33,5 +33,22 @@ class RepositoryError(TeamsRecorderError):
     """Read or write failure in the meeting repository."""
 
 
+class CommitIncomplete(RepositoryError):
+    """A pass replaced the document but could not write `base.md` or its pass-log line: the pass happened, and the next
+    `lock()` finishes it. It is not a failed pass."""
+
+
 class MeetingNotFound(RepositoryError):
     """The requested meeting does not exist in the repository."""
+
+
+class CuratorBusy(TeamsRecorderError):
+    """The activities curator holds the lock and the caller must not wait (undo)."""
+
+
+class NothingToUndo(TeamsRecorderError):
+    """The pass log holds no pass that can be undone."""
+
+
+class UndoStale(TeamsRecorderError):
+    """The last pass is not the one that was previewed."""

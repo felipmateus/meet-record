@@ -243,6 +243,7 @@ class ClaimKind(StrEnum):
     ACTION = "action"
     DEADLINE = "deadline"
     PARTICIPANT = "participant"
+    STATUS_UPDATE = "status_update"
 
 
 @dataclass(frozen=True)
@@ -285,6 +286,7 @@ class Action:
     at: str | None = None  # transcript timestamp (HH:MM:SS) where it was said, for verification
     kind: ActionKind | None = None  # None: extracted before actions were classified
     verification: Verification | None = None  # None: not verified
+    for_whom: str | None = None  # who receives or waits for the result, when the meeting said so
 
     @property
     def route(self) -> ActionRoute:
@@ -315,6 +317,33 @@ class Deadline:
     verification: Verification | None = None  # None: not verified
 
 
+class StatusChange(StrEnum):
+    """What a meeting said happened to work that already existed."""
+
+    DONE = "done"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    DELAYED = "delayed"
+    DUE_CHANGED = "due_changed"
+    REASSIGNED = "reassigned"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class StatusUpdate:
+    """Progress reported in a meeting on work that existed before it. The analyzer does not know which item of the
+    activities document it concerns: `about` is in the meeting's words and the curator matches it."""
+
+    about: str
+    change: StatusChange
+    who: str                       # Llm.OWNER_SELF, a name, or Llm.OWNER_UNKNOWN
+    evidence: str                  # literal quote, at most 20 words, hedges kept
+    at: str | None = None          # HH:MM:SS where it was said
+    new_due: date | None = None    # for due_changed and delayed
+    new_owner: str | None = None   # for reassigned
+    verification: Verification | None = None  # None: not verified
+
+
 @dataclass
 class Analysis:
     meeting_id: str
@@ -332,6 +361,7 @@ class Analysis:
     topics: list[Topic] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     participant_checks: dict[str, Verification] = field(default_factory=dict)  # by name, as in `participants`; absent: not verified
+    status_updates: list[StatusUpdate] = field(default_factory=list)  # progress on earlier work, in the order it was said
 
     @property
     def all_actions(self) -> list[Action]:

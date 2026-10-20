@@ -20,6 +20,7 @@ TRANSCRIPT_JSON = "transcript.json"
 ANALYSIS = "analysis.json"
 MINUTES = "minutes.md"  # human-readable minutes rendered from the analysis (not part of status)
 ERROR = "error.txt"
+CURATION_ERROR = "curation_error.txt"  # why the activities curator could not take this meeting; not part of status
 LOCK = ".lock"
 
 RAW_TRACKS = (TAP_TRACK, MIC_TRACK)
