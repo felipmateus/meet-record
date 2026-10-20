@@ -27,7 +27,7 @@ from teams_recorder.domain import (
     UserStory,
     derive_status,
 )
-from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, LOCK, META, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, AUDIO, CURATION_ERROR, ERROR, LOCK, META, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -107,6 +107,33 @@ def test_failed_marks_and_clears(fs: FsMeetingRepository):
     assert derive_status(fs.files(m.id)) == MeetingStatus.FAILED
     fs.clear_failed(m.id)
     assert ERROR not in fs.files(m.id)
+
+
+def test_curation_error_round_trips_without_the_meeting_lock_and_leaves_the_status_alone(fs: FsMeetingRepository):   # UT-109
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.path(m.id, ANALYSIS).write_text("{}")
+    status = derive_status(fs.files(m.id))
+    assert CURATION_ERROR == "curation_error.txt" and fs.curation_error(m.id) is None
+    with fs.lock(m.id):   # a step holding the meeting lock does not block the error file, and the file never takes the lock
+        fs.mark_curation_failed(m.id, "the curator timed out")
+        assert fs.curation_error(m.id) == "the curator timed out"
+    assert fs.path(m.id, CURATION_ERROR).read_text() == "the curator timed out\n"
+    assert LOCK not in fs.files(m.id) and CURATION_ERROR in fs.files(m.id)
+    assert derive_status(fs.files(m.id)) == status
+    fs.mark_curation_failed(m.id, "second attempt")
+    assert fs.curation_error(m.id) == "second attempt"
+    fs.clear_curation_failed(m.id)
+    fs.clear_curation_failed(m.id)   # clearing twice is harmless
+    assert fs.curation_error(m.id) is None and CURATION_ERROR not in fs.files(m.id)
+    assert not [name for name in fs.files(m.id) if name.endswith(Files.TMP_SUFFIX)]
+    assert derive_status(fs.files(m.id)) == status
+
+
+def test_curation_error_of_an_unknown_meeting_is_meeting_not_found(fs: FsMeetingRepository):
+    with pytest.raises(MeetingNotFound):
+        fs.mark_curation_failed("nope", "x")
+    with pytest.raises(MeetingNotFound):
+        fs.curation_error("nope")
 
 
 def test_delete_file_and_meeting(fs: FsMeetingRepository):

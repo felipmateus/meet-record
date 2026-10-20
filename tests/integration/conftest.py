@@ -1,4 +1,5 @@
 import json
+import logging
 import subprocess
 from pathlib import Path
 
@@ -24,3 +25,17 @@ def throwaway_board(tmp_path: Path) -> Path:
 def board_tasks(board: Path) -> list[dict]:
     listed = subprocess.run(["backlog", "task", "list", "--json"], cwd=board, check=True, capture_output=True, text=True).stdout
     return list(json.loads(listed)["tasks"])
+
+
+@pytest.fixture(autouse=True)
+def _undo_root_logging_changes():
+    """`trec daemon` (run through the CLI runner by some tests) installs a stream handler on the root logger that writes to the
+    runner's captured stream; once that stream is closed, every later log line of a CLI test prints a "Logging error" into its
+    output. Takes back what a test added to the root logger (pytest's own capture handlers aside) and its level."""
+    root = logging.getLogger()
+    before, level = list(root.handlers), root.level
+    yield
+    for handler in list(root.handlers):
+        if handler not in before and not type(handler).__module__.startswith("_pytest"):
+            root.removeHandler(handler)
+    root.setLevel(level)

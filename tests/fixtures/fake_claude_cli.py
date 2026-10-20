@@ -1,6 +1,13 @@
 """Simulates `claude -p --output-format json`: reads the message from stdin and prints an envelope.
 
 Behavior is controlled by the FAKE_CLAUDE_MODE variable: success (default), error, no_structured, bad_schema.
+
+By default it answers with a meeting analysis. Other answers, for the other structured calls:
+- FAKE_CLAUDE_OUTPUT_FILE: path to a JSON file holding the structured output to return on every call;
+- FAKE_CLAUDE_SCRIPT: path to a JSON file holding a list of structured outputs, returned in order (the last one repeats);
+  the position is kept in `<script>.n`, so a test that runs several calls shares one script;
+- FAKE_CLAUDE_RECORD: path of a JSON-lines file where every call appends `{"system": ..., "user": ...}`.
+With an output file or a script the message is not required to hold a transcript.
 """
 import json
 import os
@@ -13,7 +20,14 @@ if any(k.startswith("ANTHROPIC_") for k in os.environ):
 args = sys.argv[1:]
 assert "-p" in args and "--json-schema" in args and "--system-prompt" in args, args
 user_message = sys.stdin.read()
-assert "Transcript" in user_message, user_message[:100]
+output_file = os.environ.get("FAKE_CLAUDE_OUTPUT_FILE")
+script_file = os.environ.get("FAKE_CLAUDE_SCRIPT")
+record_file = os.environ.get("FAKE_CLAUDE_RECORD")
+if record_file:
+    with open(record_file, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"system": args[args.index("--system-prompt") + 1], "user": user_message}, ensure_ascii=False) + "\n")
+if not (output_file or script_file):
+    assert "Transcript" in user_message, user_message[:100]
 
 out = {
     "title": "Revisão da sprint",
@@ -30,6 +44,17 @@ out = {
     "open_questions": [],
     "next_meetings": [],
 }
+if output_file:
+    with open(output_file, encoding="utf-8") as fh:
+        out = json.load(fh)
+elif script_file:
+    with open(script_file, encoding="utf-8") as fh:
+        script = json.load(fh)
+    counter = script_file + ".n"
+    position = int(open(counter).read()) if os.path.exists(counter) else 0
+    with open(counter, "w") as fh:
+        fh.write(str(position + 1))
+    out = script[min(position, len(script) - 1)]
 envelope = {
     "type": "result", "subtype": "success", "is_error": False,
     "result": json.dumps(out, ensure_ascii=False), "structured_output": out,

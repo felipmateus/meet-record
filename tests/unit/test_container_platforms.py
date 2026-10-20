@@ -197,3 +197,56 @@ def test_verification_off_keeps_only_the_code_checks(tmp_path: Path, monkeypatch
     c = build_container(load_settings(tmp_path), headless=True)
     step = c.analyze_meeting().verify
     assert c.verifier is None and step is not None and step.verifier is None   # no model call; PRD decision 11
+
+
+def test_ut108_the_container_builds_the_curator_the_store_and_the_use_case_from_the_activities_settings(tmp_path: Path, monkeypatch):
+    from teams_recorder.adapters.outbound.activities_fs import FsActivityStore
+    from teams_recorder.adapters.outbound.curator_claude import ClaudeCurator
+    from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport
+    from teams_recorder.application.use_cases.activities import CurateMeetings, UndoLastPass, doc_format
+    from teams_recorder.constants import Effort
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    (tmp_path / "config.toml").write_text(
+        '[llm]\nprovider = "claude-code"\ncli_model = "sonnet"\neffort = "high"\n[user]\nname = "Felipe"\n'
+        '[activities]\ncli_model = "opus"\nnotify = false\nkeep_versions = 7\n')
+    c = build_container(load_settings(tmp_path), headless=True)
+
+    curator = c.curator
+    assert isinstance(curator, ClaudeCurator) and isinstance(curator.transport, ClaudeCodeTransport)
+    assert curator.transport.model == "opus" and curator.transport.effort is Effort.MEDIUM   # its own model and effort, not the analyzer's
+    assert curator.transport.usage_log == c.settings.usage_log and curator.prompt_path == c.settings.prompts_dir / Files.CURATE_PROMPT
+    assert curator.transport is not c.verifier.transport   # type: ignore[union-attr]
+    store = c.activity_store
+    assert isinstance(store, FsActivityStore) and store.fmt == doc_format() and store.keep_versions == 7
+    assert store.path() == c.settings.data_dir / "activities" / "atividades.md"
+    use = c.curate_meetings()
+    assert isinstance(use, CurateMeetings)
+    assert (use.repo, use.store, use.curator, use.notifier, use.clock) == (c.repo, store, curator, c.notifier, c.clock)
+    assert use.user_name == "Felipe" and use.notify is False
+    summary = c.activities_summary()
+    assert (summary.repo, summary.store) == (c.repo, store) and isinstance(summary.curate, CurateMeetings) and summary.curate.store is store
+    undo = c.undo_last_pass()
+    assert isinstance(undo, UndoLastPass) and (undo.store, undo.clock) == (store, c.clock)
+
+    (tmp_path / "config.toml").write_text('[llm]\nprovider = "api"\nmodel = "claude-sonnet-5-5"\n[activities]\neffort = "low"\n')
+    api = build_container(load_settings(tmp_path), headless=True).curator
+    assert isinstance(api, ClaudeCurator) and isinstance(api.transport, ApiTransport)
+    assert api.transport.model == "claude-sonnet-5-5" and api.transport.effort is Effort.LOW   # [activities] model defaults to the analyzer's
+
+
+def test_ut108_activities_disabled_only_switches_off_the_automatic_triggers_the_use_case_is_still_built(tmp_path: Path):
+    (tmp_path / "config.toml").write_text("[activities]\nenabled = false\n")
+    c = build_container(load_settings(tmp_path), headless=True)
+    assert c.settings.activities_enabled is False
+    assert c.curate_meetings().store is c.activity_store and c.curator is not None   # `trec activities curate` still works
+
+
+def test_ut108_pipeline_takes_the_after_analysis_hook(tmp_path: Path):
+    c = build_container(load_settings(tmp_path), headless=True)
+
+    def hook(meeting_id: str) -> None:
+        pass
+
+    assert c.pipeline(after_analysis=hook).after_analysis is hook
+    assert c.pipeline(hook).after_analysis is hook
+    assert c.pipeline().after_analysis is None

@@ -297,3 +297,67 @@ def test_the_repository_config_documents_the_speakers_section():
     s = load_settings(Path(__file__).resolve().parents[2])
     assert s.speakers_enabled is True
     assert "[speakers]" in (Path(__file__).resolve().parents[2] / "config.toml").read_text()
+
+
+def test_a_config_without_activities_yields_the_documented_defaults(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[llm]\nmodel = "claude-sonnet-5-5"\n')
+    s = load_settings(tmp_path)
+    assert s.activities_enabled is True and s.activities_notify is True and s.activities_keep_versions == 50
+    assert s.activities_cli_model == "opus" and s.activities_effort is Effort.MEDIUM
+    assert s.activities_model == "claude-sonnet-5-5"   # the analyzer's model when [activities] sets none
+    assert load_settings(tmp_path / "missing").activities_model == "claude-opus-5-5"
+
+
+def test_every_activities_key_set_in_the_file_is_read(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        '[llm]\nmodel = "claude-sonnet-5-5"\n'
+        '[activities]\nenabled = false\nmodel = "claude-opus-5-5"\ncli_model = "sonnet"\neffort = "HIGH"\nnotify = false\nkeep_versions = 7\n')
+    s = load_settings(tmp_path)
+    assert (s.activities_enabled, s.activities_model, s.activities_cli_model, s.activities_effort, s.activities_notify, s.activities_keep_versions) == (
+        False, "claude-opus-5-5", "sonnet", Effort.HIGH, False, 7)
+
+
+def test_an_activities_effort_outside_effort_is_rejected_like_the_other_sections(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[activities]\neffort = "ultra"\n')
+    with pytest.raises(ValueError, match="activities.effort") as raised:
+        load_settings(tmp_path)
+    assert str(raised.value) == Err.INVALID_ACTIVITIES_EFFORT.format(value="ultra", options=tuple(e.value for e in Effort))
+
+
+@pytest.mark.parametrize("value", ["0", "-3", '"many"'])
+def test_keep_versions_must_be_a_whole_number_of_at_least_one(tmp_path: Path, value: str):
+    (tmp_path / "config.toml").write_text(f"[activities]\nkeep_versions = {value}\n")
+    with pytest.raises(ValueError, match="activities.keep_versions"):
+        load_settings(tmp_path)
+
+
+def test_the_repository_config_documents_the_activities_section_with_the_defaults():
+    root = Path(__file__).resolve().parents[2]
+    s = load_settings(root)
+    assert "[activities]" in (root / "config.toml").read_text()
+    assert (s.activities_enabled, s.activities_cli_model, s.activities_effort, s.activities_notify, s.activities_keep_versions) == (
+        True, "opus", Effort.MEDIUM, True, 50)
+    assert s.activities_model == s.llm_model
+
+
+def test_config_tool_prints_the_activities_switch_and_writes_booleans_and_numbers(tmp_path: Path, monkeypatch, capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("config_tool", Path(__file__).resolve().parents[2] / "scripts" / "config_tool.py")
+    assert spec is not None and spec.loader is not None
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    (tmp_path / "config.toml").write_text('[user]\nname = "Felipe"\n[activities]\nenabled = true\nkeep_versions = 50\nmodel = "x"\n')
+    monkeypatch.setattr(tool, "PROJECT", tmp_path)
+
+    tool.get()
+    assert "activities_enabled=true" in capsys.readouterr().out.splitlines()
+    tool.set_value("activities", "enabled", "false")
+    tool.set_value("activities", "keep_versions", "20")
+    tool.set_value("activities", "model", "claude-opus-5-5")
+    tool.set_value("user", "name", "Ana")
+
+    assert (tmp_path / "config.toml").read_text() == '[user]\nname = "Ana"\n[activities]\nenabled = false\nkeep_versions = 20\nmodel = "claude-opus-5-5"\n'
+    s = load_settings(tmp_path)
+    assert s.activities_enabled is False and s.activities_keep_versions == 20 and s.user_name == "Ana"
+    tool.get()
+    assert "activities_enabled=false" in capsys.readouterr().out.splitlines()

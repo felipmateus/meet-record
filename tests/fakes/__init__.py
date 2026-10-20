@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
-from teams_recorder.application.ports import ActiveRecording, CallState, CaptureHandle
+from teams_recorder.application.ports import ActiveRecording, CallState, CaptureHandle, VersionFiles
 from teams_recorder.domain import (
     Action,
     Analysis,
@@ -15,11 +15,16 @@ from teams_recorder.domain import (
     CaptureError,
     ClaimRef,
     CaptureStats,
+    CuratorInput,
+    CuratorOutput,
     DailyPlan,
     Decision,
     EnergyTimeline,
     Meeting,
     MeetingNotFound,
+    Op,
+    OpFailure,
+    PassRecord,
     PublishError,
     RepositoryError,
     Segment,
@@ -33,7 +38,7 @@ from teams_recorder.domain import (
     UserStory,
     Verification,
 )
-from teams_recorder.domain.status import ANALYSIS, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, CURATION_ERROR, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 
 
 class FakeClock:
@@ -263,6 +268,7 @@ class InMemoryMeetingRepository:
         self.notice_days: dict[str, date] = {}
         self.unavailable: dict[str, str] = {}   # meeting id -> reason written by write_speakers_unavailable
         self.speaker_log_calls: list[tuple[str, float, float]] = []
+        self.curation_errors: dict[str, str] = {}   # meeting id -> text of curation_error.txt
 
     def _get(self, meeting_id: str) -> _Rec:
         try:
@@ -395,6 +401,18 @@ class InMemoryMeetingRepository:
     def clear_failed(self, meeting_id: str) -> None:
         self._get(meeting_id).files.discard(ERROR)
 
+    def mark_curation_failed(self, meeting_id: str, message: str) -> None:
+        self._get(meeting_id).files.add(CURATION_ERROR)
+        self.curation_errors[meeting_id] = message
+
+    def clear_curation_failed(self, meeting_id: str) -> None:
+        self._get(meeting_id).files.discard(CURATION_ERROR)
+        self.curation_errors.pop(meeting_id, None)
+
+    def curation_error(self, meeting_id: str) -> str | None:
+        self._get(meeting_id)
+        return self.curation_errors.get(meeting_id)
+
     def save_plan(self, plan: DailyPlan) -> None:
         self.plans[plan.day] = plan
 
@@ -495,3 +513,120 @@ class FakeStoryRenderer:
         self.calls.append((drafts, actions, existing))
         self.degraded.append(degraded)
         return f"# Stories {drafts.day}\n{len(drafts.stories)} stories\n"
+
+
+class FakeActivityCurator:
+    """Answers `curate` with the scripted outputs in order (the last one repeats) and `repair` with the scripted op lists,
+    recording every input. `during_call` runs inside each call, that is, between the use case's snapshot of the document and its
+    re-read, so a test can edit the document "while the model is thinking"."""
+
+    def __init__(self, outputs: list[CuratorOutput] | None = None, repairs: list[list[Op]] | None = None, fail: Exception | None = None,
+                 during_call: Callable[[], None] | None = None) -> None:
+        self.outputs = list(outputs or [])
+        self.repairs = list(repairs or [])
+        self.fail = fail
+        self.during_call = during_call
+        self.inputs: list[CuratorInput] = []
+        self.repair_calls: list[tuple[CuratorInput, str, list[OpFailure]]] = []
+
+    def curate(self, data: CuratorInput) -> CuratorOutput:
+        self.inputs.append(data)
+        if self.during_call:
+            self.during_call()
+        if self.fail:
+            raise self.fail
+        if not self.outputs:
+            return CuratorOutput(ops=[], user_removed=[], focus=[], summary="", notify=False, ignored=[])
+        return self.outputs.pop(0) if len(self.outputs) > 1 else self.outputs[0]
+
+    def repair(self, data: CuratorInput, current: str, failures: list[OpFailure]) -> list[Op]:
+        self.repair_calls.append((data, current, list(failures)))
+        if self.during_call:
+            self.during_call()
+        if self.fail:
+            raise self.fail
+        return self.repairs.pop(0) if self.repairs else []
+
+
+class InMemoryActivityStore:
+    """The activities store in memory. `busy` makes `lock(wait=False)` yield False; `fail_commit` makes the next commit raise, `fail_log` every log_pass;
+    `commits` records every commit; the archive is one text whose size is the bytes of the entries appended."""
+
+    def __init__(self, document: str | None = None, base: str | None = None, busy: bool = False) -> None:
+        self.document = document
+        self.base = base
+        self.busy = busy
+        self.fail_commit: Exception | None = None
+        self.fail_log: Exception | None = None   # makes every log_pass raise
+        self.logged: list[PassRecord] = []       # the records written by log_pass (no commit)
+        self.records: list[PassRecord] = []
+        self.versions: dict[str, VersionFiles] = {}
+        self.archive = ""
+        self.commits: list[tuple[str, str, list[tuple[str, str]], str | None, PassRecord]] = []
+        self.locks: list[bool] = []              # `wait` of every lock() call
+        self.truncated: list[PassRecord] = []
+        self.document_path = Path("activities") / "atividades.md"
+
+    @contextmanager
+    def lock(self, wait: bool = True) -> Iterator[bool]:
+        self.locks.append(wait)
+        if self.busy and not wait:
+            yield False
+            return
+        yield True
+
+    def read_document(self) -> str | None:
+        return self.document
+
+    def read_base(self) -> str | None:
+        return self.base
+
+    def recent_archive(self, limit: int) -> list[str]:
+        entries = [chunk for chunk in self.archive.split("### ")[1:]]
+        return ["### " + "\n".join(entry.split("\n")[:2]).rstrip("\n") for entry in entries[-limit:]] if limit > 0 else []
+
+    def commit(self, before: str, after: str, archived: list[tuple[str, str]], base: str | None, record: PassRecord) -> None:
+        if self.fail_commit is not None:
+            raise self.fail_commit
+        if archived:
+            appended = "".join(f"### {reason}\n{text}\n" for text, reason in archived)
+            size = len(self.archive.encode("utf-8"))
+            record = replace(record, archive_file="arquivo/archive.md", archive_bytes_before=size,
+                             archive_bytes_after=size + len(appended.encode("utf-8")))
+            self.archive += appended
+        self.commits.append((before, after, list(archived), base, record))
+        self.versions[record.version] = VersionFiles(before, after, base, self.base)
+        self.document = after
+        self.base = base
+        self.records.append(record)
+
+    def log_pass(self, record: PassRecord) -> None:
+        if self.fail_log is not None:
+            raise self.fail_log
+        self.records.append(record)
+        self.logged.append(record)
+
+    def passes(self) -> list[PassRecord]:
+        return list(self.records)
+
+    def version(self, name: str) -> VersionFiles:
+        try:
+            return self.versions[name]
+        except KeyError:
+            raise RepositoryError(f"no version {name}") from None
+
+    def version_names(self) -> list[str]:
+        return sorted(self.versions)
+
+    def truncate_archive(self, record: PassRecord) -> bool:
+        if record.archive_file is None or record.archive_bytes_before is None or record.archive_bytes_after is None:
+            return True
+        data = self.archive.encode("utf-8")
+        if len(data) != record.archive_bytes_after:
+            return False
+        self.archive = data[:record.archive_bytes_before].decode("utf-8")
+        self.truncated.append(record)
+        return True
+
+    def path(self) -> Path:
+        return self.document_path

@@ -53,8 +53,9 @@ class FakeContainer:
     def cancel_recording(self):
         return CancelRecording(self.repo, self.proc, self.mic, self.notifier, self.speakers)
 
-    def pipeline(self):
-        return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()))
+    def pipeline(self, after_analysis=None):
+        return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()),
+                        after_analysis)
 
 
 def _inline(fn):

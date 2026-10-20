@@ -50,7 +50,7 @@ def test_status_shows_meetings_and_next_step(tmp_path: Path, monkeypatch):
     assert "Meetings: 1" in result.output
     assert "2026-10-06_14-00-00 Daily  [recorded] → next: transcribe" in result.output
     assert "API key: MISSING" in result.output
-    assert "Open actions: 0" in result.output
+    assert Cli.ACTIVITIES_STATUS_NONE in result.output and "Open actions" not in result.output
 
 
 def test_plan_requires_provider_prerequisites(tmp_path: Path, monkeypatch):
@@ -512,14 +512,14 @@ def test_a_damaged_transcript_is_reported_not_a_traceback(tmp_path: Path, monkey
 
 def test_status_reports_a_damaged_file_instead_of_a_traceback(tmp_path: Path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
-    plans = project / "data" / "plans"
-    plans.mkdir(parents=True)
-    (plans / Files.OPEN_ACTIONS).write_text('[{"description": "sem id"}]')
+    log = project / "data" / Files.LOG_DIR / Files.ACTIVITIES_LOG
+    log.parent.mkdir(parents=True)
+    log.write_text("not json\n{}\n")
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
-    assert "Open actions: unreadable (invalid JSON in" in result.output and Files.OPEN_ACTIONS in result.output
+    assert "Activities: unreadable (invalid JSON in" in result.output and Files.ACTIVITIES_LOG in result.output
     assert "Meetings: 0" in result.output   # the rest of the status is still shown
 
 
@@ -534,7 +534,7 @@ def test_status_shows_a_damaged_meeting_on_its_own_line(tmp_path: Path, monkeypa
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
     assert f"  {broken.id}  [unreadable: invalid JSON in" in result.output
-    assert f"{fine.id} Daily  [recording]" in result.output and "Open actions: 0" in result.output
+    assert f"{fine.id} Daily  [recording]" in result.output and Cli.ACTIVITIES_STATUS_NONE in result.output
 
 
 def test_transcribe_and_status_mark_a_teams_track_recorded_at_the_wrong_rate(tmp_path: Path, monkeypatch):
