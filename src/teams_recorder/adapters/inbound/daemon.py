@@ -13,6 +13,9 @@ the answer before transcribing.
 The daemon owns a CuratorWorker: a thread that, after each meeting reaches `analyzed`, updates the
 activities document (CurateMeetings). The pipeline hands it the meeting ids; the worker batches them,
 adds the meetings still pending from the last working days, and is never awaited on shutdown.
+
+The first tick of each calendar day also schedules the audio retention (`PurgeOldAudio`) in the background; the tick
+never runs it inline, the day is recorded before it is scheduled, and a failure is logged and not retried that day.
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ import logging
 import queue
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
@@ -163,6 +166,7 @@ class Daemon:
     questions: dict[str, _Question] = field(default_factory=dict)   # meeting id -> keep-recording question
     ignoring_call: bool = False   # the user discarded this call's recording; wait until it ends
     disk_warned: set[str] = field(default_factory=set)   # meetings already warned about a nearly full disk
+    purge_day: date | None = None   # the day the audio retention was last scheduled; None until the first tick
     curator_worker: CuratorWorker | None = field(init=False, default=None)   # None: [activities] enabled = false, or a container without the curator
 
     def __post_init__(self) -> None:
@@ -221,8 +225,26 @@ class Daemon:
             self._watch_capturers()
             self._watch_disk()
         self._handle_state(detector, state)
+        self._schedule_purge()
         if self.active is not None:
             self._watch_observer()   # last: whatever it does or costs, the call state above was already handled
+
+    def _schedule_purge(self) -> None:
+        """On the first tick of each day, runs the audio retention in the background (never inline: the tick has a call to follow).
+        The day is recorded before the work is scheduled, so a purge that fails is not retried until tomorrow."""
+        today = self.container.clock.now().date()
+        if self.purge_day == today:
+            return
+        self.purge_day = today
+        self._background(self._purge)
+
+    def _purge(self) -> None:
+        try:
+            purged = self.container.purge_old_audio().execute()
+        except Exception:  # noqa: BLE001 - the retention is housekeeping: its failure never reaches the detector
+            log.exception(Log.PURGE_FAILED)
+            return
+        log.info(Log.PURGE_DONE, len(purged))
 
     def _handle_state(self, detector: CallDetector, state: CallState) -> None:
         if state == CallState.UNKNOWN:

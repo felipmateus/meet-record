@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import NamedTuple, Protocol, runtime_checkable
 
 from teams_recorder.domain import (
-    Action, Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, DailyPlan, EnergyTimeline, Meeting, Op, OpFailure, PassRecord,
-    SpeakerLog, StoryDrafts, Transcript, TranscriptHealth, UserStory, Verification,
+    Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, EnergyTimeline, Meeting, Op, OpFailure, PassRecord,
+    SpeakerLog, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
 )
 
 
@@ -126,31 +126,21 @@ class MinutesRenderer(Protocol):
 
 
 @runtime_checkable
-class Planner(Protocol):
-    def plan(
-        self,
-        day: date,
-        analyses: list[Analysis],
-        previous_plan: DailyPlan | None,
-        open_actions: list[Action],
-    ) -> DailyPlan: ...
-
-
-@runtime_checkable
 class StoryWriter(Protocol):
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
-        """Drafts user stories from the given actions. `analyses` are the meetings they came from (context);
-        `existing` are recent stories, which an action already covered by one of them must not duplicate."""
+    def draft_from_blocks(self, day: date, blocks: list[TaggedBlock], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
+        """Drafts a story for each tagged block of the activities document. `analyses` are the meetings the blocks link to
+        (context); `existing` are recent stories, which a block already covered by one of them must not duplicate. A block that
+        is not a story ends up in `skipped` with a reason, its `source_line` set; `action_id` holds the block's ref."""
         ...
 
 
 @runtime_checkable
 class StoryRenderer(Protocol):
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
-               degraded: dict[str, TranscriptHealth] | None = None) -> str:
-        """The review document; `existing` names the stories that left-out duplicates point to; `degraded`, by
-        meeting id, the source meetings whose transcript cannot be trusted (degraded, or made from a Teams track
-        recorded at the wrong sample rate), each shown with its warning banner."""
+    def render(self, drafts: StoryDrafts, existing: list[UserStory], degraded: dict[str, TranscriptHealth] | None = None) -> str:
+        """The review document, built only from what `*.stories.json` stores: a block story prints its `source_text`, a
+        skipped block its `source_line`, a planner-era story its stored meetings. `existing` names the stories that left-out
+        duplicates point to; `degraded`, by meeting id, the source meetings whose transcript cannot be trusted (degraded, or
+        made from a Teams track recorded at the wrong sample rate), each shown with its warning banner."""
         ...
 
 
@@ -225,14 +215,11 @@ class MeetingRepository(Protocol):
         ...
     def clear_curation_failed(self, meeting_id: str) -> None: ...
     def curation_error(self, meeting_id: str) -> str | None: ...
-    # plans
-    def save_plan(self, plan: DailyPlan) -> None: ...
-    def load_plan(self, day: date) -> DailyPlan | None: ...
-    def latest_plan_before(self, day: date) -> DailyPlan | None: ...
-    def load_open_actions(self) -> list[Action]: ...
-    def save_open_actions(self, actions: list[Action]) -> None: ...
-    # user story drafts (one set per plan day)
+    # user story drafts (one set per day)
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None: ...
+    def story_drafts_path(self, day: date) -> Path:
+        """The review document (`plans/<day>.stories.md`)."""
+        ...
     def load_story_drafts(self, day: date) -> StoryDrafts | None: ...
     def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
         """Drafts of the days in [before - days, before), oldest first."""
@@ -274,6 +261,11 @@ class ActivityStore(Protocol):
         holds (text, reason); `base=None` deletes base.md and writes no `_base` file. Raises `CommitIncomplete` when it
         failed after the document replace (the pass happened; the next `lock()` finishes it), any other `RepositoryError`
         when it failed before it (nothing was changed)."""
+        ...
+    def rewrite_document(self, document: str, base: str | None = None) -> None:
+        """Replaces the document and, when `base` is given, base.md, with no version files and no pass-log line: for a small edit
+        that is not a pass (a story's tag replaced by its link). The caller holds `lock()`; the box is left as it is, so a stamp
+        reconciliation is unaffected. Raises `RepositoryError`."""
         ...
     def log_pass(self, record: PassRecord) -> None:
         """Appends the record of a pass that changed nothing (kind skipped_empty or failed) to the pass log, and nothing

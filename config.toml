@@ -23,6 +23,9 @@ bitrate_kbps = 64
 # 32 (float; about 2 GB per hour). 16-bit is enough for speech and transcription; 32 adds headroom
 # but no audible or transcription gain. The final audio.m4a is the same either way.
 bit_depth = 16
+# Delete audio.m4a of meetings older than this many days that are already transcribed. Was
+# [planner] retention_days (still read when this key is absent). The daemon runs it once a day.
+retention_days = 30
 
 [detector]
 # Reads `pmset -g assertions` every poll_seconds. Recording starts after start_after_positive_polls
@@ -77,7 +80,7 @@ max_tokens = 16000
 [verification]
 # After each analysis, one more call checks every decision, action, deadline and participant
 # against the transcript; what it cannot confirm is kept and marked ⚠️ with the reason, in the
-# minutes, the daily plan and the story drafts. Same provider as [llm], smaller model.
+# minutes and the story drafts. Same provider as [llm], smaller model.
 # A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not
 # checked (it would confirm its own hallucinations): its banner says so. false = no extra call
 # (the two checks done in code, sensitive data and unheard participants, still run).
@@ -120,21 +123,16 @@ notify = true
 # Versions kept for `trec activities undo`.
 keep_versions = 50
 
-[planner]
-hour = 18
-retention_days = 30
-
 [stories]
-# After each daily plan, draft user stories from the day's new actions into
-# data/plans/<day>.stories.md for you to review; `destinations` and `publish` below decide
-# whether they also go to a board. Run it by hand with `trec stories [--date YYYY-MM-DD]`.
-enabled = true
+# Stories are drafted only for items of data/activities/atividades.md that you tag #história,
+# with `trec stories`, into data/plans/<day>.stories.md for you to review; `destinations` and
+# `publish` below decide whether they also go to a board.
 # Instructions the model always receives when it writes a story (a relative path is resolved
 # against the project folder). Drafting fails if this file is missing or empty.
 guide = "prompts/user_story_guide.md"
 # Where drafted stories go (boards), by name. Available: "backlog-md". Empty = drafts only.
 destinations = ["backlog-md"]
-# Publish to the destinations right after drafting, so the scheduled planner does it too.
+# Publish to the destinations right after `trec stories` drafts them.
 # false = drafts are published only with `trec publish [--date YYYY-MM-DD] [--only 1,3]`.
 publish = false
 # Stories of this many previous days are shown to the model so a topic raised again is not

@@ -91,11 +91,14 @@ class BacklogMdPublisher:
         parts = [mark, story.narrative, story.details]
         if story.open_questions:
             parts.append("\n".join([StoryDoc.QUESTIONS, *(StoryDoc.BULLET.format(text=q) for q in story.open_questions)]))
-        parts.append(StoryDoc.BOARD_ORIGIN.format(
-            day=day.isoformat(),
-            meetings=", ".join(story.source_meetings),
-            actions=", ".join(StoryDoc.ACTION_REF.format(id=i) for i in story.source_action_ids),
-        ))
+        meetings = ", ".join(story.source_meetings)
+        if story.source_text is not None:   # drafted from an item of the activities document
+            parts.append(StoryDoc.BOARD_ORIGIN_BLOCK.format(day=day.isoformat(), meetings=meetings))
+        else:
+            parts.append(StoryDoc.BOARD_ORIGIN.format(
+                day=day.isoformat(), meetings=meetings,
+                actions=", ".join(StoryDoc.ACTION_REF.format(id=i) for i in story.source_action_ids),
+            ))
         if self.drafts_dir is not None:
             parts.append(StoryDoc.BOARD_DRAFTS.format(path=self.drafts_dir / Files.STORIES_MARKDOWN.format(day=day.isoformat())))
         return "\n\n".join(p for p in parts if p)

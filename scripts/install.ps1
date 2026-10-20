@@ -1,17 +1,18 @@
 # Installs teams-recorder on this Windows PC, from a clone of the repository. Safe to run again:
 # every step checks what is already there and only does what is missing.
 #
-#   scripts\install.ps1 [-Name "Your name"] [-Provider claude-code|api] [-NoActivities] [-SkipModel] [-NoAgent] [-Yes] [-DryRun]
+#   scripts\install.ps1 [-Name "Your name"] [-Provider claude-code|api] [-NoActivities] [-RetentionDays N] [-SkipModel] [-NoAgent] [-Yes] [-DryRun]
 #
 # Steps: check Windows (10 2004+ / 11) and Teams, winget packages (Python 3.12, ffmpeg, .NET 8 SDK
 # when teams-tap.exe must be built), whisper.cpp into tools\whisper, the Python virtualenv,
-# teams-tap.exe, config.toml ([user] name, llm provider, [activities] enabled), .env (API provider only), the whisper
-# model, trec doctor, the scheduled tasks (daemon at logon + 6 pm planner) and the microphone
+# teams-tap.exe, config.toml ([user] name, llm provider, [activities] enabled, [audio] retention_days), .env (API provider only), the whisper
+# model, trec doctor, the scheduled task (the daemon at logon; an old daily planner task is removed) and the microphone
 # privacy setting. Logging in to Claude Code is left to you (it needs your browser).
 param(
     [string]$Name = "",
     [ValidateSet("", "claude-code", "api")][string]$Provider = "",
     [switch]$NoActivities,
+    [ValidateRange(0, 3650)][int]$RetentionDays = 0,   # [audio] retention_days; 0 = leave the config as it is
     [switch]$SkipModel,
     [switch]$NoAgent,
     [switch]$Yes,
@@ -223,6 +224,8 @@ if ($Provider -notin @("claude-code", "api")) { Die "provider must be claude-cod
 if ($Provider -ne $s["provider"]) { Set-Config "llm" "provider" $Provider }
 Ok "LLM provider: $Provider"
 if ($NoActivities -and $s["activities_enabled"] -ne "false") { Set-Config "activities" "enabled" "false"; $s["activities_enabled"] = "false" }
+if ($RetentionDays -gt 0 -and "$RetentionDays" -ne $s["retention_days"]) { Set-Config "audio" "retention_days" "$RetentionDays"; $s["retention_days"] = "$RetentionDays" }
+Ok "audio kept $($s["retention_days"]) days after transcription ([audio] retention_days in config.toml; the daemon deletes older audio once a day)"
 Ok ("activities curator: " + $(if ($s["activities_enabled"] -eq "false") { "off ([activities] enabled = false in config.toml)" } else { "on (updates data\activities\atividades.md after each analyzed meeting)" }))
 if ($Provider -eq "claude-code") {
     if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "Claude Code found; make sure you are logged in (run 'claude' once and use /login)" }
@@ -269,9 +272,9 @@ else {
         Warn "tasks left pointing to $owner"
     } elseif (Test-Path $s["active"]) {
         Warn "a recording is in progress; tasks not reinstalled. Run '$Trec agent install' after the call."
-    } elseif (Confirm-Step "Install the recorder (starts at logon) and the 6 pm planner?" $true) {
+    } elseif (Confirm-Step "Install the recorder (starts at logon)?" $true) {
         Run { & $Trec agent install | ForEach-Object { Write-Host "  $_" } } "trec agent install"
-        Ok "daemon and planner installed"
+        Ok "daemon installed"
     } else { Warn "tasks not installed; run '$Trec agent install' when ready" }
 }
 

@@ -24,7 +24,6 @@ from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeC
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
-from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
@@ -47,7 +46,6 @@ from teams_recorder.application.ports import (
     MicCapture,
     MinutesRenderer,
     Notifier,
-    Planner,
     ProcessAudioCapture,
     RecordingConfirmation,
     SpeakerObserver,
@@ -58,9 +56,8 @@ from teams_recorder.application.ports import (
 )
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
-    BuildDailyPlan,
     CancelRecording,
-    DraftUserStories,
+    DraftStoriesFromTags,
     PublishUserStories,
     PurgeOldAudio,
     stories_waiting,
@@ -105,7 +102,6 @@ class Container:
     mixer: AudioMixer
     transcriber: Transcriber
     analyzer: MeetingAnalyzer
-    planner: Planner
     detector: CallDetector
     minutes: MinutesRenderer
     story_writer: StoryWriter
@@ -156,11 +152,9 @@ class Container:
     def pipeline(self, after_analysis: Callable[[str], None] | None = None) -> Pipeline:
         return Pipeline(self.repo, self.notifier, self.stop_recording(), self.transcribe_meeting(), self.analyze_meeting(), after_analysis)
 
-    def build_daily_plan(self) -> BuildDailyPlan:
-        return BuildDailyPlan(self.repo, self.planner, self.notifier)
-
-    def draft_user_stories(self) -> DraftUserStories:
-        return DraftUserStories(self.repo, self.story_writer, self.story_renderer, self.notifier, self.settings.story_dedup_days)
+    def draft_stories_from_tags(self) -> DraftStoriesFromTags:
+        return DraftStoriesFromTags(self.repo, self.activity_store, self.story_writer, self.story_renderer, self.clock,
+                                    self.settings.story_dedup_days)
 
     def stories_waiting(self) -> list[UserStory]:
         destinations = [p.destination for p in self.story_publishers]
@@ -213,7 +207,7 @@ def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
 
 
 def build_container(settings: Settings, *, headless: bool = False) -> Container:
-    transport = build_transport(settings)  # shared by analyzer and planner
+    transport = build_transport(settings)  # shared by the analyzer and the story writer
     platform = (_windows_adapters if settings.platform is Platform.WINDOWS else _macos_adapters)(settings, headless)
     ffmpeg = find_tool(Bin.FFMPEG, settings.project_dir)
     return Container(
@@ -231,7 +225,6 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         retry_transcriber=build_retry_transcriber(settings),
         verifier=build_verifier(settings),
         analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT, user_name=settings.user_name),
-        planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
         story_writer=ClaudeStoryWriter(

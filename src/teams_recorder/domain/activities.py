@@ -124,6 +124,15 @@ class IgnoredRef:
 
 
 @dataclass(frozen=True)
+class TaggedBlock:
+    """An item of the document the user tagged for a story: its tagged line and the lines under it, verbatim."""
+
+    ref: str                               # "b1"... numbered per call
+    lines: tuple[str, ...]                 # the tagged line + the deeper-indented lines after it
+    labels: tuple[str, ...]                # meeting ids of the reference links in those lines
+
+
+@dataclass(frozen=True)
 class CuratorInput:
     document: str
     meetings: list[MeetingContext]        # oldest first
@@ -586,3 +595,60 @@ def _plain(text: str) -> list[str]:
 def unified_diff(base: str, current: str) -> str:
     """The hunks (no file header) that turn `base` into `current`; "" when they are the same. Callers pass bodies."""
     return "\n".join(list(difflib.unified_diff(_plain(base), _plain(current), lineterm="", n=2))[2:])
+
+
+# --- tagged items ---------------------------------------------------------------------------------------------------
+
+@lru_cache(maxsize=None)
+def _tag_pattern(tag: str) -> re.Pattern[str]:
+    """The tag as a whole word: `#história` does not match inside `#históricas`."""
+    return re.compile(r"(?<!\w)" + re.escape(tag) + r"(?!\w)")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def tagged_blocks(fmt: DocFormat, document: str, tag: str) -> list[TaggedBlock]:
+    """The items of the body whose line carries `tag`: each is that line plus the deeper-indented lines right after it (a
+    blank line or a line as shallow as the tagged one ends it). The box and the link block are not items. A tag inside the
+    lines of an earlier block belongs to that block; it is found as a block of its own once the earlier tag is gone. Trailing
+    whitespace is dropped from every line."""
+    pattern = _tag_pattern(tag)
+    lines = [line.rstrip() for line in body_text(fmt, document).split("\n")]
+    blocks: list[TaggedBlock] = []
+    i = 0
+    while i < len(lines):
+        if not pattern.search(lines[i]):
+            i += 1
+            continue
+        end = i + 1
+        while end < len(lines) and lines[end] and _indent(lines[end]) > _indent(lines[i]):
+            end += 1
+        block = tuple(lines[i:end])
+        labels = tuple(dict.fromkeys(re.findall(fmt.label_re, "\n".join(block))))
+        blocks.append(TaggedBlock(f"b{len(blocks) + 1}", block, labels))
+        i = end
+    return blocks
+
+
+def replace_tag(document: str, line: str, tag: str, replacement: str) -> str | None:
+    """`document` with the first `tag` of `line` replaced by `replacement` (any further `tag` on that line is dropped); the rest
+    is copied byte for byte. None when `line` (trailing whitespace ignored) is not found exactly once in the document, or has
+    no `tag`: the line was edited meanwhile, so its tag stays."""
+    wanted = line.rstrip()
+    pattern = _tag_pattern(tag)
+    parts = _lines(document)
+    found = [i for i, part in enumerate(parts) if part.rstrip() == wanted]
+    if len(found) != 1 or not pattern.search(wanted):
+        return None
+    index = found[0]
+    seen = 0
+
+    def swap(_: re.Match[str]) -> str:
+        nonlocal seen
+        seen += 1
+        return replacement if seen == 1 else ""
+
+    parts[index] = pattern.sub(swap, parts[index])
+    return "".join(parts)

@@ -34,7 +34,7 @@ For each action, set **for_whom** to the person (or party, e.g. "o cliente") who
 
 Status updates are only what was said, and an intention is not progress. "Vou subir o timesheet", "preciso terminar o relatório", "amanhã eu envio" are actions or nothing, never `done` or `in_progress`. Use `done` only for something already finished ("já subi", "foi para homologação", "terminei"). When the doubt is about whether it is finished ("acho que já enviei"), do not record `done`: use `in_progress` or leave it out, and keep the hedge in `evidence` if you record it. A question ("já subiram o fix?") is not a statement. Do not repeat as a status update an action created in the same meeting, and do not repeat the same statement twice.
 
-For each action (yours and other people's), set **kind** to what kind of work it is. It decides where the action goes: features and bugs become user stories on the user's board, technical and operation work become task cards, and management and communication stay only in the daily plan.
+For each action (yours and other people's), set **kind** to what kind of work it is. It is a classification, not a routing decision: it is a hint for the story writer, which drafts stories on demand from the items of the activities document the user tags, and for that document.
 
 - `feature`: a change in how the product behaves for its users: a new screen, field, rule, report inside the product, integration or flow change.
 - `bug`: something in the product that should work and does not: a wrong value, an error, a broken flow. Describe what fails.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Pipeline fidelity tests: does what reaches the plan, the stories and the wiki match what was said?
+"""Pipeline fidelity tests: does what reaches the activities document, the stories and the wiki match what was said?
 
 Uses the synthetic corpus (tests/fixtures/wiki_corpus), whose dialogues say who said what, as
-ground truth, and the project's own analysis, planner, story writer and transcriber.
+ground truth, and the project's own analysis, activities curator, story writer and transcriber.
 
   setup        copy the planted meetings (transcripts + analyses) into a work dir
   oracle       label every claim of every analysis against the dialogue (with speakers), k runs
@@ -10,12 +10,12 @@ ground truth, and the project's own analysis, planner, story writer and transcri
                tentative recorded as decided, phantom participant, sensitive remark)
   defend       deterministic checks (L2) and a transcript verifier (L1, k runs) on every claim
   report       tests A and B: what each defense layer catches and rejects, per error type
-  stories      plans and stories per day for six variants (baseline, +wiki, defended = flagged
+  stories      the curated document and stories per day for six variants (baseline, +wiki, defended = flagged
                claims dropped, defended+wiki, cited = the writer cites a source or "(sugestão)"
                for each criterion, guarded = flagged claims marked "a confirmar" + cited);
                every story claim judged against the dialogue, with its origin
   verify-stories  the verifier applied to the story claims, compared with the story oracle
-  propagate    one injected error traced through plans, stories and the wiki (test C)
+  propagate    one injected error traced through the activities document, stories and the wiki (test C)
   glossary     whisper with and without a glossary prompt (synthetic WER, real-audio terms)
   audit-wiki   cited bullets of a wiki checked against the dialogue and the verifier (test D)
   gate         regression gate on the injection set (test E)
@@ -570,8 +570,8 @@ def report(args: argparse.Namespace) -> None:
 
 
 # --- stories (end to end, four variants) --------------------------------------------------------
-WIKI_HEADER = ("\n## Context from the meetings wiki (pages as of the plan date, compiled by another model from earlier meetings; "
-               "may contain errors: never contradict the candidate actions or the meeting analyses with it)\n")
+WIKI_HEADER = ("\n## Context from the meetings wiki (pages as of the draft date, compiled by another model from earlier meetings; "
+               "may contain errors: never contradict the tagged items or the meeting analyses with it)\n")
 
 
 def wiki_pages_at(wiki: Path, day: date) -> str:
@@ -621,13 +621,13 @@ def story_container(data: Path, wiki: Path | None, cited: bool = False) -> Any:
         return c
 
     class WikiContextWriter(sc.ClaudeStoryWriter):
-        def draft(self, day: date, actions: list[Any], analyses: list[Any], existing: list[Any]) -> Any:
-            if not actions:
+        def draft_from_blocks(self, day: date, blocks: list[Any], analyses: list[Any], existing: list[Any]) -> Any:
+            if not blocks:
                 return sc.StoryDrafts(day=day)
-            user = sc.build_user_message(day, actions, analyses, existing, self.user_name) + WIKI_HEADER + wiki_pages_at(wiki, day)
+            user = sc.build_user_message(day, blocks, analyses, existing, self.user_name) + WIKI_HEADER + wiki_pages_at(wiki, day)
             out = self.transport.complete(self._system(), user, sc.StoriesOut, tag=f"stories+wiki:{day.isoformat()}",
                                           extra={"day": day.isoformat()})
-            return sc.to_drafts(out, day, actions, existing)
+            return sc.to_drafts(out, day, blocks, existing)
 
     c.story_writer = WikiContextWriter(base.transport, base.guide_path, prompt_path=base.prompt_path, user_name=base.user_name)
     return c
@@ -698,19 +698,73 @@ def build_variant_data(work: Path, name: str, defended: bool | str) -> Path:
     return data
 
 
-def run_plans_and_stories(data: Path, wiki: Path | None, days: list[date], plans_from: Path | None = None, cited: bool = False) -> None:
-    c = story_container(data, wiki, cited)
-    if plans_from is not None and not (data / "plans").exists():
-        shutil.copytree(plans_from / "plans", data / "plans", ignore=shutil.ignore_patterns("*.stories.*"))
+class PinnedClock:
+    """The container's clock held at the end of an evaluated day: the curator, the story drafts and their duplicate window see that day."""
+
+    def __init__(self, day: date) -> None:
+        self.at = datetime(day.year, day.month, day.day, 18)
+
+    def now(self) -> datetime:
+        return self.at
+
+
+def curated_snapshot(data: Path, day: date) -> Path:
+    """The activities document as the curator left it after `day`'s meetings, before the evaluation tagged anything."""
+    return data / "eval" / f"{day.isoformat()}.curated.md"
+
+
+def curate_days(c: Any, data: Path, days: list[date]) -> None:
+    """The activities curator over each day's analyzed meetings, in day order (the document builds up, as in daily use); one
+    snapshot of the document per day. A day that already has its snapshot is not curated again."""
+    from teams_recorder.application.use_cases.activities import batches
     for day in days:
-        if c.repo.load_plan(day) is None:
-            c.build_daily_plan().execute(day)
-        if c.repo.load_story_drafts(day) is None:
-            try:
-                c.draft_user_stories().execute(day)
-            except Exception as exc:  # noqa: BLE001 - recorded, the other days go on
-                print(f"  {data.name} {day}: stories failed: {exc}")
-        print(f"  {data.name} {day}: plan + stories done")
+        snapshot = curated_snapshot(data, day)
+        if snapshot.exists():
+            continue
+        c.clock = PinnedClock(day)
+        ids = [m["id"] for m in planted() if meeting_day(m["id"]) == day and (data / "recordings" / m["id"] / "analysis.json").exists()]
+        curate = c.curate_meetings()
+        for batch in batches(curate.uncurated(ids)):
+            result = curate.execute(batch, wait=True)
+            if result.failed:
+                print(f"  {data.name} {day}: curation failed for {', '.join(f'{mid} ({why})' for mid, why in result.failed)}")
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_text(c.activity_store.read_document() or "", encoding="utf-8")
+        print(f"  {data.name} {day}: curated {len(ids)} meetings")
+
+
+def new_open_lines(before: str, after: str) -> list[str]:
+    """The open checkbox lines of `after` that `before` does not have (what a day's curation added), untagged."""
+    from teams_recorder.constants import Parse
+    from teams_recorder.messages import ActivityDoc
+    seen = set(before.splitlines())
+    return [line for line in after.splitlines() if re.match(Parse.ACTIVITY_OPEN, line) and line not in seen and ActivityDoc.STORY_TAG not in line]
+
+
+def run_curation_and_stories(data: Path, wiki: Path | None, days: list[date], doc_from: Path | None = None, cited: bool = False) -> None:
+    """Per day: the document the curator built (this data dir's own, or `doc_from`'s snapshots: the variants that share the
+    analyses share the document), the evaluation plays the user and tags every open item that day added, and `trec stories`'
+    use case drafts a story for each tagged item into that day's drafts file."""
+    from teams_recorder.messages import ActivityDoc
+    c = story_container(data, wiki, cited)
+    if doc_from is None:
+        curate_days(c, data, days)
+    source = doc_from or data
+    previous = ""
+    for day in days:
+        snapshot = curated_snapshot(source, day)
+        curated = snapshot.read_text(encoding="utf-8") if snapshot.exists() else previous
+        fresh = set(new_open_lines(previous, curated))
+        previous = curated
+        if not fresh or c.repo.load_story_drafts(day) is not None:
+            continue
+        c.clock = PinnedClock(day)
+        c.activity_store.rewrite_document("\n".join(f"{line.rstrip()} {ActivityDoc.STORY_TAG}" if line in fresh else line for line in curated.split("\n")))
+        try:
+            c.draft_stories_from_tags().execute()
+        except Exception as exc:  # noqa: BLE001 - recorded, the other days go on
+            print(f"  {data.name} {day}: stories failed: {exc}")
+        print(f"  {data.name} {day}: {len(fresh)} tagged items drafted")
 
 
 STORY_ORACLE_SYSTEM = """You are the ground-truth judge in a test of a meeting-processing pipeline that turns meetings into user stories. You receive the exact dialogues (every line says who spoke) of all meetings up to the plan date, the analyses the pipeline made of the source meetings, optionally the wiki pages the story writer was given, and the stories drafted for that day.
@@ -785,12 +839,13 @@ def judge_stories(work: Path, variant: str, wiki: Path | None, days: list[date],
 
 
 # Since task 5.0 the shipped writer always cites (prompts/stories_system.md), so "baseline" and "cited" both run it:
-# compare gate G3 with the 8.2% recorded before (evaluation §14.5), not with a baseline run now.
+# compare gate G3 with the 8.2% recorded before (evaluation §14.5), not with a baseline run now. The stories are drafted from
+# the tagged items of the curated document.
 STORY_VARIANTS = {   # name → (defended analyses, wiki context, writer cites a source or "(sugestão)" for each criterion)
     "baseline": (False, False, False), "wiki": (False, True, False), "defended": (True, False, False), "defended_wiki": (True, True, False),
     "cited": (False, False, True), "guarded": ("mark", False, True),
 }
-for _r in (2, 3):   # repeats of the two variants the conclusion rests on: same plans, the writer drafts again
+for _r in (2, 3):   # repeats of the two variants the conclusion rests on: same document, the writer drafts again
     STORY_VARIANTS[f"baseline_r{_r}"] = STORY_VARIANTS["baseline"]
     STORY_VARIANTS[f"guarded_r{_r}"] = STORY_VARIANTS["guarded"]
 
@@ -804,10 +859,10 @@ def stories(args: argparse.Namespace) -> None:
         source = "guarded" if defended == "mark" else "defended" if defended else "baseline"
         data = build_variant_data(args.work, name, defended)
         repeat = "_r" in name
-        plans_from = args.work / "variants" / source if (with_wiki or cited or repeat) and source != name else None
-        if plans_from is not None:
-            run_plans_and_stories(args.work / "variants" / source, None, days)   # the plans come from the plain variant
-        run_plans_and_stories(data, args.wiki if with_wiki else None, days, plans_from=plans_from, cited=cited)
+        doc_from = args.work / "variants" / source if (with_wiki or cited or repeat) and source != name else None
+        if doc_from is not None:
+            run_curation_and_stories(doc_from, None, days)   # the document comes from the plain variant
+        run_curation_and_stories(data, args.wiki if with_wiki else None, days, doc_from=doc_from, cited=cited)
         claims = judge_stories(args.work, name, args.wiki if with_wiki else None, days, args.jobs)
         results[name] = claims
         bad = [c for c in claims if c.get("verdict") in ("unsupported", "contradicted")]
@@ -964,7 +1019,7 @@ def propagate(args: argparse.Namespace) -> None:
         data = args.work / "propagation" / variant
         if not data.exists():
             base = args.work / "variants" / "baseline"
-            for m in planted():   # plans are rebuilt from the first day: open_actions.json is cumulative
+            for m in planted():   # the document is rebuilt from the first day: each curator pass builds on the last
                 shutil.copytree(base / "recordings" / m["id"], data / "recordings" / m["id"])
             corrupted = corrupt_handover(load_json(args.work / "recordings" / mid / "analysis.json"))
             if variant == "defended":
@@ -975,9 +1030,9 @@ def propagate(args: argparse.Namespace) -> None:
                 flagged = {c["text"].strip() for c in claims if l1_flag(c, verdicts.get(c["id"])) + l2_flags(c, transcript)}
                 corrupted = filter_analysis(corrupted, flagged)
             save_json(data / "recordings" / mid / "analysis.json", corrupted)
-        run_plans_and_stories(data, None, all_days)
+        run_curation_and_stories(data, None, all_days)
         found: dict[str, bool] = {}
-        artifacts = {f"plan {d}": data / "plans" / f"{d.isoformat()}.md" for d in days}
+        artifacts = {f"activities {d}": curated_snapshot(data, d) for d in days}
         artifacts |= {f"stories {d}": data / "plans" / f"{d.isoformat()}.stories.md" for d in days}
         artifacts["analysis"] = data / "recordings" / mid / "analysis.json"
 

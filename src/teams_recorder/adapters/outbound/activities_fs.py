@@ -361,6 +361,12 @@ class FsActivityStore:
             self._write(self.base_file, base)
 
     @_io_boundary()
+    def rewrite_document(self, document: str, base: str | None = None) -> None:
+        self._write(self.document, document)
+        if base is not None:
+            self._write(self.base_file, base)
+
+    @_io_boundary()
     def log_pass(self, record: PassRecord) -> None:
         """Appends a record of a pass that changed nothing (skipped as empty, or failed): no version files, no document write."""
         self._log_pass(record)

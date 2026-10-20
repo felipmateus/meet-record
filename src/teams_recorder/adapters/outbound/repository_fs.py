@@ -2,7 +2,6 @@
 
 Layout:
   <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, curation_error.txt, .lock}
-  <data_dir>/plans/{YYYY-MM-DD.md, YYYY-MM-DD.json, open_actions.json}
   <data_dir>/plans/{YYYY-MM-DD.stories.md, YYYY-MM-DD.stories.json}  (user story drafts)
 Writes are atomic (temporary file + os.replace).
 """
@@ -22,10 +21,8 @@ from teams_recorder.adapters.outbound.fs_retry import atomic_write, retry_io
 from teams_recorder.application.ports import ActiveRecording, CaptureHandle
 from teams_recorder.constants import Files
 from teams_recorder.domain import (
-    Action,
     Analysis,
     CaptureStats,
-    DailyPlan,
     EnergyTimeline,
     Meeting,
     MeetingNotFound,
@@ -58,13 +55,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RepositoryError(Err.BAD_JSON.format(path=path, error=type(data).__name__))
     return cast(dict[str, Any], data)
-
-
-def _read_json_list(path: Path) -> list[Any]:
-    data = _load_json(path)
-    if not isinstance(data, list):
-        raise RepositoryError(Err.BAD_JSON.format(path=path, error=type(data).__name__))
-    return data
 
 
 def _decoded(path: Path, decode: Callable[[Any], T], read: Callable[[Path], Any] = _read_json) -> T:
@@ -279,21 +269,7 @@ class FsMeetingRepository:
         except FileNotFoundError:
             return None
 
-    # --- plans ----------------------------------------------------------
-    def _plan_json(self, day: date) -> Path:
-        return self.plans / Files.PLAN_JSON.format(day=day.isoformat())
-
-    def _plan_md(self, day: date) -> Path:
-        return self.plans / Files.PLAN_MARKDOWN.format(day=day.isoformat())
-
-    def save_plan(self, plan: DailyPlan) -> None:
-        _write_json(self._plan_json(plan.day), codec.plan_to_dict(plan))
-        atomic_write(self._plan_md(plan.day), plan.markdown)
-
-    def load_plan(self, day: date) -> DailyPlan | None:
-        p = self._plan_json(day)
-        return _decoded(p, codec.plan_from_dict) if p.exists() else None
-
+    # --- dated files in plans/ ----------------------------------------
     def _dated(self, pattern: str) -> list[tuple[date, Path]]:
         """Files in plans/ matching the pattern, with the ISO day their name starts with, oldest first."""
         found: list[tuple[date, Path]] = []
@@ -304,26 +280,16 @@ class FsMeetingRepository:
                 continue
         return sorted(found)
 
-    def latest_plan_before(self, day: date) -> DailyPlan | None:
-        earlier = [p for d, p in self._dated(Files.PLAN_GLOB) if d < day]
-        return _decoded(earlier[-1], codec.plan_from_dict) if earlier else None
-
-    def load_open_actions(self) -> list[Action]:
-        p = self.plans / Files.OPEN_ACTIONS
-        if not p.exists():
-            return []
-        return _decoded(p, lambda items: [codec.action_from_dict(x) for x in items], _read_json_list)
-
-    def save_open_actions(self, actions: list[Action]) -> None:
-        _write_json(self.plans / Files.OPEN_ACTIONS, [codec.action_to_dict(a) for a in actions])
-
     # --- user story drafts --------------------------------------------------
     def _stories_json(self, day: date) -> Path:
         return self.plans / Files.STORIES_JSON.format(day=day.isoformat())
 
+    def story_drafts_path(self, day: date) -> Path:
+        return self.plans / Files.STORIES_MARKDOWN.format(day=day.isoformat())
+
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
         _write_json(self._stories_json(drafts.day), codec.story_drafts_to_dict(drafts))
-        atomic_write(self.plans / Files.STORIES_MARKDOWN.format(day=drafts.day.isoformat()), markdown)
+        atomic_write(self.story_drafts_path(drafts.day), markdown)
 
     @staticmethod
     def _load_drafts(path: Path) -> StoryDrafts:

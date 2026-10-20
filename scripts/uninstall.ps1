@@ -2,9 +2,10 @@
 #
 #   scripts\uninstall.ps1 [-All] [-Yes]
 #
-# Always: ends and deletes the scheduled tasks (daemon and planner), but only when they run this
-# copy of the project. With -All: also deletes .venv and the teams-tap.exe build. Never deletes
-# your recordings, transcripts, plans or models (the data folder), nor winget packages.
+# Always: ends and deletes the scheduled tasks (the daemon, and the daily planner task an older
+# version installed), but only when they run this copy of the project. With -All: also deletes
+# .venv and the teams-tap.exe build. Never deletes your recordings, transcripts, plans or models
+# (the data folder), nor winget packages.
 param([switch]$All, [switch]$Yes)
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 $Trec = Join-Path $ProjectDir ".venv\Scripts\trec.exe"
@@ -13,7 +14,7 @@ if (Test-Path $Trec) {
     $line = & $Trec status 2>$null | Where-Object { $_ -like "Data dir: *" } | Select-Object -First 1
     if ($line) { $dataDir = $line.Substring(10) }
 }
-foreach ($name in @("daemon", "planner")) {
+foreach ($name in @("daemon", "planner")) {   # planner: a legacy task
     $task = "\teams-recorder\$name"
     $xml = schtasks /Query /TN $task /XML 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host "${name}: not installed"; continue }

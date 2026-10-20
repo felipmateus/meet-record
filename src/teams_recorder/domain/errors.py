@@ -22,7 +22,7 @@ class TranscriptionError(TeamsRecorderError):
 
 
 class AnalysisError(TeamsRecorderError):
-    """LLM analysis, planning or story drafting failed."""
+    """LLM analysis, curation or story drafting failed."""
 
 
 class PublishError(TeamsRecorderError):

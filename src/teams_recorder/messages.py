@@ -27,12 +27,8 @@ class Notify:
     ACTIVITIES_UPDATED = "Activities updated"            # body: the curator's one-line summary
     ACTIVITIES_FAILED = "Activity curation failed"
     ACTIVITIES_FAILED_BODY = "{title} ({meeting_id}): {error}. It will be retried; or run trec activities curate {meeting_id}."
-    PLAN_READY = "Daily plan ready"
-    PLAN_READY_BODY = "{meetings} meeting(s), {new_actions} new action(s)"
-    STORIES_READY = "User story drafts ready"
-    STORIES_READY_BODY = "{stories} stor(ies) and {tasks} task card(s) to review, {skipped} action(s) left out"
     STORIES_FAILED = "User story drafts failed"
-    STORIES_FAILED_BODY = "Plan {day}: {error}"
+    STORIES_FAILED_BODY = "Stories {day}: {error}"
     STORIES_PUBLISHED = "User stories published"
     STORIES_PUBLISHED_BODY = "{count} story(ies) sent to the board for review"
     PUBLISH_FAILED = "Publishing user stories failed"
@@ -135,7 +131,6 @@ class Err:
     NO_SYSTEM_PROMPT = "{who} has no system prompt (system_prompt or prompt_path)"
     EMPTY_TRANSCRIPT = "Empty transcript: no speech recognized."
     SHORT_TRANSCRIPT = "Transcript too short ({words} words) to analyze: \"{text}\""
-    EMPTY_PLAN = "# Plan {day}\n\nNo analyzed meetings and no open actions.\n"
     STORY_GUIDE_MISSING = "user story guide not found: {path} (set [stories] guide in config.toml)"
     STORY_GUIDE_EMPTY = "user story guide is empty: {path}"
     BACKLOG_BINARY_MISSING = "Backlog.md CLI ({binary}) not found; install it with `brew install backlog-md` or `npm i -g backlog.md`"
@@ -152,10 +147,9 @@ class Err:
     BACKLOG_TIMEOUT = "Backlog.md did not answer within {seconds:.0f}s"
     BACKLOG_EXEC = "could not run Backlog.md ({binary}): {error}"
     BACKLOG_NO_ID = "Backlog.md did not report the new task id: {tail}"
-    PLAN_MISSING = "no plan for {day}; create it with `trec plan --date {day}`"
-    STORIES_MISSING = "no story drafts for {day}; draft them with `trec stories --date {day}`"
+    STORIES_MISSING = "no story drafts for {day}; tag items #história in the activities document and run `trec stories`"
+    NO_ACTIVITIES_DOCUMENT = "No activities document yet: {path}"
     INVALID_STORY_NUMBER = "there is no story {number} in the drafts of {day} (they have {count})"
-    STORIES_ALREADY_PUBLISHED = "the stories of {day} were already published; drafting them again would put the same work on the board twice. Edit them on the board instead"
     # repository
     FILE_MISSING = "file not found: {path}"
     CURATION_FAILED = "Activity curation failed: {reason}"   # content of curation_error.txt
@@ -206,7 +200,7 @@ class Cli:
     VERSION = "teams-recorder {version}"
     # command help (shown by --help)
     VERSION_CMD_HELP = "Show the version."
-    STATUS_CMD_HELP = "List meetings, the status of each one and open actions."
+    STATUS_CMD_HELP = "List meetings, the status of each one, and the Activities line (open and waiting items, last pass)."
     DOCTOR_CMD_HELP = "Check external dependencies and permissions."
     START_CMD_HELP = "Start recording (Teams audio + microphone). Stop with `trec stop`."
     STOP_CMD_HELP = "Stop the recording in progress, mix the tracks and produce audio.m4a."
@@ -223,10 +217,10 @@ class Cli:
     AGENT_UNINSTALL_CMD_HELP = "Stop the daemon and remove the LaunchAgent."
     AGENT_RESTART_CMD_HELP = "Restart the daemon (for example after changing config.toml)."
     AGENT_STATUS_CMD_HELP = "Show whether the daemon is loaded and running."
-    PLAN_CMD_HELP = "Consolidate the day's analyses into a Markdown plan and update the open actions."
-    STORIES_CMD_HELP = "Draft user stories from a day's plan, following the story guide (stories.guide in config.toml); publish them when stories.publish is on."
+    STORIES_CMD_HELP = ("Draft a user story for each item of the activities document tagged #história, following the story guide "
+                        "(stories.guide in config.toml), and replace the tag with a link to the draft; publish them when stories.publish is on.")
     PUBLISH_CMD_HELP = "Send a day's story drafts to the configured boards (stories.destinations). Stories already there are skipped."
-    PURGE_CMD_HELP = "Delete audio of already transcribed meetings older than N days (config: planner.retention_days)."
+    PURGE_CMD_HELP = "Delete audio of already transcribed meetings older than N days (config: audio.retention_days)."
     # status
     DATA_DIR = "Data dir: {path}"
     API_KEY = "API key: {state}"
@@ -295,7 +289,6 @@ class Cli:
     ENV_PERMISSIONS = "[WARNING] .env permissions {mode}; recommended: chmod 600 .env"
     DATA_IN = "[info] data in {path}"
     STORY_GUIDE_LINE = "[{mark}] user story guide: {path}{hint}"
-    STORY_GUIDE_DISABLED = "  (story drafts are off: [stories] enabled = false)"
     # start / stop / cancel
     START_PID_HELP = "PID of the process to capture. Default: the running Microsoft Teams."
     START_TITLE_HELP = "Meeting title, used in the name and in the status."
@@ -429,13 +422,13 @@ class Cli:
     AGENT_ENV_HELP = "Extra variable for the daemon, in KEY=VALUE format (e.g. TREC_LLM_PROVIDER=claude-code). Repeatable."
     AGENT_ENV_INVALID = "--env expects KEY=VALUE, got {item!r}"
     AGENT_INSTALLED = "LaunchAgent installed and started: {path}"
-    PLANNER_SCHEDULED = "Planner scheduled (Mon–Fri {hour:02d}:00): {path}"
     PERMISSIONS_HINT = "On the first recording macOS will ask for Microphone and System Audio Recording permissions."
     PERMISSIONS_HINT_WINDOWS = "Allow microphone access for desktop apps: Settings > Privacy & security > Microphone."
     TASK_INSTALLED = "Scheduled task installed and started: {path}"
     AGENT_ENV_UNSUPPORTED = "--env is not supported on Windows; set the variables in config.toml or the user environment"
     AGENT_REMOVED, AGENT_NOT_INSTALLED = "LaunchAgent removed.", "No daemon LaunchAgent installed."
-    PLANNER_REMOVED, PLANNER_NOT_SCHEDULED = "Planner removed.", "No planner scheduled."
+    LEGACY_PLANNER_REMOVED = "Removed the old daily planner job ({name})."
+    LEGACY_PLANNER_REMOVE_FAILED = "warning: could not remove the old daily planner job ({name}): {error}. Continuing; remove it by hand if it is still there."
     DAEMON_RESTARTED = "daemon restarted."
     PLIST_LINE = "plist: {path} ({state})"
     TASK_LINE = "task definition: {path} ({state})"
@@ -443,21 +436,25 @@ class Cli:
     LOADED_LINE = "loaded: {state}{details}"
     YES, NO = "yes", "no"
     LOADED_DETAILS = "  pid={pid}  state={state}"
-    PLANNER_LINE = "planner: {state} ({hour:02d}:00 Mon–Fri)"
-    SCHEDULED, NOT_SCHEDULED = "scheduled", "not scheduled"
-    # plan / purge
-    PLAN_DATE_HELP = "Day to plan (YYYY-MM-DD). Default: today."
-    PLAN_PURGE_HELP = "After the plan, delete audio of old meetings (retention)."
+    # dates
     INVALID_DATE = "invalid date: {value!r} (use YYYY-MM-DD)"
-    PLANNING = "Planning {day} (provider {provider})…"
-    PLANNED_OK = " ok ({new} new actions, {completed} completed, {overdue} overdue)"
-    PRIORITY_LINE = "  • {text}"
-    PLAN_PATH = "  Plan: {path}"
-    STORIES_DATE_HELP = "Day whose plan is turned into story drafts (YYYY-MM-DD). Default: today."
-    DRAFTING_STORIES = "Drafting user stories for {day}…"
-    STORIES_OK = " ok ({stories} stories, {tasks} task cards, {skipped} actions left out)"
-    STORY_LINE = "  • {title}"
-    STORIES_PATH = "  Drafts: {path}"
+    DRAFTING_TAGGED = "Drafting {count} tagged items…"
+    DRAFTING_TAGGED_ONE = "Drafting 1 tagged item…"
+    STORIES_OK = " ok ({parts})"
+    STORIES_PARTS_SEPARATOR = ", "
+    STORIES_COUNT, STORIES_COUNT_ONE = "{count} stories", "1 story"
+    TASK_CARDS_COUNT, TASK_CARDS_COUNT_ONE = "{count} task cards", "1 task card"
+    STORIES_EXIST, STORIES_EXIST_ONE = "{count} already exist", "1 already exists"
+    STORIES_SKIPPED_COUNT = "{count} skipped"
+    STORY_LINE = "  {title}"
+    STORIES_SKIPPED_LINE = "  Skipped: {line} — {reason}"
+    STORIES_EXISTS_REASON = 'already exists ("{title}")'
+    STORIES_PATH = "Drafts: {path}"
+    STORIES_NOTHING_TAGGED = "Nothing tagged {tag} in {path}."
+    STORIES_NO_DOCUMENT = "No activities document yet: {path}"
+    STORIES_DEFERRED = "The curator is working; the drafts are saved. Run trec stories again later to replace the tags."
+    STORIES_EDITED, STORIES_EDITED_ONE = "{count} tagged lines were edited meanwhile; their tags stay.", "1 tagged line was edited meanwhile; its tag stays."
+    STORIES_REPLACED, STORIES_REPLACED_ONE = "Replaced {count} tags in {path}.", "Replaced 1 tag in {path}."
     PUBLISH_DATE_HELP = "Day whose story drafts are published (YYYY-MM-DD). Default: today."
     PUBLISH_ONLY_HELP = "Only these story numbers of the drafts document, comma-separated (e.g. 1,3)."
     INVALID_ONLY = "invalid --only value: {value!r} (use story numbers such as 1,3)"
@@ -471,7 +468,6 @@ class Cli:
     DESTINATION_LINE = "[{mark}] story destination {destination}: {state}"
     DESTINATION_READY, DESTINATION_NOT_READY = "ready", "not ready"
     DESTINATION_PROBLEM = "      {problem}"
-    PURGED_RETENTION = "Audio files removed by retention: {count}"
     PURGED = "Audio files removed: {count}"
     PURGED_LINE = "  {meeting_id}"
 
@@ -513,6 +509,8 @@ class Log:
     STOPPED_NOT_MIXED = "meeting %s was stopped but not mixed; mixing it now"
     MIX_TIMEOUT = "mixing %s s of audio with a %.0f s time limit"
     RESUME_FAILED = "failed to resume pending work"
+    PURGE_DONE = "audio retention: %s audio file(s) removed"
+    PURGE_FAILED = "audio retention failed; it runs again on the first tick of tomorrow"
     AFTER_ANALYSIS_FAILED = "the after-analysis hook failed for meeting %s"
     WORKER_STARTED = "activities curator worker started"
     WORKER_STOPPING = "activities curator worker told to stop; a pass in flight is not awaited"
@@ -591,14 +589,7 @@ class Prompt:
     ROSTER = "Participants seen in the meeting window: {names}"
     SPEAKER_LABELS = 'Speaker labels: the name after a timestamp is who said the line; "{label}" is the recording owner'
     TRANSCRIPT_HEADER = "\n\nTranscript (with timestamps):\n\n"
-    PLAN_DATE = "Plan date: {date} ({weekday}). The plan is for the next business day."
     WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-    PLAN_MEETINGS = "\n## Meetings analyzed today (JSON)\n"
-    PLAN_OPEN_ACTIONS = "\n## Accumulated open actions (JSON; use these ids in completed_action_ids)\n"
-    PLAN_NEW_ACTIONS = "\n## New actions from today (already identified; include them in the 'Ações novas' section)\n"
-    PLAN_OVERDUE = "\n## Ids already overdue on the plan date (include them in the 'Vencidas' section)\n"
-    PLAN_PREVIOUS = "\n## Previous plan ({date})\n{markdown}"
-    TRUNCATED = "\n…(truncated)"
     # JSON Schema field descriptions (part of the contract with the model)
     FIELD_ACTION_DESCRIPTION = "Task, starting with a verb in the infinitive"
     FIELD_DEADLINE_WHO = ("Who delivers it; '{self_owner}' for the recording owner (and for lines labelled with the owner's label); "
@@ -627,12 +618,9 @@ class Prompt:
     FIELD_STATUS_EVIDENCE = "The literal words that say it, at most 20 words, hedges kept (acho que, quase)"
     FIELD_STATUS_NEW_DUE = "The new date in ISO format (YYYY-MM-DD) for due_changed and delayed when one was said; otherwise null"
     FIELD_STATUS_NEW_OWNER = "The person the work passes to, for reassigned; otherwise null"
-    FIELD_PLAN_MARKDOWN = "Full plan in Markdown, with the requested sections"
-    FIELD_PLAN_PRIORITIES = "3 to 5 priorities, one sentence each"
-    FIELD_PLAN_COMPLETED = "ids of open actions that the day's analyses show as completed"
-    STORIES_DATE = "Plan date: {date} ({weekday})"
-    STORIES_ACTIONS = "\n## Candidate actions (JSON; cite these ids in source_action_ids and skipped)\n"
-    STORIES_MEETINGS = "\n## Context: analyses of the meetings these actions came from (JSON)\n"
+    STORIES_DATE = "Date: {date} ({weekday})"
+    STORIES_BLOCKS = "\n## Tagged items (JSON; cite each `ref` in `block` and in `skipped`)\n"
+    STORIES_MEETINGS = "\n## Context: analyses of the meetings these items link to (JSON)\n"
     STORIES_EXISTING = "\n## Existing stories from recent days (JSON; never duplicate them: cite their id in duplicate_of)\n"
     STORY_GUIDE_HEADER = "\n\n# User story guide\n\nThe user's own rules. Follow them for format, style and what counts as a story.\n\n"
     FIELD_STORY_TITLE = "Short story title, as the guide asks"
@@ -642,9 +630,13 @@ class Prompt:
     FIELD_CRITERION_SOURCE = "hh:mm:ss of the action or decision it comes from (an `at` you received), or suggestion when nobody said it"
     FIELD_STORY_DETAILS = "Other sections the guide asks for, in Markdown without top-level headings; empty if none"
     FIELD_STORY_QUESTIONS = "What must be answered before the story can start; empty if nothing"
-    FIELD_STORY_SOURCES = "ids of the candidate actions this story comes from, exactly as received"
-    FIELD_SKIPPED_REASON = "Short reason why this action is not a story"
-    FIELD_SKIPPED_DUPLICATE = "id of the existing story that already covers this action, or null"
+    FIELD_STORY_BLOCK = "ref of the tagged item this story comes from, exactly as received"
+    FIELD_STORY_KIND = "feature or bug for a user story, technical or operation for a task card; management or communication when the item is neither"
+    FIELD_STORY_PRIORITY = "high/medium/low only when the item or its meetings stated or clearly implied the urgency; otherwise null"
+    FIELD_STORY_DUE = "Due date in ISO format (YYYY-MM-DD) when the item or its meetings gave one; otherwise null"
+    FIELD_SKIPPED_REF = "ref of the tagged item that is not a story, exactly as received"
+    FIELD_SKIPPED_REASON = "Short reason why this item is not a story"
+    FIELD_SKIPPED_DUPLICATE = "id of the existing story that already covers this item, or null"
     # The verifier's message keeps the prototype's shape (scripts/fidelity_eval.py verify_meeting, describe),
     # which the evaluation measured (§14.3).
     VERIFY_TRANSCRIPT = "\n\n## Transcript\n"
@@ -727,7 +719,7 @@ class Prompt:
 
 class Minutes:
     """Labels of minutes.md. Portuguese on purpose: it is a document for the user, written from
-    LLM content that is in Portuguese (same exception as the daily plan's section names)."""
+    LLM content that is in Portuguese (one of the Portuguese exceptions in AGENTS.md, English only)."""
 
     TITLE = "# Ata: {title}"
     DEGRADED = ("> ⚠️ **Transcrição degradada:** {loop:.0%} dos trechos são uma mesma frase repetida pelo reconhecimento de voz{gaps}. "
@@ -805,9 +797,8 @@ class StoryDoc:
     the user, built from LLM content that is in Portuguese."""
 
     TITLE = "# Rascunhos de user stories — {date}"
-    INTRO = "_Gerados a partir do plano de {date}. Cada história publicada mostra abaixo do título o board e o id da tarefa; as demais ainda não saíram daqui._"
-    NO_ACTIONS = "Nenhuma ação nova no plano deste dia."
-    NO_STORIES = "Nenhuma ação nova virou história."
+    INTRO = "_Gerados dos itens marcados com #história em {date}. Cada história publicada mostra abaixo do título o board e o id da tarefa; as demais ainda não saíram daqui._"
+    NO_STORIES = "Nenhum item virou história."
     STORY_TITLE = "## {n}. {title}"
     PRIORITY = "**Prioridade:** {label}"
     PUBLISHED = "**Publicada em:** {destination} `{ref}`"
@@ -821,24 +812,21 @@ class StoryDoc:
     BOARD_CRITERION_AT = " [{at}]"          # the same on the board, where criteria are plain text
     BOARD_SUGGESTION = " (sugestão)"
     QUESTIONS = "**Perguntas em aberto**"
-    SOURCES = "**Ações de origem**"
-    SOURCE_LINE = "- `{id}` {description}{at}"
-    AT = " (dito em {at})"
+    SOURCE_BLOCK = "**Item de origem**"
+    QUOTE = "> {line}"
     BULLET = "- {text}"
-    SKIPPED = "## Ações que não viraram história"
-    SKIPPED_LINE = "- `{id}` {description} — {reason}{covered_by}"
-    DUPLICATE_OF = " (já coberta por: {title})"
-    UNKNOWN_ACTION = "(ação fora do plano)"
-    BOARD_ORIGIN = "**Origem:** plano de {day} · reuniões {meetings} · ações {actions}"
+    SKIPPED = "## Itens que não viraram história"
+    SKIPPED_LINE = "- `{id}` — {reason}{covered_by}"           # a planner-era entry: only its action id is stored
+    SKIPPED_BLOCK_LINE = "- {line} — {reason}{covered_by}"       # a block: its tagged line, in a code span
+    CODE_SPAN = "`{text}`"
+    LONG_CODE_SPAN = "`` {text} ``"                               # the text holds a backtick itself
+    DUPLICATE_OF = " (já coberto por: {title})"
+    BOARD_ORIGIN = "**Origem:** plano de {day} · reuniões {meetings} · ações {actions}"   # a planner-era story
+    BOARD_ORIGIN_BLOCK = "**Origem:** atividades de {day} · reuniões {meetings}"          # a story drafted from a tagged item
     BOARD_DRAFTS = "**Rascunho:** `{path}`"
     ACTION_REF = "`{id}`"
-    NOT_ADDRESSED = "o modelo não incluiu esta ação em nenhuma história"  # stored as the skip reason
-    PLAN_ONLY = "{kind}: fica só no plano do dia"                           # stored as the skip reason
-    SAME_TASK = "mesma tarefa de um card recente"                            # stored as the skip reason
-    NOT_CONFIRMED = "não confirmada na transcrição: {reason}"                # stored as the skip reason
-    NOT_CONFIRMED_NO_REASON = "não confirmada na transcrição"                # stored as the skip reason
-    UNCONFIRMED_SUFFIX = " (⚠️ não confirmada na transcrição: {reason})"     # added to a plan-only action's skip reason
-    UNCONFIRMED_SUFFIX_NO_REASON = " (⚠️ não confirmada na transcrição)"
+    NOT_ADDRESSED = "o modelo não incluiu este item em nenhuma história"   # stored as the skip reason
+    OTHER_KIND = "{kind}: não vira história nem card"                        # stored as the skip reason
     UNCONFIRMED = "⚠️ **A confirmar na transcrição:** {reason}"
     UNCONFIRMED_NO_REASON = "⚠️ **A confirmar na transcrição.**"
     DEGRADED = ("> ⚠️ **Transcrição degradada** na reunião {meeting}: {loop:.0%} dos trechos são uma mesma frase repetida "
@@ -877,3 +865,7 @@ class ActivityDoc:
     ARCHIVE_PREFIX = "### "                    # an archive entry starts with this heading marker
     ARCHIVE_HEADER = ARCHIVE_PREFIX + "{date} — {reason}"
     LINK_DEFINITION = "[{label}]: {target}"
+    EMPHASIS = "**"                            # bold marks around an item's title
+    STORY_TAG = "#história"                    # written by the user on an item to ask for a story (`trec stories`)
+    STORY_LINK = "história: [rascunho {date}]({target})"   # replaces the tag once the draft exists
+    STORY_EXISTS = 'história: já existe ("{title}")'       # replaces the tag when the writer found the story already there

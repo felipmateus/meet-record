@@ -2,7 +2,7 @@
 
 Both transports take a system prompt, a user message and a Pydantic schema and return
 a validated instance. They are the single place that knows the request shape, error
-mapping and usage logging; the analyzer and the planner only build messages and map
+mapping and usage logging; the analyzer, the story writer, the verifier and the curator only build messages and map
 results to the domain.
 """
 from __future__ import annotations

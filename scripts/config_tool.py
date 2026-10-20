@@ -27,6 +27,7 @@ def get() -> None:
         "user_name": s.user_name,
         "active": s.data_dir / Files.ACTIVE_RECORDING,
         "activities_enabled": str(s.activities_enabled).lower(),   # [activities] enabled
+        "retention_days": s.retention_days,                        # [audio] retention_days (falls back to the old [planner] one)
     }
     for key, value in values.items():
         print(f"{key}={value}")

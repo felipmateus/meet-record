@@ -8,7 +8,7 @@
 # Steps: check macOS and the project location, Homebrew packages (ffmpeg, whisper-cpp),
 # Xcode Command Line Tools, Python virtualenv, the teams-tap capture and teams-speakers binaries, the whisper model,
 # config.toml ([user] name, llm provider), .env (API provider only), trec doctor, and the
-# LaunchAgents (daemon + 6 pm planner). Installing Homebrew itself and logging in to Claude Code
+# LaunchAgent (the daemon; an old daily planner job is removed). Installing Homebrew itself and logging in to Claude Code
 # are left to you: both need your password or browser.
 set -euo pipefail
 
@@ -60,6 +60,7 @@ confirm() {   # confirm "question" default(y|n)
   [[ "$answer" =~ ^[Yy] ]]
 }
 DAEMON_PLIST="$HOME/Library/LaunchAgents/local.teams-recorder.daemon.plist"
+LEGACY_PLANNER_PLIST="$HOME/Library/LaunchAgents/local.teams-recorder.planner.plist"   # an older version ran `trec plan --purge` at 18:00
 agent_owner() {   # project folder the installed daemon runs from, if any
   [ -f "$DAEMON_PLIST" ] && /usr/libexec/PlistBuddy -c "Print :WorkingDirectory" "$DAEMON_PLIST" 2>/dev/null || true
 }
@@ -208,7 +209,7 @@ elif "$TREC" doctor | sed 's/^/  /'; then ok "all checks passed"
 else warn "trec doctor reported a problem above; fix it and run 'trec doctor' again"; fi
 
 # ---------------------------------------------------------------------------------------------
-step "Background services (LaunchAgents)"
+step "Background service (LaunchAgent)"
 if [ "$NO_AGENT" = 1 ]; then
   warn "skipped (--no-agent); install later with: $TREC agent install"
 else
@@ -218,9 +219,10 @@ else
     warn "services left pointing to $OTHER"
   elif [ -f "$ACTIVE" ]; then
     warn "a recording is in progress; services not reinstalled. Run '$TREC agent install' after the call."
-  elif confirm "Install the recorder daemon (starts at login) and the 6 pm planner?" y; then
+  elif confirm "Install the recorder daemon (starts at login)?" y; then
+    if [ -f "$LEGACY_PLANNER_PLIST" ]; then echo "  the old daily planner job (local.teams-recorder.planner) is removed by the install"; fi
     run "$TREC" agent install | sed 's/^/  /'
-    ok "daemon and planner installed"
+    ok "daemon installed"
   else
     warn "services not installed; run '$TREC agent install' when ready"
   fi

@@ -1,11 +1,11 @@
-"""Runs the daemon and the planner as Windows Task Scheduler tasks (the launchd counterpart).
+"""Runs the daemon as a Windows Task Scheduler task (the launchd counterpart).
 
-Two tasks in the \\teams-recorder\\ folder, both for the current user only, run only while the
-user is logged on (they show dialogs and toasts) and with standard rights:
-- daemon: starts at logon, no time limit, restarted if it fails, started at once on install.
-- planner: `plan --purge` Monday to Friday at the configured hour.
-Both run `.venv\\Scripts\\pythonw.exe -m teams_recorder.adapters.inbound.cli ...`, so no
-console window opens. The XML definition is kept in <data>/tasks for reference.
+One task in the \\teams-recorder\\ folder, for the current user only, runs only while the
+user is logged on (it shows dialogs and toasts) and with standard rights: it starts at logon, has
+no time limit, is restarted if it fails and is started at once on install. It runs
+`.venv\\Scripts\\pythonw.exe -m teams_recorder.adapters.inbound.cli daemon`, so no console window opens.
+The XML definition is kept in <data>/tasks for reference. A task an older version installed
+is removed through `uninstall()` of a task built with its name.
 """
 from __future__ import annotations
 
@@ -29,13 +29,8 @@ class ScheduledTask:
     data_dir: Path
     name: str = Windows.TASK_DAEMON
     args: tuple[str, ...] = Launchd.DAEMON_ARGS
-    hour: int | None = None                      # None: at logon (daemon); else weekdays at hour:00
     runner: Runner = subprocess.run
     user: str = field(default_factory=lambda: _current_user())
-
-    @classmethod
-    def planner(cls, project_dir: Path, data_dir: Path, hour: int, runner: Runner = subprocess.run) -> "ScheduledTask":
-        return cls(project_dir, data_dir, name=Windows.TASK_PLANNER, args=Launchd.PLANNER_ARGS, hour=hour, runner=runner)
 
     @property
     def task_name(self) -> str:
@@ -50,17 +45,8 @@ class ScheduledTask:
         ns = Windows.TASK_NAMESPACE
         task = ET.Element("Task", version="1.2", xmlns=ns)
         triggers = ET.SubElement(task, "Triggers")
-        if self.hour is None:
-            trigger = ET.SubElement(triggers, "LogonTrigger")
-            ET.SubElement(trigger, "UserId").text = self.user
-        else:
-            trigger = ET.SubElement(triggers, "CalendarTrigger")
-            ET.SubElement(trigger, "StartBoundary").text = Windows.TASK_START_DATE.format(hour=self.hour)
-            weekly = ET.SubElement(trigger, "ScheduleByWeek")
-            ET.SubElement(weekly, "WeeksInterval").text = "1"
-            days = ET.SubElement(weekly, "DaysOfWeek")
-            for day in Windows.TASK_WEEKDAYS:
-                ET.SubElement(days, day)
+        trigger = ET.SubElement(triggers, "LogonTrigger")
+        ET.SubElement(trigger, "UserId").text = self.user
         ET.SubElement(trigger, "Enabled").text = "true"
 
         principal = ET.SubElement(ET.SubElement(task, "Principals"), "Principal", id="Author")
@@ -77,10 +63,9 @@ class ScheduledTask:
             ("ExecutionTimeLimit", "PT0S"),
         ):
             ET.SubElement(settings, tag).text = value
-        if self.hour is None:
-            restart = ET.SubElement(settings, "RestartOnFailure")
-            ET.SubElement(restart, "Interval").text = Windows.TASK_RESTART_INTERVAL
-            ET.SubElement(restart, "Count").text = str(Windows.TASK_RESTART_COUNT)
+        restart = ET.SubElement(settings, "RestartOnFailure")
+        ET.SubElement(restart, "Interval").text = Windows.TASK_RESTART_INTERVAL
+        ET.SubElement(restart, "Count").text = str(Windows.TASK_RESTART_COUNT)
 
         action = ET.SubElement(ET.SubElement(task, "Actions", Context="Author"), "Exec")
         ET.SubElement(action, "Command").text = str(self.project_dir / Files.VENV_PYTHONW)
@@ -97,8 +82,7 @@ class ScheduledTask:
         if self.is_loaded():
             self._schtasks("/End", "/TN", self.task_name)
         self._schtasks("/Create", "/TN", self.task_name, "/XML", str(self.xml_path), "/F", check=True)
-        if self.hour is None:
-            self._schtasks("/Run", "/TN", self.task_name, check=True)
+        self._schtasks("/Run", "/TN", self.task_name, check=True)
         return self.xml_path
 
     def uninstall(self) -> bool:

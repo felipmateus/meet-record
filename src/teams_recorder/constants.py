@@ -84,19 +84,16 @@ class Files:
     DOTENV = ".env"
     PROMPTS_DIR = "prompts"
     ANALYZE_PROMPT = "analyze_system.md"
-    PLAN_PROMPT = "plan_system.md"
     STORIES_PROMPT = "stories_system.md"
     VERIFY_PROMPT = "verify_system.md"
     CURATE_PROMPT = "curate_system.md"
     STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
-    PLAN_GLOB = "????-??-??.json"     # every saved plan (see PLAN_JSON below)
     TMP_SUFFIX = ".tmp"               # atomic writes: <name>.tmp then os.replace
     MODELS_DIR = "models"
     LOG_DIR = "log"
     DEBUG_DIR = "debug"              # raw tracks kept on mixing anomalies
-    OPEN_ACTIONS = "open_actions.json"
     ACTIVE_RECORDING = "current_recording.json"
     DAEMON_LOG = "teams-recorder.log"
     CAPTURE_LOG = "capture.log"
@@ -122,11 +119,9 @@ class Files:
     PLIST_SUBDIR = Path("Library") / "LaunchAgents"   # relative to the home dir (resolved at call time so tests can fake it)
     PLIST_DIR = Path.home() / PLIST_SUBDIR
     VENV_TREC = Path(".venv") / "bin" / CLI_NAME       # relative to the project dir
-    AGENT_OUT_LOG = "{name}.out.log"                   # name: last label segment (daemon / planner)
+    AGENT_OUT_LOG = "{name}.out.log"                   # name: last label segment (daemon / speakers)
     AGENT_ERR_LOG = "{name}.err.log"
-    PLAN_MARKDOWN = "{day}.md"                         # day: ISO date
-    PLAN_JSON = "{day}.json"
-    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
+    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day
     STORIES_JSON = "{day}.stories.json"
     STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
     NOTICES_DIR = "notices"                          # in the data dir: one file per once-a-day notice, holding the day it last fired
@@ -164,7 +159,6 @@ def ggml_model_file(name: str) -> str:
 # --- launchd ---------------------------------------------------------------------
 class Launchd:
     DAEMON_LABEL = f"local.{APP_NAME}.daemon"
-    PLANNER_LABEL = f"local.{APP_NAME}.planner"
     SPEAKERS_LABEL = f"local.{APP_NAME}.speakers"              # the helper, one job per recording (at most one at a time)
     SPEAKERS_CHECK_LABEL = f"local.{APP_NAME}.speakers-check"  # its short-lived `--check` job, run by the doctor
     PATH = ":".join(["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
@@ -173,11 +167,9 @@ class Launchd:
     BOOTSTRAP_RETRY_DELAY = 1.0
     BOOTOUT_TIMEOUT = 15.0
     BOOTOUT_POLL_SECONDS = 0.5
-    PLANNER_WEEKDAYS = range(1, 6)  # Monday..Friday in StartCalendarInterval
     DOMAIN = "gui/{uid}"            # launchctl target domain for the logged-in user
     TIMEOUT_EXIT = 124              # the exit code a launchctl call that timed out is reported with (the `timeout(1)` convention)
     DAEMON_ARGS = ("daemon",)       # `trec` arguments run by each agent
-    PLANNER_ARGS = ("plan", "--purge")
 
 
 # --- LLM -------------------------------------------------------------------------
@@ -189,7 +181,6 @@ class Llm:
     MIN_WORDS = 20                  # below this an LLM call is not worth it
     OWNER_SELF = "usuário"          # data contract with the prompts: the recording owner
     OWNER_UNKNOWN = "indefinido"    # data contract with the prompts: unknown owner
-    MAX_PREVIOUS_PLAN_CHARS = 6000
     CLAUDE_CODE_TIMEOUT = 900.0
 
 
@@ -204,6 +195,7 @@ class Audio:
     MASTER_FILTER = "loudnorm=I=-18:TP=-2:LRA=11,alimiter=limit=0.891:level=0"
     WAIT_AUDIO_SECONDS = 20.0
     DEFAULT_MIC_DEVICE = "default"
+    RETENTION_DAYS = 30             # delete audio.m4a of transcribed meetings older than this ([audio] retention_days)
     DEFAULT_LANGUAGE = "pt"
     DEFAULT_WHISPER_MODEL = "large-v3-turbo-q5_0"
     DEFAULT_WHISPER_THREADS = 0     # 0 = let whisper-cli decide
@@ -296,6 +288,9 @@ class Parse:
     ACTIVITY_OPEN = r"^\s*[-*+] \[ \] "            # an open checkbox line of the activities document
     ACTIVITY_TICKED = r"^\s*[-*+] \[[xX]\] "       # a ticked one
     ACTIVITY_LABEL = r"\]\[([^\]\s]+)\]"            # the label of a reference link: `[text][label]`
+    ACTIVITY_ITEM_PREFIX = r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?"   # the list marker and checkbox that open an item line
+    ACTIVITY_TITLE_END = r" [—·] "                    # what follows an item's title on its line: ` — p/ Carla`, ` · sex 16/10`
+    ACTIVITY_LINK = r"\[([^\]]*)\]\[[^\]\s]+\]"        # a reference link `[text][label]`; group 1 is its text
 
 
 # --- detection -------------------------------------------------------------------
@@ -339,13 +334,11 @@ class Windows:
         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}').Show([Windows.UI.Notifications.ToastNotification]::new($t))"
     )
     POWERSHELL_ARGS = ("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command")
-    TASK_FOLDER = APP_NAME           # Task Scheduler folder: \teams-recorder\daemon and \teams-recorder\planner
-    TASK_DAEMON, TASK_PLANNER = "daemon", "planner"
+    TASK_FOLDER = APP_NAME           # Task Scheduler folder: \teams-recorder\daemon
+    TASK_DAEMON = "daemon"
     TASK_STATE_SCRIPT = "(Get-ScheduledTask -TaskPath '\\{folder}\\' -TaskName '{name}' -ErrorAction Stop).State"
     TASK_RUNNING, TASK_DISABLED = "Running", "Disabled"
     TASK_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-    TASK_START_DATE = "2026-01-01T{hour:02d}:00:00"
-    TASK_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
     TASK_RESTART_INTERVAL = "PT1M"
     TASK_RESTART_COUNT = 999
 
@@ -381,9 +374,11 @@ class Logging:
     BACKUP_COUNT = 30
 
 
-class Planner:
-    DEFAULT_HOUR = 18
-    RETENTION_DAYS = 30
+class Legacy:
+    """What an older version installed and this one removes. Used only to build the agent whose `uninstall()` removes it."""
+
+    PLANNER_LABEL = f"local.{APP_NAME}.planner"   # macOS LaunchAgent that ran `trec plan --purge` at 18:00
+    PLANNER_TASK = "planner"                      # Windows scheduled task of the same job (folder \\teams-recorder\\)
 
 
 class BacklogMd:
@@ -487,13 +482,15 @@ class Curator:
 
 
 class Stories:
-    ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
     DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
     PUBLISH = False   # without [stories] publish = true, drafts are published only with `trec publish`
+    BLOCK_REF = "b{n}"                    # the ref a tagged block has in one call to the writer, numbered from 1
+    DRAFTS_LINK = "../{folder}/{name}"    # from the activities document to a drafts document (the tag's replacement)
+    LINK_DATE_FORMAT = "%d/%m"
     BACKLOG_STATUS = "Triagem"            # Backlog.md column where new stories wait for review
     BACKLOG_LABELS = ("teams-recorder",)
     # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
     CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
-                      "decisions", "others_actions", "open_questions", "risks")
+                      "decisions", "my_actions", "others_actions", "deadlines", "open_questions", "risks")
     # Story fields the writer sees for each recent story, to recognise an action it already covers.
     EXISTING_FIELDS = ("id", "title", "narrative")

@@ -3,14 +3,14 @@
 #
 #   scripts/uninstall.sh [--all] [--yes]
 #
-# Always: stops and removes the LaunchAgents (daemon and planner), but only when they run this
-# copy of the project. With --all: also deletes .venv and the teams-tap build. Never deletes
+# Always: stops and removes the LaunchAgents (the daemon, and the daily planner job an older version
+# installed), but only when they run this copy of the project. With --all: also deletes .venv and the teams-tap build. Never deletes
 # your recordings, transcripts, plans or models (the data folder), nor Homebrew packages.
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
-LABELS=(local.teams-recorder.daemon local.teams-recorder.planner)
+LABELS=(local.teams-recorder.daemon local.teams-recorder.planner)   # the planner is a legacy job
 ALL=0
 ASSUME_YES=0
 while [ $# -gt 0 ]; do

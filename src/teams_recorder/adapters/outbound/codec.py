@@ -19,7 +19,6 @@ from teams_recorder.domain import (
     Analysis,
     CaptureStats,
     Criterion,
-    DailyPlan,
     Deadline,
     Decision,
     EnergyTimeline,
@@ -274,7 +273,7 @@ def energy_from_dict(d: dict[str, Any]) -> dict[str, EnergyTimeline]:
 
 
 # Verification (fidelity guard). Written only when a claim was verified, so files and the JSON
-# sent to the planner and the story writer stay as before for claims that were not. Read back
+# sent to the story writer and the curator stay as before for claims that were not. Read back
 # strictly: absent, null or {} means "not verified"; any other value that is not an object
 # (false, 0, "", [] included) raises TypeError, and the repository reports the file.
 def _verification_to_dict(v: Verification) -> dict[str, Any]:
@@ -424,29 +423,6 @@ def analysis_from_dict(d: dict[str, Any]) -> Analysis:
     )
 
 
-# DailyPlan
-def plan_to_dict(p: DailyPlan) -> dict[str, Any]:
-    return {
-        "day": p.day.isoformat(),
-        "markdown": p.markdown,
-        "priorities": list(p.priorities),
-        "new_actions": [action_to_dict(x) for x in p.new_actions],
-        "completed_action_ids": list(p.completed_action_ids),
-        "overdue_action_ids": list(p.overdue_action_ids),
-    }
-
-
-def plan_from_dict(d: dict[str, Any]) -> DailyPlan:
-    return DailyPlan(
-        day=date.fromisoformat(d["day"]),
-        markdown=d.get("markdown", ""),
-        priorities=list(d.get("priorities", [])),
-        new_actions=[action_from_dict(x) for x in d.get("new_actions", [])],
-        completed_action_ids=list(d.get("completed_action_ids", [])),
-        overdue_action_ids=list(d.get("overdue_action_ids", [])),
-    )
-
-
 # User story drafts
 def criterion_to_value(c: Criterion) -> Any:
     """A criterion with a source as {text, source}; one without (drafted before provenance) as the plain text it was."""
@@ -482,6 +458,7 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
             {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
         ],
         "kind": s.kind.value if s.kind else None,
+        **({"source_text": s.source_text} if s.source_text is not None else {}),   # absent on planner-era drafts and unchanged files
         **_verified(s.verification),
     }
 
@@ -503,14 +480,24 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         ],
         kind=ActionKind(d["kind"]) if d.get("kind") else None,
         verification=_verification_or_none(d.get("verification")),
+        source_text=d.get("source_text"),
     )
+
+
+def skipped_to_dict(k: SkippedAction) -> dict[str, Any]:
+    return {"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of,
+            **({"source_line": k.source_line} if k.source_line is not None else {})}
+
+
+def skipped_from_dict(d: dict[str, Any]) -> SkippedAction:
+    return SkippedAction(d["action_id"], d.get("reason", ""), d.get("duplicate_of"), d.get("source_line"))
 
 
 def story_drafts_to_dict(drafts: StoryDrafts) -> dict[str, Any]:
     return {
         "day": drafts.day.isoformat(),
         "stories": [story_to_dict(s) for s in drafts.stories],
-        "skipped": [{"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of} for k in drafts.skipped],
+        "skipped": [skipped_to_dict(k) for k in drafts.skipped],
     }
 
 
@@ -518,7 +505,7 @@ def story_drafts_from_dict(d: dict[str, Any]) -> StoryDrafts:
     return StoryDrafts(
         day=date.fromisoformat(d["day"]),
         stories=[story_from_dict(x) for x in d.get("stories", [])],
-        skipped=[SkippedAction(x["action_id"], x.get("reason", ""), x.get("duplicate_of")) for x in d.get("skipped", [])],
+        skipped=[skipped_from_dict(x) for x in d.get("skipped", [])],
     )
 
 

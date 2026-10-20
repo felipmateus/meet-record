@@ -13,7 +13,6 @@ from teams_recorder.constants import Bin, Env, Files, Launchd, Parse
 from teams_recorder.messages import Err
 
 LABEL = Launchd.DAEMON_LABEL
-PLANNER_LABEL = Launchd.PLANNER_LABEL
 
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -81,8 +80,6 @@ class LaunchAgent:
     runner: Runner = subprocess.run
     extra_env: dict[str, str] | None = None
     sleep: Callable[[float], None] = time.sleep
-    program_args: list[str] | None = None            # default: Launchd.DAEMON_ARGS
-    calendar: list[dict[str, int]] | None = None     # schedule (StartCalendarInterval) instead of KeepAlive
 
     @property
     def plist_path(self) -> Path:
@@ -94,7 +91,7 @@ class LaunchAgent:
         log_dir = self.data_dir / Files.LOG_DIR
         plist: dict[str, Any] = {
             "Label": self.label,
-            "ProgramArguments": [str(trec), *(self.program_args or Launchd.DAEMON_ARGS)],
+            "ProgramArguments": [str(trec), *Launchd.DAEMON_ARGS],
             "ProcessType": "Background",
             "WorkingDirectory": str(self.project_dir),
             "EnvironmentVariables": {"PATH": Launchd.PATH, Env.PROJECT_DIR: str(self.project_dir), "HOME": home, **(self.extra_env or {})},
@@ -102,22 +99,13 @@ class LaunchAgent:
             "StandardErrorPath": str(log_dir / Files.AGENT_ERR_LOG.format(name=self._short)),
             "ThrottleInterval": Launchd.THROTTLE_SECONDS,
         }
-        if self.calendar:
-            plist["StartCalendarInterval"] = self.calendar   # runs at the scheduled times; not resident
-        else:
-            plist["RunAtLoad"] = True
-            plist["KeepAlive"] = True
+        plist["RunAtLoad"] = True
+        plist["KeepAlive"] = True
         return plist
 
     @property
     def _short(self) -> str:
         return self.label.rsplit(".", 1)[-1]
-
-    @classmethod
-    def planner(cls, project_dir: Path, data_dir: Path, hour: int, extra_env: dict[str, str] | None = None, **kw: Any) -> "LaunchAgent":
-        """Scheduled agent: `trec plan --purge` at <hour>:00, Monday to Friday."""
-        return cls(project_dir, data_dir, label=PLANNER_LABEL, extra_env=extra_env, program_args=list(Launchd.PLANNER_ARGS),
-                   calendar=[{"Hour": hour, "Minute": 0, "Weekday": wd} for wd in Launchd.PLANNER_WEEKDAYS], **kw)
 
     def _domain(self) -> str:
         return job_domain()
