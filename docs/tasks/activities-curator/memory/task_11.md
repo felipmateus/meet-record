@@ -1,0 +1,11 @@
+# task_11 memory
+
+Status: documentation written and checked against the code; changes left uncommitted. No source, test or prompt file changed, so only the strings guard was re-run (`pytest -q tests/unit/test_no_hardcoded_strings.py`, green); no full suite needed.
+
+Changed: `AGENTS.md` (intro, commands, restart rule, LLM-stack exception, ports table: `ActivityCurator`, `ActivityStore`, the `MeetingRepository` error-file methods, analyzer/verifier/minutes notes; the `activities/` layout, lock and invariants; fakes; English-only allowance), `README.md` (features, how it works, daily use, commands, new "Activities document" section, config, prompts, data layout, architecture, troubleshooting, status), `docs/REQUIREMENTS-AND-ARCHITECTURE.md` §10 (phase row + dated note 2026-10-20), `docs/prd/README.md`, new `docs/prd/pages/09-activities.md` (a new page, because `docs/prd/README.md` keeps one page per flow), `03-analysis`, `04-automation`, `05-operations`, `06-daily-plan` (shadow note only), `07-installation` (`-NoActivities`), appendices `data-layout`, `enum-dictionary`, `relationships`.
+
+Decisions for task_12 to task_15:
+- The planner is documented as unchanged everywhere; task_15 removes it from `06-daily-plan.md`, `08-user-stories.md` (not touched here), the README "Daily plan" section/diagram/config rows (`[planner]`, `[stories] enabled`), the AGENTS.md `Planner`/`StoryWriter`/`StoryRenderer` rows and the `trec plan` commands, the PRD README roadmap rows, and the "Shadow" notes added here (`09-activities.md` header, `06-daily-plan.md`, README "Activities document" callout, `docs/prd/README.md` module/roadmap rows).
+- Things stated in the docs that task_12 to task_14 must keep true or update: `trec stories` still reads the plan (09-activities.md Relationships); `trec status`/`doctor` lines; the daemon-scheduled purge is not documented yet (task_14).
+- Not documented on purpose (not built): tagged `#história` stories, `trec stories` without a plan, `[audio] retention_days`, planner job removal in `agent install`.
+- The REQUIREMENTS note records the build's deviations from the spec (`log_pass`, no `UndoPreview.archive_stays`, `DocFormat.label_re`, `trec analyze` batching, English weekdays) and the known edges from task_03/05/09 memory.

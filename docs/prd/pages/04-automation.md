@@ -35,9 +35,10 @@ This is the heart of the product: a background process that notices when a Teams
 
 ### Call end
 - Stops the recording and launches the transcription → analysis sequence in the background (after the keep-or-discard answer, when it is still pending), so the detector stays alert for the next call. Each step fails in isolation (`error.txt`).
+- When the analysis step saves `analysis.json`, the pipeline hands the meeting to the **curator worker**, a thread of the daemon that updates the [activities document](./09-activities.md) (up to four meetings per pass, oldest first). The worker never blocks recording, transcription or analysis; its failures are logged and written to the meeting's `curation_error.txt`, not `error.txt`. `[activities] enabled = false` starts no worker.
 
 ### Startup and crash
-- On startup: if it finds an orphaned recording (pointer + raw tracks), it finalizes it; if the pointer has no tracks, it discards it. It then resumes meetings stalled in `recorded` or `transcribed`.
+- On startup: if it finds an orphaned recording (pointer + raw tracks), it finalizes it; if the pointer has no tracks, it discards it. It then queues the meetings analyzed in the last 2 working days that have no successful curation (the worker's queue is in memory, so a restart would otherwise lose them) and resumes meetings stalled in `recorded` or `transcribed`.
 - On SIGTERM/SIGINT: finishes the active call (recording → pipeline) before exiting.
 
 ### LaunchAgent
@@ -45,7 +46,7 @@ This is the heart of the product: a background process that notices when a Teams
 |---|---|
 | `agent install` | Writes `~/Library/LaunchAgents/local.teams-recorder.daemon.plist` (RunAtLoad, KeepAlive, PATH with Homebrew and `~/.local/bin`, logs in `data/log/daemon.*.log`) and loads it in the user domain. `--env KEY=VALUE` adds variables to the daemon (e.g. `TREC_LLM_PROVIDER=claude-code`). If already loaded, unloads it first and waits for the removal to complete; retries loading up to 10 times because of a transient launchd error. |
 | `agent uninstall` | Unloads and removes the plist. |
-| `agent restart` | Restarts the daemon (after changing `config.toml` or updating the code). |
+| `agent restart` | Restarts the daemon (after changing `config.toml` or updating the code; the curator worker also starts only after a restart). |
 | `agent status` | Shows the plist, whether it is loaded, PID and state; exit code 1 if not loaded. |
 | `daemon --once` | Diagnostics: a single detector reading and the PID found. |
 

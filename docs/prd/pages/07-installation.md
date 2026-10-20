@@ -47,7 +47,7 @@ A from-scratch installation for another user on the Mac works and `trec doctor` 
 Verified on 2026-10-05 with a fresh copy outside the repository: every step passed in under a minute, with the model download and services skipped on purpose; a second run changed nothing. Pending from the original plan: the month's LLM spend in `trec status`.
 
 ## Windows
-- `scripts\install.ps1`, or double-click `install.cmd`. Same idempotent approach and options (`-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`).
+- `scripts\install.ps1`, or double-click `install.cmd`. Same idempotent approach and options (`-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`), plus `-NoActivities`, which sets `[activities] enabled = false` (the installer also prints whether the activities curator is on; the macOS installer does not touch that key, and its default is on).
 - Steps: Windows build 19041 or later, warning if the project is in OneDrive or Teams is missing; winget for Python 3.12 and ffmpeg; whisper.cpp release zip into `tools\whisper`; `.venv`; `teams-tap.exe` (built with the .NET 8 SDK from winget when missing); name and provider; model; `trec doctor`; scheduled tasks (same takeover and in-progress guards); the microphone privacy setting, with an option to open it.
 - `scripts\uninstall.ps1` removes only this copy's tasks; `-All` also deletes `.venv` and the build; data is kept.
 - `[TBC]` Parsed with the PowerShell parser; not yet run on Windows.

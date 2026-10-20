@@ -1,6 +1,6 @@
 # teams-recorder
 
-A background tool for macOS (and Windows, not yet run on real hardware) that notices when a Microsoft Teams call starts, records Teams audio and your microphone, transcribes the call locally with whisper.cpp, and uses Claude to pull out decisions, actions and deadlines. Every weekday evening it turns the day's meetings into a Markdown activity plan and drafts user stories for your backlog.
+A background tool for macOS (and Windows, not yet run on real hardware) that notices when a Microsoft Teams call starts, records Teams audio and your microphone, transcribes the call locally with whisper.cpp, and uses Claude to pull out decisions, actions and deadlines. Every weekday evening it turns the day's meetings into a Markdown activity plan and drafts user stories for your backlog. After each analyzed meeting an agent also keeps one document, `data/activities/atividades.md`, current with everything still open for you (in a trial run beside the plan, see [Activities document](#activities-document)).
 
 It is built for one person who sits in several meetings a day and wants a reliable record of what they committed to, without taking notes. Meetings are expected in Brazilian Portuguese, so the minutes, plans and stories it writes are in Portuguese. The code, CLI and documentation are in English.
 
@@ -13,7 +13,8 @@ See the [flowchart](#how-it-works) for the whole pipeline.
 - **Local transcription.** whisper.cpp (`large-v3-turbo-q5_0`, 574 MB) runs on your Mac. Audio never leaves the machine.
 - **Speaker labels (macOS).** A second helper reads who is speaking from the Teams meeting window, and your own lines are told apart from the microphone track. Transcript lines carry the person's name, and the analysis takes owners and participants from them. No voice is modelled. See [Speaker labels](#speaker-labels).
 - **Structured analysis.** Claude extracts the summary, topics, decisions, your actions, other people's actions, deadlines, risks and open questions. Every item carries the transcript timestamp where it was said.
-- **Meeting minutes.** A `minutes.md` file is written for each meeting, with no extra model call.
+- **Meeting minutes.** A `minutes.md` file is written for each meeting, with no extra model call, including what the meeting said about earlier work (finished, blocked, a new date).
+- **Activities document.** A curator agent updates one Markdown file after each analyzed meeting: your open actions, what you wait on from others, dates and recent context, every line linked to its meeting. It suggests (💬) what the meetings said is done, but only you tick or untick; it keeps your edits, archives instead of deleting, and `trec activities undo` restores the last pass.
 - **Daily plan.** The day's meetings and the running list of open actions are consolidated into a prioritized Markdown plan. Overdue and completed actions are tracked.
 - **User stories.** Actions are routed by kind: features and bugs become user stories written by your own guide, technical and operation work becomes task cards, and the rest stays in the plan. They are published to a local Backlog.md board for review.
 - **Two ways to pay for the model.** Use the Claude API with prepaid credit (about US$ 0.10 per hour of meeting), or your Claude Code subscription.
@@ -33,6 +34,7 @@ See the [flowchart](#how-it-works) for the whole pipeline.
 - [Transcription](#transcription)
 - [Speaker labels](#speaker-labels)
 - [Analysis with Claude](#analysis-with-claude)
+- [Activities document](#activities-document)
 - [Daily plan](#daily-plan)
 - [User stories and the Backlog.md board](#user-stories-and-the-backlogmd-board)
 - [Configuration](#configuration)
@@ -56,7 +58,8 @@ flowchart LR
         mix("<b>Mix the audio</b><br/><small>ffmpeg → audio.m4a</small>")
         transcribe("<b>Transcribe locally</b><br/><small>whisper.cpp → transcript</small>")
         analyze("<b>Analyze with Claude</b><br/><small>analysis.json + minutes.md</small>")
-        detect --> record --> mix --> transcribe --> analyze
+        curate("<b>Update the activities document</b><br/><small>atividades.md</small>")
+        detect --> record --> mix --> transcribe --> analyze --> curate
     end
 
     subgraph evening["6 pm, Mon–Fri · planner"]
@@ -72,7 +75,7 @@ flowchart LR
 
     classDef daemon fill:#EEEDFE,stroke:#534AB7,stroke-width:1px,color:#3C3489
     classDef planner fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#085041
-    class detect,record,mix,transcribe,analyze daemon
+    class detect,record,mix,transcribe,analyze,curate daemon
     class plan,route,publish,review planner
     style perCall fill:none,stroke:#7F77DD,stroke-width:1px,stroke-dasharray:6 4
     style evening fill:none,stroke:#1D9E75,stroke-width:1px,stroke-dasharray:6 4
@@ -83,10 +86,11 @@ flowchart LR
 3. **Mix.** After hang-up, the level of each raw track is saved to `energy.json`, then ffmpeg cleans each track (80 Hz high-pass, noise reduction), mixes them, normalizes to -18 LUFS and writes `audio.m4a`. The raw tracks are deleted.
 4. **Transcribe.** whisper.cpp writes `transcript.json` and `transcript.txt` (`[hh:mm:ss] text`, or `[hh:mm:ss] Name: text` for a line whose speaker is known).
 5. **Analyze.** The transcript text is sent to Claude with a JSON schema. The result is saved as `analysis.json` and rendered to `minutes.md`.
-6. **Plan.** At 6 pm, Monday to Friday, `trec plan` builds `plans/YYYY-MM-DD.md` and updates `open_actions.json`.
-7. **Draft and publish stories.** If enabled, stories are drafted into `plans/YYYY-MM-DD.stories.md` and sent to the **Triagem** column of a Backlog.md board.
+6. **Curate.** Right after the analysis is saved, the daemon's curator worker updates `activities/atividades.md` with what the meeting added, suggested or changed. It never blocks the steps above, and a failure only writes `curation_error.txt` in the meeting folder.
+7. **Plan.** At 6 pm, Monday to Friday, `trec plan` builds `plans/YYYY-MM-DD.md` and updates `open_actions.json`.
+8. **Draft and publish stories.** If enabled, stories are drafted into `plans/YYYY-MM-DD.stories.md` and sent to the **Triagem** column of a Backlog.md board.
 
-Steps 3–5 run in the background, so a call that starts right after another one is still recorded. A step that fails writes `error.txt` in the meeting folder and stops only that meeting; re-running resumes from there. Every step can also be run by hand with `trec`.
+Steps 3–6 run in the background, so a call that starts right after another one is still recorded. A step that fails writes `error.txt` in the meeting folder and stops only that meeting; re-running resumes from there. Every step can also be run by hand with `trec`.
 
 ## Tech stack
 
@@ -184,7 +188,7 @@ git clone https://github.com/felipmateus/meet-record.git C:\Projetos\teams-recor
 C:\Projetos\teams-recorder\scripts\install.ps1
 ```
 
-Or double-click `install.cmd`. The installer uses winget for Python 3.12, ffmpeg and, when `teams-tap.exe` must be built, the .NET 8 SDK. It downloads whisper.cpp into `tools\whisper` and the model into `data\models`, then installs the scheduled tasks. Options mirror the macOS installer: `-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`. `scripts\uninstall.ps1` removes the tasks; `-All` also removes `.venv` and the build.
+Or double-click `install.cmd`. The installer uses winget for Python 3.12, ffmpeg and, when `teams-tap.exe` must be built, the .NET 8 SDK. It downloads whisper.cpp into `tools\whisper` and the model into `data\models`, then installs the scheduled tasks. Options mirror the macOS installer: `-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`; `-NoActivities` also sets `[activities] enabled = false`. `scripts\uninstall.ps1` removes the tasks; `-All` also removes `.venv` and the build.
 
 Only the parts that talk to the operating system differ:
 
@@ -201,23 +205,23 @@ Windows asks for no permission to capture Teams audio. The microphone needs "Let
 
 ## First run checklist
 
-1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the claim verifier, the speaker labels, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present. The `speaker labels` line is information only and never fails the doctor: it says whether `teams-speakers` is built and whether it holds the Accessibility permission (the check runs the helper as its own short-lived launchd job, the same context the daemon uses), and how the last recording was labelled.
+1. **`trec doctor` is all `ok`.** It checks ffmpeg, whisper-cli, swift, osascript, the `teams-tap` build, Claude Code or the API key, the models, the transcript-loop guard, the claim verifier, the speaker labels, the activities document, the `.env` permission, free disk, the story guide and each story destination. It exits 0 only when everything your configuration needs is present. The `speaker labels` line is information only and never fails the doctor: it says whether `teams-speakers` is built and whether it holds the Accessibility permission (the check runs the helper as its own short-lived launchd job, the same context the daemon uses), and how the last recording was labelled.
 2. **Grant the three macOS permissions** under System Settings > Privacy & Security. The first two are requested on the first recording; the third is not requested by macOS, you add it by hand:
    - **Microphone**, for the process that records the microphone.
    - **Screen & System Audio Recording**, for `teams-tap`. Without it, the Teams track comes out silent and only your voice is recorded.
    - **Accessibility**, for `teams-speakers`, so it can read the Teams window. Open the Accessibility pane, press the **+** button, press Cmd+Shift+G, enter `<project>/native/teams-speakers/.build/release/teams-speakers`, choose Open and switch the entry on. A request made by a background job creates no entry, so the **+** button is the only way. The grant has to be on the helper itself: the daemon runs it as its own launchd job (`local.teams-recorder.speakers`), so granting your terminal or Python does not cover it. macOS ties the grant to the binary, so a rebuild (`scripts/build-native.sh`) may require adding it again; `trec doctor` tells. Without it recordings work as before, only without names (see [Speaker labels](#speaker-labels)).
 3. **Set your name** in `config.toml` (`[user] name`), as people say it in meetings, so tasks addressed to you by name are attributed to you.
 4. **Check that the detector sees a call.** Join a test call and run `trec daemon --once`. It should report Teams in a call along with its PID.
-5. **Check the services** with `trec agent status`. After an update that adds the speaker labels, run `trec agent restart` so the daemon starts using them.
+5. **Check the services** with `trec agent status`. After an update that adds the speaker labels or the activities curator, run `trec agent restart` so the daemon starts using them.
 
 ## Daily use
 
 Once installed, there is nothing to do: join Teams calls as usual.
 
 - When a call starts, you get a notification and a **Keep recording / Discard** dialog. Press Return, or ignore it, to keep the recording.
-- After hang-up, the meeting is mixed, transcribed and analyzed in the background. The minutes land in `data/recordings/<id>/minutes.md`.
+- After hang-up, the meeting is mixed, transcribed and analyzed in the background. The minutes land in `data/recordings/<id>/minutes.md`, and a few minutes later `data/activities/atividades.md` is updated (a notification says so when something of yours changed). Open it with `trec activities --open`, tick what is done, add your own lines; the next update respects them.
 - At 6 pm, Monday to Friday, the plan for the day lands in `data/plans/YYYY-MM-DD.md`, followed by the story drafts if they are enabled.
-- `trec status` shows every meeting and its state, the recording in progress, the open actions and the stories waiting to be published.
+- `trec status` shows every meeting and its state, the recording in progress, the activities summary and the stories waiting to be published.
 
 ## Command reference
 
@@ -225,14 +229,17 @@ Once installed, there is nothing to do: join Teams calls as usual.
 
 | Command | What it does |
 |---|---|
-| `trec status` | Data folder, API key status, meetings with state and next step (and the share of labelled lines, `· speakers 78%`), degraded transcripts, unconfirmed claims, recording in progress, open actions, stories waiting to be published |
-| `trec doctor` | Checks dependencies, models, the transcript-loop guard, the claim verifier, the speaker labels (helper build and Accessibility permission), permissions, disk and story destinations |
+| `trec status` | Data folder, API key status, meetings with state and next step (and the share of labelled lines, `· speakers 78%`), degraded transcripts, unconfirmed claims, recording in progress, the activities summary (`Activities: 7 yours · 3 waiting on others (last pass …)`), stories waiting to be published |
+| `trec doctor` | Checks dependencies, models, the transcript-loop guard, the claim verifier, the speaker labels (helper build and Accessibility permission), the activities document (information only), permissions, disk and story destinations |
 | `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`); prints a `Speakers:` line when the observer started |
 | `trec stop` | Stops the recording, mixes the tracks and writes `audio.m4a`. Works from any terminal |
 | `trec cancel` | Discards the recording in progress and deletes its files |
 | `trec transcribe [id]` | Transcribes one meeting, or all meetings in state `recorded`, and prints how many lines got a speaker label, or why none did |
-| `trec analyze [id]` | Analyzes one meeting, or all meetings in state `transcribed`, and writes `minutes.md` |
+| `trec analyze [id]` | Analyzes one meeting, or all meetings in state `transcribed`, writes `minutes.md`, then updates the activities document for the meetings it analyzed (skipped with `[activities] enabled = false`) |
 | `trec minutes [id] [--all]` | Re-renders `minutes.md` from existing analyses, with no model call |
+| `trec activities [--open]` | Where the activities document stands: path, last update, the focus, counts, the last pass and the meetings not curated yet with their retry command; `--open` also opens the file |
+| `trec activities curate <id>… \| --since YYYY-MM-DD [--yes]` | Reruns the curator for analyzed meetings, or builds the document from the meetings since a date (asks first: meetings, passes, estimated time) |
+| `trec activities undo [--yes]` | Shows the last pass and what undoing it changes, then restores the document to before it |
 | `trec plan [--date YYYY-MM-DD] [--purge]` | Builds the day's plan; `--purge` also applies audio retention afterwards |
 | `trec stories [--date YYYY-MM-DD]` | Drafts user stories from a day's plan |
 | `trec publish [--date YYYY-MM-DD] [--only 1,3]` | Sends a day's drafts to the configured boards, skipping what is already there |
@@ -334,23 +341,24 @@ The model returns a schema-validated record:
 | `participants`, `summary`, `topics` | People who speak or are addressed (not people only talked about), or the roster read from the Teams window when there is one; 3–6 sentence summary, topics with key points |
 | `decisions` | Only what was actually decided, with timestamp |
 | `my_actions`, `others_actions` | Description, owner, ISO due date, priority (only when urgency was stated), timestamp, and **kind** |
+| `status_updates` | What the meeting said about work that already existed: `about`, `change` (`done`, `in_progress`, `blocked`, `delayed`, `due_changed`, `reassigned`, `cancelled`), `who`, the literal quote (at most 20 words, hedges kept), timestamp, and the new date or owner when said |
 | `deadlines`, `open_questions`, `next_meetings`, `risks` | Relative dates are resolved against the meeting date |
 
-Each action's kind decides where it goes after the plan: `feature` or `bug` (user story), `technical` or `operation` (task card), `management` or `communication` (stays in the plan). The rules are in `prompts/analyze_system.md`.
+An action also carries `for_whom` when the meeting said who waits for the result. An intention ("vou subir") is never progress, and a hedge ("acho que já enviei") is never recorded as `done`. Each action's kind decides where it goes after the plan: `feature` or `bug` (user story), `technical` or `operation` (task card), `management` or `communication` (stays in the plan). The rules are in `prompts/analyze_system.md`.
 
-`minutes.md` follows the structure of the `meeting-notes` skill: title, date, participants, type and purpose, summary, topics, decisions, an action table (owner, due date, priority, timestamp), risks, open questions and next steps.
+`minutes.md` follows the structure of the `meeting-notes` skill: title, date, participants, type and purpose, summary, topics, decisions, an action table (owner, due date, priority, timestamp), a `🔄 Andamento informado` section with the status updates, risks, open questions and next steps.
 
 Safeguards:
 
 - Transcripts under 20 words are not sent to the model, because whisper hallucinates on silence. They get a local "transcript too short" analysis instead.
 - Refusals, truncated responses and schema violations are errors. A partial analysis is never saved.
 - The model is told not to invent tasks, deadlines or decisions, to name another person as owner only when the transcript makes it evident (else `indefinido`), not to record tentative statements as decisions, and to keep sensitive personal data (health and private life, for example; the list is in `prompts/analyze_system.md`) out of every field.
-- **Claim verification** (`[verification]`, on by default): one more call, Sonnet at medium effort on the same provider, checks every decision, action, deadline and participant against the transcript. What it cannot confirm is kept and marked "⚠️ _a confirmar: <motivo>_" in `minutes.md`, listed "a confirmar" in the daily plan, and never becomes a user story source. Two checks in code also mark claims with sensitive personal data and participants who neither speak nor are addressed. A failed call leaves the claims unverified and never blocks the analysis. A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not checked: the verifier would confirm the hallucinations the analysis took from it. Its banners in `minutes.md` and the story drafts say so. `enabled = false` turns off the call; the two code checks still run.
+- **Claim verification** (`[verification]`, on by default): one more call, Sonnet at medium effort on the same provider, checks every decision, action, deadline, status update and participant against the transcript. What it cannot confirm is kept and marked "⚠️ _a confirmar: <motivo>_" in `minutes.md`, listed "a confirmar" in the daily plan, and never becomes a user story source. Two checks in code also mark claims with sensitive personal data and participants who neither speak nor are addressed. A failed call leaves the claims unverified and never blocks the analysis. A degraded transcript, or one from a Teams track recorded at the wrong sample rate, is not checked: the verifier would confirm the hallucinations the analysis took from it. Its banners in `minutes.md` and the story drafts say so. `enabled = false` turns off the call; the two code checks still run.
 - Every call logs tokens (and cost, or its equivalent) to `data/log/llm_usage.jsonl`; verifier calls are tagged `verify:<meeting>`.
 
 ### Provider: API or Claude Code
 
-`llm.provider` in `config.toml` selects the transport. The same provider serves the analysis, the plan and the stories.
+`llm.provider` in `config.toml` selects the transport. The same provider serves the analysis, the activities curator, the plan and the stories.
 
 | `provider` | Uses | Billing | Notes |
 |---|---|---|---|
@@ -358,6 +366,28 @@ Safeguards:
 | `claude-code` | Claude Code in headless mode (`claude -p`) | Your Claude Code subscription | Needs a logged-in session on the Mac; no refusal fallback; model alias in `llm.cli_model` |
 
 `TREC_LLM_PROVIDER` overrides the file, for example `TREC_LLM_PROVIDER=claude-code trec analyze`. To set it for the daemon, run `trec agent install --env TREC_LLM_PROVIDER=claude-code`.
+
+## Activities document
+
+> A trial run: the document is updated beside the daily plan, which stays as it is until you decide it goes. The curator reads neither the plan nor `open_actions.json`.
+
+After each analyzed meeting, one Claude call (the curator, `prompts/curate_system.md`) updates `data/activities/atividades.md`. It receives the current document, the new analyses, transcript excerpts around each progress statement, a 14-day calendar, what you edited since its last pass and the recent archive. It answers with edits to the file plus a focus, a one-line summary and whether to notify you. Up to four meetings that finished together are curated in one pass.
+
+```bash
+trec activities curate --since 2026-10-05   # once: build the document from past meetings (asks first)
+trec activities --open                      # focus, counts, last pass, meetings not curated; opens the file
+trec activities undo                        # restore the document to before the last pass
+```
+
+The document (in Brazilian Portuguese) has a box rewritten on every pass (update time and the three to five lines of focus), then `## Minhas ações`, `## Aguardando outros`, `## Agenda e prazos`, `## Contexto recente`, and a generated link block. Each item links to its meeting's `minutes.md`. Three markers: 💬 a suggestion about something a meeting said (never an automatic change), ⚠️ not confirmed, 💤 not mentioned for about three weeks.
+
+- **Only you close an item.** A meeting that says something is done adds a 💬 sub-line with the quote; you tick it. The one code rule: only an archive (with a reason) removes a checkbox line, and no edit ticks or unticks one.
+- **Your edits stand.** Lines you wrote or changed are never reworded, moved or archived; a meeting that mentions one adds a sub-line. A line you delete is archived as `removido por você`. A line you type inside the box is moved to the right section. Edits made while a pass runs are kept (the curator's edits are applied to the file as it is when the answer arrives) and are read at the next pass.
+- **Nothing is deleted.** What leaves goes to `data/activities/arquivo/YYYY-MM.md` with its date and reason: items you ticked before the previous working day, past agenda entries, answered context lines, duplicates. Versions of the last 50 passes are kept for `trec activities undo`, which previews the change and asks first.
+- **Failures are retried.** A failed pass leaves the document untouched, writes `curation_error.txt` in the meeting folder, notifies you and is retried by the daemon (at most twice for a meeting curated alone). `trec activities` lists every meeting analyzed in the last 10 working days with no successful pass and the command to rerun it.
+- **Settings.** `[activities]` in `config.toml`: `enabled` (`false` turns off only the automatic updates; the `trec activities` commands still work), `model`, `cli_model`, `effort`, `notify`, `keep_versions`. The project and its `data/` must stay out of iCloud, Documents and Desktop, as for every file the daemon writes.
+
+The daemon runs the curator in a thread, so it needs `trec agent restart` after this feature is installed. The file layout is under [Data layout](#data-layout); the product page is [`docs/prd/pages/09-activities.md`](docs/prd/pages/09-activities.md).
 
 ## Daily plan
 
@@ -474,6 +504,11 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `model`, `cli_model` | `"claude-sonnet-5-5"`, `"sonnet"` | Verifier model for `api` / `claude-code` (same provider as `[llm]`) |
 | | `effort` | `"medium"` | Verifier reasoning effort |
 | `[speakers]` | `enabled` | `true` | Read who is speaking from the Teams window during each recording and label the transcript lines (macOS; needs `teams-speakers` and its Accessibility permission). `false` starts no helper and writes no `speakers.jsonl`; your own lines are still labelled from the microphone track |
+| `[activities]` | `enabled` | `true` | Update the activities document after each analyzed meeting (the daemon's worker and the step of `trec analyze`); `false` leaves the `trec activities` commands working |
+| | `model`, `cli_model` | the `[llm]` model, `"opus"` | Curator model for `api` / `claude-code` (same provider as `[llm]`) |
+| | `effort` | `"medium"` | Curator reasoning effort (`low` … `max`) |
+| | `notify` | `true` | Notify when a pass changed something of yours |
+| | `keep_versions` | `50` | Passes kept for `trec activities undo` |
 | `[user]` | `name` | `""` | Your name as said in meetings, sent to the model; also the label of your own lines when set |
 | `[confirmation]` | `enabled`, `timeout_seconds` | `true`, `30` | Keep-or-discard dialog |
 | `[planner]` | `hour` | `18` | When the planner runs, Monday to Friday |
@@ -500,6 +535,7 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | File | Used by |
 |---|---|
 | `prompts/analyze_system.md` | Meeting analysis, including the rules for action kinds |
+| `prompts/curate_system.md` | Activities curator |
 | `prompts/plan_system.md` | Daily plan |
 | `prompts/stories_system.md` | Story drafting (your guide is appended to it) |
 | `prompts/user_story_guide.md` | Your story-writing rules; edit freely |
@@ -511,7 +547,7 @@ The prompts are written in English and ask the model for Brazilian Portuguese ou
 ### What leaves your machine
 
 - **Audio and transcription never leave the Mac.** whisper.cpp runs locally.
-- **Only the transcript text and the prompt** are sent to Claude, through the API or your local Claude Code. With speaker labels the text includes the participants' display names (as shown in Teams) before their lines. The plan and story steps send the analyses, not the audio.
+- **Only the transcript text and the prompt** are sent to Claude, through the API or your local Claude Code. With speaker labels the text includes the participants' display names (as shown in Teams) before their lines. The curator, plan and story steps send the analyses (and, for the curator, short transcript excerpts around progress statements), not the audio.
 - Stories go to a local Backlog.md board with no network access, and they are never versioned.
 - Telling participants you are recording, and following company policy and LGPD (Brazil's data protection law), are your responsibility. Native Teams recording may be disabled in corporate tenants; this tool does not change that policy.
 
@@ -530,7 +566,12 @@ data/                                   # paths.data_dir (git-ignored)
 │   ├── transcript.json, transcript.txt # lines carry the speaker name when known
 │   ├── analysis.json, minutes.md
 │   ├── error.txt                       # "step: message" after a failure
+│   ├── curation_error.txt              # why the activities curator could not take this meeting (not part of its state)
 │   └── debug/                          # raw copies kept on a track anomaly
+├── activities/
+│   ├── atividades.md                   # the activities document (edit it freely)
+│   ├── arquivo/YYYY-MM.md              # append-only archive: what left the document, with date and reason
+│   └── .curator/                       # internal: lock, base.md, versions of the last passes (undo)
 ├── plans/
 │   ├── YYYY-MM-DD.md / .json           # daily plan
 │   ├── YYYY-MM-DD.stories.md / .json   # story drafts and where they were published
@@ -541,7 +582,8 @@ data/                                   # paths.data_dir (git-ignored)
     ├── daemon.out.log, daemon.err.log
     ├── capture.log                     # recorders' stderr, padded gaps
     ├── speakers.log                    # teams-speakers' stderr (permission, windows and tiles found, counters)
-    └── llm_usage.jsonl                 # one line per model call
+    ├── llm_usage.jsonl                 # one line per model call
+    └── activities.jsonl                # one line per curator pass (diagnosis, undo)
 ```
 
 A meeting's state comes from its files, checked from top to bottom:
@@ -549,12 +591,12 @@ A meeting's state comes from its files, checked from top to bottom:
 | State | Condition | Next step |
 |---|---|---|
 | `failed` | `error.txt` exists | Fix the cause and re-run the step |
-| `analyzed` | `analysis.json` exists | None (included in the daily plan) |
+| `analyzed` | `analysis.json` exists | None (included in the daily plan and the activities document) |
 | `transcribed` | `transcript.json` exists | `trec analyze` |
 | `recorded` | `audio.m4a` exists | `trec transcribe` |
 | `recording` | only `meta.json` (and raw tracks) | `trec stop` |
 
-All JSON files are written atomically (temporary file, then rename). A `.lock` file stops two processes from working on the same meeting at once.
+All JSON files are written atomically (temporary file, then rename), and so is the activities document. A `.lock` file stops two processes from working on the same meeting at once; one OS lock (`activities/.curator/lock`) does the same for the activities document.
 
 ### Retention
 
@@ -570,7 +612,7 @@ src/teams_recorder/
 │                        # MeetingStatus and derive_status() (state = files)
 ├── application/
 │   ├── ports.py         # typing.Protocol interfaces for every external capability
-│   ├── use_cases/       # recording, processing, planning (daily plan, stories, purge)
+│   ├── use_cases/       # recording, processing, activities (curator pass, undo), planning (daily plan, stories, purge)
 │   └── pipeline.py      # derives the next step from files; stops at the first failure
 ├── adapters/
 │   ├── inbound/         # cli.py (Typer app `trec`), daemon.py (detector loop with hysteresis)
@@ -592,7 +634,7 @@ tests/                   # unit/, integration/, fakes/, fixtures/
 
 | Port | macOS adapter | Windows adapter |
 |---|---|---|
-| `MeetingRepository` | `repository_fs` (folder per meeting, atomic writes, `.lock`) | same |
+| `MeetingRepository` | `repository_fs` (folder per meeting, atomic writes, `.lock`, `curation_error.txt`) | same |
 | `ProcessAudioCapture` | `capture_coreaudio` → `teams-tap --pid` | `capture_wasapi` → `teams-tap.exe --pid --stop-file` |
 | `MicCapture` | `capture_mic_coreaudio` (default) or `capture_mic_ffmpeg` | `capture_wasapi.WasapiMicCapture` |
 | `SpeakerObserver` | `speakers_ax` → `teams-speakers`, run as its own launchd job per recording | none (`[speakers] enabled = false` also wires none) |
@@ -600,6 +642,8 @@ tests/                   # unit/, integration/, fakes/, fixtures/
 | `AudioMixer` | `mixer_ffmpeg` | same |
 | `Transcriber` | `transcriber_whispercpp` | same |
 | `MeetingAnalyzer`, `Planner`, `StoryWriter` | `llm_claude`, `planner_claude`, `stories_claude` over one shared transport (`llm_transport.ApiTransport` or `ClaudeCodeTransport`) | same |
+| `ActivityCurator` | `curator_claude` (its own transport on the same provider; `[activities]` model and effort) | same |
+| `ActivityStore` | `activities_fs` (the document, archive, versions and pass log under `data/activities/` and `data/log/`, one OS lock) | same (`msvcrt` lock, not run on Windows) |
 | `MinutesRenderer`, `StoryRenderer` | `minutes_markdown`, `stories_markdown` | same |
 | `StoryPublisher` | `publisher_backlogmd` | same |
 | `CallDetector` | `detector_pmset` | `detector_windows` |
@@ -613,6 +657,7 @@ tests/                   # unit/, integration/, fakes/, fixtures/
 ### Design decisions worth knowing
 
 - **State is files.** There is no database. `Pipeline.process()` looks at which files exist, runs the next step, and writes `error.txt` on failure. Re-running a command resumes from where it stopped.
+- **The curator edits, code guards.** The model decides what is new, what matches what and where it goes; code only applies its edits to the file as it is when the answer arrives, enforces that nothing but an archive removes a checkbox line, and commits in a recoverable order (the pass-log line is the commit point). There is no task database.
 - **Recording is cross-process.** `CaptureHandle` is a plain dataclass (PID and path) stored in `current_recording.json`, so `trec stop` in one terminal can stop recorders started by the daemon or by another `trec start`.
 - **No hardcoded strings.** User-facing text lives in `messages.py`, and identifiers in `constants.py`. `tests/unit/test_no_hardcoded_strings.py` enforces this.
 - **Lazy SDK import.** The `anthropic` SDK is imported only inside the analyzer; at module level it made cold starts very slow.
@@ -678,7 +723,7 @@ TREC_TEAMS_PROCESS=python3.11 trec daemon --once   # while tests/fixtures/fake_c
 
 ### Conventions
 
-- Everything in the repository is in English. The only Portuguese is user-facing content built from LLM output (minutes labels, story labels, plan section names) and test fixtures.
+- Everything in the repository is in English. The only Portuguese is user-facing content built from LLM output (minutes labels, story labels, activities document labels, plan section names) and test fixtures.
 - Commits are grouped per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`); see [`docs/COMMITS.md`](docs/COMMITS.md).
 - **After changing Python code, run `trec agent restart`**, or the running daemon keeps the old code. The Swift binary is spawned again for each recording, so rebuilding it is enough.
 - Coding agents: see [`AGENTS.md`](AGENTS.md).
@@ -734,6 +779,15 @@ If Teams is in full screen, the dialog may be on another desktop. When the dialo
 **`trec publish` refuses to publish.**
 `trec doctor` lists the board's problems: missing `backlog` binary, an uninitialized project, no `Triagem` status, a board Git does not ignore, or a configuration that auto-commits or reaches remotes.
 
+**`trec activities` lists a meeting under `Not curated`, or I got an `Activity curation failed` notification.**
+The line gives the reason (the meeting's `curation_error.txt`) and the command to rerun it: `trec activities curate <id>`. The daemon retries a meeting analyzed in the last two working days by itself, at most twice for one curated alone. The document is untouched by a failed pass.
+
+**The last update to the activities document is wrong.**
+`trec activities undo` previews the change, asks, and restores the document to before that pass (the lines you edited after it are discarded, and the preview says how many). Then `trec activities curate <id>` curates that meeting again.
+
+**The activities document is not updated after a meeting.**
+The daemon needs `trec agent restart` once after the feature is installed. Check `[activities] enabled`, `trec doctor` (the `Activities document` line) and `data/log/teams-recorder.log`.
+
 **I changed `config.toml` or the code and nothing changed.**
 Run `trec agent restart`.
 
@@ -752,6 +806,7 @@ Endpoint security scanning on the first open of new files (`.pyc` included) can 
 | 6 | Daily plan at 6 pm and audio retention | Done |
 | 7 | Installer and uninstaller | Done |
 | — | User story drafts and Backlog.md publishing | Done; publishing is manual (`publish = false`) until story quality is approved |
+| — | Activities document (curator, `trec activities`) | Implemented as a trial beside the daily plan; the quality checks on real meetings and the shadow week are pending, then you decide whether the plan goes |
 | — | Windows port | Implemented and unit-tested; not yet run on Windows |
 
 Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure Boards destinations, reading approvals back from the board, and voice identification (a voiceprint per person, deliberately left out). Speaker labels from the Teams window ship on macOS; their gates on real meetings are pending. Calendar integration was dropped.
@@ -763,6 +818,7 @@ Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure 
 | [`docs/prd/README.md`](docs/prd/README.md) | Product requirements: modules, flows, global rules, with one page per flow and appendices (states, integrations, data layout) |
 | [`docs/REQUIREMENTS-AND-ARCHITECTURE.md`](docs/REQUIREMENTS-AND-ARCHITECTURE.md) | Requirements, architecture, risks and per-phase implementation notes |
 | [`docs/SPEAKER-ATTRIBUTION.md`](docs/SPEAKER-ATTRIBUTION.md) | Investigation and spike runs behind the speaker labels; PRD in [`docs/tasks/speaker-attribution/`](docs/tasks/speaker-attribution/) |
+| [`docs/tasks/activities-curator/`](docs/tasks/activities-curator/) | Specification, user stories, developer-experience contract, tests, ADRs and tasks for the activities document |
 | [`docs/tasks/prd-story-publishing/`](docs/tasks/prd-story-publishing/) | PRD, tech spec and tasks for story publishing |
 | [`docs/COMMITS.md`](docs/COMMITS.md) | Commit conventions |
 | [`AGENTS.md`](AGENTS.md) | Guidance for coding agents |

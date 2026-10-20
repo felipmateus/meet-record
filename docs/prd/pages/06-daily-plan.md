@@ -2,6 +2,7 @@
 
 > **Command:** `trec plan [--date YYYY-MM-DD] [--purge]` · scheduled Mon–Fri at 6 pm (`planner.hour`) through the `local.teams-recorder.planner` LaunchAgent
 > **Module:** Planning · **Generated:** 2026-10-05 · **Status:** delivered (phase 6); validation with a real meeting pending
+> **Shadow:** the [activities document](./09-activities.md) now runs beside this plan. Nothing on this page changed: the planner, `open_actions.json` and the story drafting after the plan still run until the user decides the plan goes. The document does not read them.
 
 ## Overview
 Once a day, consolidates the analyses of the day's meetings, the previous day's plan and the accumulated list of open actions into a Markdown activity plan, and updates the action list (new, completed, overdue).
