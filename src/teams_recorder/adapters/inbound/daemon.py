@@ -9,19 +9,28 @@ recording it starts. Recording begins at once so the start of the meeting is nev
 "discard" cancels it and the rest of that call is ignored, and no answer keeps it. If the
 call ends before the answer, the capture stops at hang-up and post-processing waits for
 the answer before transcribing.
+
+The daemon owns a CuratorWorker: a thread that, after each meeting reaches `analyzed`, updates the
+activities document (CurateMeetings). The pipeline hands it the meeting ids; the worker batches them,
+adds the meetings still pending from the last working days, and is never awaited on shutdown.
+
+The first tick of each calendar day also schedules the audio retention (`PurgeOldAudio`) in the background; the tick
+never runs it inline, the day is recorded before it is scheduled, and a failure is logged and not retried that day.
 """
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol
 
 from teams_recorder.application.ports import ActiveRecording, CallDetector, CallState, CaptureHandle, ConfirmAnswer
-from teams_recorder.constants import Audio, Confirm, Detector, Proc
+from teams_recorder.application.use_cases.activities import CurateMeetings, batches
+from teams_recorder.constants import Activities, Audio, Confirm, Detector, Proc
 from teams_recorder.container import Container
 from teams_recorder.domain import Meeting, TeamsRecorderError, derive_status
 from teams_recorder.domain.status import MIC_TRACK, TAP_TRACK
@@ -39,6 +48,103 @@ class _Question:
     """A keep-recording question in flight; `done` is set once `answer` is final."""
     done: threading.Event = field(default_factory=threading.Event)
     answer: ConfirmAnswer = ConfirmAnswer.NO_ANSWER
+
+
+class CuratorWorker:
+    """One daemon thread that curates the meetings the pipeline hands it. `enqueue` never blocks; a round takes the id the
+    thread woke up for, up to `Activities.WORKER_DRAIN` more, and the meetings `CurateMeetings.pending()` finds (analyzed in
+    the last working days, no pass yet, fewer than two failed attempts), and runs them in passes of four, oldest first. A queued
+    id the pass log already shows as curated is dropped when its round starts (`pending()` of an earlier round may have run it
+    while it waited in the queue), so no meeting is curated twice. The queue lives in memory: a restart loses it, and
+    `pending()` rebuilds it (the daemon enqueues it at start).
+
+    `request_stop()` sets a flag and wakes an idle thread; a pass in flight is never awaited (it can take 900 s), and what it
+    leaves unfinished is rebuilt by `pending()` at the next start."""
+
+    def __init__(self, curate: CurateMeetings) -> None:
+        self.curate = curate
+        self._queue: queue.Queue[str | None] = queue.Queue()   # None is the stop sentinel
+        self._stopping = threading.Event()
+        self.thread: threading.Thread | None = None
+
+    # --- called by the pipeline and the daemon ----------------------------------------------------------------------
+    def enqueue(self, meeting_id: str) -> None:
+        """Queues a meeting for the next round; ignored once the worker was told to stop."""
+        if not self._stopping.is_set():
+            self._queue.put(meeting_id)
+
+    def start(self) -> None:
+        self.thread = threading.Thread(target=self.run, name="curator-worker", daemon=True)
+        self.thread.start()
+
+    def request_stop(self) -> None:
+        log.info(Log.WORKER_STOPPING)
+        self._stopping.set()
+        self._queue.put(None)
+
+    @property
+    def stopping(self) -> bool:
+        return self._stopping.is_set()
+
+    # --- the thread -------------------------------------------------------------------------------------------------
+    def run(self) -> None:
+        log.info(Log.WORKER_STARTED)
+        while self.step():
+            pass
+        log.info(Log.WORKER_STOPPED)
+
+    def step(self) -> bool:
+        """One round: waits for an id, curates it with what else is queued or pending. False once the worker must stop."""
+        first = self._queue.get()
+        if first is None or self._stopping.is_set():
+            return False
+        queued = self._uncurated([first] + self._drain())
+        try:
+            pending = self.curate.pending()
+        except Exception as exc:  # noqa: BLE001 - the queued meetings are curated whatever the listing did
+            log.warning(Log.WORKER_QUEUE_PENDING_FAILED, exc)
+            pending = []
+        passes = batches(queued + pending)
+        log.info(Log.WORKER_QUEUE, sum(len(b) for b in passes), len(queued), len(pending), ", ".join(m for b in passes for m in b))
+        for n, ids in enumerate(passes, 1):
+            if self._stopping.is_set():
+                return False
+            self._run_pass(n, len(passes), ids)
+        return True
+
+    def _uncurated(self, queued: list[str]) -> list[str]:
+        """`queued` without the ids that already have a successful pass; all of them when the pass log cannot be read."""
+        try:
+            wanted = self.curate.uncurated(queued)
+        except Exception as exc:  # noqa: BLE001 - the queued meetings are curated whatever the check did
+            log.warning(Log.WORKER_QUEUE_FILTER_FAILED, exc)
+            return queued
+        dropped = [meeting_id for meeting_id in queued if meeting_id not in wanted]
+        if dropped:
+            log.info(Log.WORKER_QUEUE_DONE, len(dropped), ", ".join(dropped))
+        return wanted
+
+    def _drain(self) -> list[str]:
+        ids: list[str] = []
+        while len(ids) < Activities.WORKER_DRAIN:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:   # the stop sentinel: leave the loop; the flag is already set
+                break
+            ids.append(item)
+        return ids
+
+    def _run_pass(self, n: int, total: int, ids: list[str]) -> None:
+        label = ", ".join(ids)
+        log.info(Log.WORKER_PASS_START, n, total, label)
+        try:
+            result = self.curate.execute(ids, wait=True, on_wait=lambda: log.info(Log.WORKER_LOCK_WAIT, label))
+        except Exception:  # noqa: BLE001 - the thread outlives one bad pass
+            log.exception(Log.WORKER_PASS_FAILED, label)
+            return
+        log.info(Log.WORKER_PASS_END, label, len(result.curated), len(result.failed), len(result.deferred), result.edits)
 
 
 @dataclass
@@ -60,12 +166,32 @@ class Daemon:
     questions: dict[str, _Question] = field(default_factory=dict)   # meeting id -> keep-recording question
     ignoring_call: bool = False   # the user discarded this call's recording; wait until it ends
     disk_warned: set[str] = field(default_factory=set)   # meetings already warned about a nearly full disk
+    purge_day: date | None = None   # the day the audio retention was last scheduled; None until the first tick
+    curator_worker: CuratorWorker | None = field(init=False, default=None)   # None: [activities] enabled = false, or a container without the curator
+
+    def __post_init__(self) -> None:
+        self.curator_worker = self._build_curator_worker()
+
+    def _build_curator_worker(self) -> CuratorWorker | None:
+        """The curator's worker, built from the container's `curate_meetings()`; the daemon owns it because the container
+        never imports this module. A container without the builder (the test doubles) or `[activities] enabled = false`
+        means no worker, and nothing is enqueued."""
+        build = getattr(self.container, "curate_meetings", None)
+        if build is None or not self.container.settings.activities_enabled:
+            return None
+        return CuratorWorker(build())
+
+    def _after_analysis(self) -> Callable[[str], None] | None:
+        """The hook the pipeline calls with each meeting that reaches `analyzed`."""
+        return self.curator_worker.enqueue if self.curator_worker is not None else None
 
     # --- lifecycle --------------------------------------------------------
     def run(self) -> None:
         log.info(Log.DAEMON_STARTED, self.poll_seconds, self.start_after, self.stop_after)
         log.info(Log.WARMUP, Log.WARMUP_OK if self.container.process_capture.warmup() else Log.WARMUP_FAILED)
         self.recover()
+        if self.curator_worker is not None:
+            self.curator_worker.start()
         self._background(self._resume_pending)
         while not self.stop_event.is_set():
             try:
@@ -79,6 +205,8 @@ class Daemon:
         self.stop_event.set()
 
     def shutdown(self) -> None:
+        if self.curator_worker is not None:
+            self.curator_worker.request_stop()   # never joined: a pass in flight can take 900 s; pending() rebuilds it at the next start
         if self.active is not None:
             log.info(Log.FINISHING_BEFORE_EXIT)
             self._finish_call()
@@ -97,8 +225,26 @@ class Daemon:
             self._watch_capturers()
             self._watch_disk()
         self._handle_state(detector, state)
+        self._schedule_purge()
         if self.active is not None:
             self._watch_observer()   # last: whatever it does or costs, the call state above was already handled
+
+    def _schedule_purge(self) -> None:
+        """On the first tick of each day, runs the audio retention in the background (never inline: the tick has a call to follow).
+        The day is recorded before the work is scheduled, so a purge that fails is not retried until tomorrow."""
+        today = self.container.clock.now().date()
+        if self.purge_day == today:
+            return
+        self.purge_day = today
+        self._background(self._purge)
+
+    def _purge(self) -> None:
+        try:
+            purged = self.container.purge_old_audio().execute()
+        except Exception:  # noqa: BLE001 - the retention is housekeeping: its failure never reaches the detector
+            log.exception(Log.PURGE_FAILED)
+            return
+        log.info(Log.PURGE_DONE, len(purged))
 
     def _handle_state(self, detector: CallDetector, state: CallState) -> None:
         if state == CallState.UNKNOWN:
@@ -220,7 +366,7 @@ class Daemon:
         if active is None:
             return
         log.info(Log.CALL_ENDED, active.meeting.id)
-        pipeline = self.container.pipeline()
+        pipeline = self.container.pipeline(after_analysis=self._after_analysis())
         question = self.questions.pop(active.meeting.id, None)
         if question is not None and question.done.is_set() and question.answer is ConfirmAnswer.DISCARD:
             self.container.cancel_recording().execute(active)   # answered in the same tick the call ended
@@ -297,12 +443,28 @@ class Daemon:
         return datetime.fromtimestamp(max(times)) if times else None
 
     def _resume_pending(self) -> None:
+        self._enqueue_pending()
         try:
-            results = self.container.pipeline().resume_pending()
+            results = self.container.pipeline(after_analysis=self._after_analysis()).resume_pending()
             if results:
                 log.info(Log.RESUMED, results)
         except Exception:  # noqa: BLE001
             log.exception(Log.RESUME_FAILED)
+
+    def _enqueue_pending(self) -> None:
+        """Rebuilds the curator's queue, which a restart loses: the analyzed meetings of the last working days that have no
+        pass yet. The worker lists them again at every round; this one wakes it."""
+        worker = self.curator_worker
+        if worker is None:
+            return
+        try:
+            ids = worker.curate.pending()
+            for meeting_id in ids:
+                worker.enqueue(meeting_id)
+            if ids:
+                log.info(Log.WORKER_PENDING_ENQUEUED, len(ids), ", ".join(ids))
+        except Exception as exc:  # noqa: BLE001 - resuming the pipeline goes on
+            log.warning(Log.WORKER_PENDING_FAILED, exc)
 
     def _background(self, fn: Callable[[], None]) -> None:
         if self.run_in_background is not None:

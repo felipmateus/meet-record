@@ -5,7 +5,7 @@ from pathlib import Path
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.application.use_cases import PublishUserStories
-from teams_recorder.domain import Action, DailyPlan, StoryDrafts, UserStory
+from teams_recorder.domain import StoryDrafts, UserStory
 from teams_recorder.messages import StoryDoc
 from tests.fakes import FakeClock, FakeNotifier, FakeStoryPublisher
 
@@ -14,9 +14,7 @@ DAY = date(2026, 10, 9)
 
 def test_failure_on_the_second_story_keeps_the_first_on_disk_and_a_rerun_sends_only_the_rest(tmp_path: Path):
     fs = FsMeetingRepository(tmp_path / "data")
-    actions = [Action("Exportar horas", "usuário", "m1", id="a1"), Action("Validar filtros", "usuário", "m1", id="a2")]
-    fs.save_plan(DailyPlan(DAY, "# plano\n", new_actions=actions))
-    fs.save_story_drafts(StoryDrafts(DAY, [UserStory("Um", "n", source_action_ids=["a1"]), UserStory("Dois", "n", source_action_ids=["a2"])]), "#\n")
+    fs.save_story_drafts(StoryDrafts(DAY, [UserStory("Um", "n", source_text="- [ ] um #história"), UserStory("Dois", "n", source_text="- [ ] dois #história")]), "#\n")   # no plan file
     clock = FakeClock(datetime(2026, 10, 9, 18, 5))
 
     first = PublishUserStories(fs, [FakeStoryPublisher("board", fail_on={"Dois"})], MarkdownStoryRenderer(), FakeNotifier(), clock).execute(DAY)

@@ -1,11 +1,12 @@
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.use_cases import AnalyzeMeeting, StartRecording, StopRecording, TranscribeMeeting
 from teams_recorder.domain import Meeting, MeetingStatus, derive_status
-from teams_recorder.domain.status import AUDIO, ERROR, TRANSCRIPT_JSON
+from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, TRANSCRIPT_JSON
+from teams_recorder.messages import Log
 from tests.fakes import FakeAnalyzer, FakeMicCapture, FakeMixer, FakeProcessCapture, FakeTranscriber
 
 
-def _pipeline(repo, notifier, clock, *, transcriber=None, analyzer=None):
+def _pipeline(repo, notifier, clock, *, transcriber=None, analyzer=None, after_analysis=None):
     proc, mic = FakeProcessCapture(), FakeMicCapture()
 
     class MixerThatWrites(FakeMixer):
@@ -19,6 +20,7 @@ def _pipeline(repo, notifier, clock, *, transcriber=None, analyzer=None):
         repo, notifier, stop,
         TranscribeMeeting(repo, transcriber or FakeTranscriber()),
         AnalyzeMeeting(repo, analyzer or FakeAnalyzer()),
+        after_analysis,
     )
     return start, pipeline
 
@@ -127,3 +129,54 @@ def test_mixing_failure_keeps_tracks_marks_error_and_is_retried(repo, notifier, 
 
     pipeline.stop.mixer.mix = real_mix          # next daemon start: retried from the raw tracks
     assert pipeline.resume_pending() == {meeting_id: MeetingStatus.ANALYZED}
+
+
+# --- the after-analysis hook (the daemon's curator worker) ----------------------------------
+def test_after_analysis_is_called_once_with_each_meeting_that_reaches_analyzed(repo, notifier, clock):
+    seen: list[str] = []
+    start, pipeline = _pipeline(repo, notifier, clock, after_analysis=seen.append)
+    active = start.execute(pid=1)
+
+    pipeline.run_after_call(active)
+
+    assert seen == [active.meeting.id] and derive_status(repo.files(active.meeting.id)) == MeetingStatus.ANALYZED
+
+
+def test_resume_pending_calls_the_hook_for_the_meetings_it_analyzes_and_not_for_the_analyzed_ones(repo, notifier, clock):
+    seen: list[str] = []
+    _, pipeline = _pipeline(repo, notifier, clock, after_analysis=seen.append)
+    done = Meeting.start(clock.now()); repo.seed(done, {AUDIO, TRANSCRIPT_JSON, ANALYSIS}, transcript=FakeTranscriber().transcript)
+    clock.advance(hours=1)
+    transcribed = Meeting.start(clock.now()); repo.seed(transcribed, {AUDIO, TRANSCRIPT_JSON}, transcript=FakeTranscriber().transcript)
+
+    pipeline.resume_pending()
+    pipeline.process(done.id)   # already analyzed: nothing ran, so nothing to announce
+
+    assert seen == [transcribed.id]
+
+
+def test_a_failed_step_does_not_call_the_hook(repo, notifier, clock):
+    seen: list[str] = []
+    start, pipeline = _pipeline(repo, notifier, clock, analyzer=FakeAnalyzer(fail=True), after_analysis=seen.append)
+    pipeline.run_after_call(start.execute(pid=1))
+    start, pipeline = _pipeline(repo, notifier, clock, transcriber=FakeTranscriber(fail=True), after_analysis=seen.append)
+    clock.advance(hours=1)
+    pipeline.run_after_call(start.execute(pid=1))
+
+    assert seen == []
+
+
+def test_a_failing_hook_is_logged_and_never_written_to_error_txt(repo, notifier, clock, caplog):
+    def broken(meeting_id: str) -> None:
+        raise RuntimeError("queue is gone")
+
+    start, pipeline = _pipeline(repo, notifier, clock, after_analysis=broken)
+    active = start.execute(pid=1)
+
+    with caplog.at_level("ERROR"):
+        pipeline.run_after_call(active)
+
+    files = repo.files(active.meeting.id)
+    assert derive_status(files) == MeetingStatus.ANALYZED and ERROR not in files and not hasattr(repo, "last_error")   # mark_failed never ran
+    assert Log.AFTER_ANALYSIS_FAILED % active.meeting.id in caplog.text and "queue is gone" in caplog.text
+    assert [t for t, _ in notifier.messages] == ["Recording started", "Recording stopped"]

@@ -1,4 +1,5 @@
-"""Task 5.0 of the fidelity guard: every acceptance criterion says where it comes from (FR6)."""
+"""Task 5.0 of the fidelity guard: every acceptance criterion says where it comes from (FR6). Drafting checks the cited times in
+tests/unit/test_stories_use_cases.py."""
 import json
 from datetime import date, datetime
 from pathlib import Path
@@ -8,16 +9,11 @@ from teams_recorder.adapters.outbound.llm_schema import strict_schema
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher, criterion_text
 from teams_recorder.adapters.outbound.stories_claude import StoriesOut
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
-from teams_recorder.application.use_cases import DraftUserStories
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Files
 from teams_recorder.domain import (
     SUGGESTION,
-    Action,
-    ActionKind,
     Criterion,
-    DailyPlan,
-    Meeting,
     Segment,
     StoryDrafts,
     Transcript,
@@ -25,8 +21,6 @@ from teams_recorder.domain import (
     checked_criteria,
     said_at,
 )
-from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
-from tests.fakes import FakeStoryRenderer
 
 TRANSCRIPT = Transcript([Segment(5.0, 9.0, "Vamos exportar em CSV."), Segment(190.0, 195.0, "Só o mês fechado.")])
 
@@ -45,35 +39,10 @@ def test_a_cited_time_must_be_a_line_of_the_source_meetings():
     assert Criterion("x", SUGGESTION).suggested and not Criterion("x", "00:00:05").suggested
 
 
-class CitingWriter:
-    """Drafts one story per action with the given criteria."""
-
-    def __init__(self, criteria: list[Criterion]) -> None:
-        self.criteria = criteria
-
-    def draft(self, day, actions, analyses, existing):
-        return StoryDrafts(day, [UserStory(f"Story {a.id}", "n", acceptance_criteria=list(self.criteria), source_action_ids=[a.id],
-                                           source_meetings=[a.source_meeting]) for a in actions])
-
-
-def test_drafting_keeps_real_citations_and_turns_the_rest_into_suggestions(repo, notifier, clock, meeting):
-    day = clock.now().date()
-    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=TRANSCRIPT)
-    gone = Action("De uma reunião apagada", "usuário", "gone", id="g1", kind=ActionKind.FEATURE)
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Exportar", "usuário", meeting.id, id="f1", kind=ActionKind.FEATURE), gone]))
-    criteria = [Criterion("Exporta em CSV", "00:00:05"), Criterion("Inventado", "01:00:00")]
-
-    drafts = DraftUserStories(repo, CitingWriter(criteria), FakeStoryRenderer(), notifier).execute(day)
-
-    assert drafts.stories[0].acceptance_criteria == [Criterion("Exporta em CSV", "00:00:05"), Criterion("Inventado", SUGGESTION)]
-    assert drafts.stories[1].acceptance_criteria == [Criterion("Exporta em CSV", SUGGESTION), Criterion("Inventado", SUGGESTION)]   # no transcript
-    assert repo.load_story_drafts(day).stories[0].acceptance_criteria[1].suggested   # saved checked
-
-
 def test_the_reviewer_sees_the_source_in_the_drafts_and_on_the_board(tmp_path: Path):
     story = UserStory("Exportar horas", "Como gestor, quero exportar.", acceptance_criteria=[
         Criterion("Exporta em CSV", "00:00:05"), Criterion("Também em PDF", SUGGESTION), Criterion("Antigo")])
-    md = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [story]), [], [])
+    md = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [story]), [])
     assert "- [ ] Exporta em CSV `[00:00:05]`" in md and "- [ ] Também em PDF _(sugestão)_" in md and "- [ ] Antigo\n" in md
     cmd = BacklogMdPublisher(tmp_path, "Triagem", ()).command(story, date(2026, 10, 14))
     assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "--ac"] == ["Exporta em CSV [00:00:05]", "Também em PDF (sugestão)", "Antigo"]

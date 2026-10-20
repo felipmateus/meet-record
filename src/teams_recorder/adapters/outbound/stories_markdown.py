@@ -1,20 +1,21 @@
 """StoryRenderer that writes plans/<day>.stories.md, the document the user reviews.
 
-One section per story: title; priority, due date and source meetings; where it was
+One section per story: title; kind, priority, due date and source meetings; where it was
 published; the story sentence; acceptance criteria as a checklist; the other sections the
-guide asked for; open questions; and the source actions with the transcript timestamp where
-each was said. Then the actions
-that did not become stories, with the reason and, for duplicates, the title of the existing
-story that covers them. A source meeting whose transcript is degraded gets a warning banner under
-the intro, and a task card from an action the verifier did not confirm shows the mark and its
-reason. Labels come from messages.StoryDoc.
+guide asked for; open questions; and the item of the activities document it came from, as the
+user wrote it. Then the items that did not become stories, with the reason and, for duplicates,
+the title of the existing story that covers them. Everything it prints is what `*.stories.json`
+stores, so a re-render after a publication needs nothing else: a story drafted by the old planner
+shows its stored meetings only, and one of its skipped actions its id and reason. A source meeting
+whose transcript is degraded gets a warning banner under the intro, and a task card from an action
+the verifier did not confirm shows the mark and its reason. Labels come from messages.StoryDoc.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
 
-from teams_recorder.domain import Action, Criterion, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
+from teams_recorder.domain import Criterion, SkippedAction, StoryDrafts, TranscriptHealth, UserStory, unconfirmed_reason
 from teams_recorder.messages import Minutes, StoryDoc
 
 
@@ -29,12 +30,16 @@ def _source_label(criterion: Criterion) -> str:
     return StoryDoc.CRITERION_AT.format(at=criterion.source) if criterion.source else ""
 
 
+def _code(text: str) -> str:
+    """`text` as a Markdown code span (double backticks when it holds a backtick itself)."""
+    text = text.strip()
+    return (StoryDoc.LONG_CODE_SPAN if "`" in text else StoryDoc.CODE_SPAN).format(text=text)
+
+
 @dataclass
 class MarkdownStoryRenderer:
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
-               degraded: dict[str, TranscriptHealth] | None = None) -> str:
-        by_id = {a.id: a for a in actions}
-        titles = {s.id: s.title for s in existing}
+    def render(self, drafts: StoryDrafts, existing: list[UserStory], degraded: dict[str, TranscriptHealth] | None = None) -> str:
+        titles = {s.id: s.title for s in [*existing, *drafts.stories]}
         day = _br(drafts.day)
         out: list[str] = [StoryDoc.TITLE.format(date=day), "", StoryDoc.INTRO.format(date=day)]
         for meeting_id, health in (degraded or {}).items():
@@ -45,30 +50,24 @@ class MarkdownStoryRenderer:
                 out += ["", StoryDoc.RATE_MISMATCH.format(meeting=meeting_id, share=health.short_padding_share)]
             if health.untrusted:
                 out += ["", StoryDoc.NOT_VERIFIED.format(meeting=meeting_id)]
-        if not actions:
-            out += ["", StoryDoc.NO_ACTIONS]
-        elif not drafts.stories:
+        if not drafts.stories:
             out += ["", StoryDoc.NO_STORIES]
         for n, story in enumerate(drafts.stories, 1):
-            out += ["", *self._story(n, story, by_id)]
+            out += ["", *self._story(n, story)]
         if drafts.skipped:
             out += ["", StoryDoc.SKIPPED]
-            for skipped in drafts.skipped:
-                action = by_id.get(skipped.action_id)
-                covered_by = (
-                    StoryDoc.DUPLICATE_OF.format(title=titles.get(skipped.duplicate_of, skipped.duplicate_of))
-                    if skipped.duplicate_of else ""
-                )
-                out.append(StoryDoc.SKIPPED_LINE.format(
-                    id=skipped.action_id,
-                    description=action.description if action else StoryDoc.UNKNOWN_ACTION,
-                    reason=skipped.reason,
-                    covered_by=covered_by,
-                ))
+            out += [self._skipped(skipped, titles) for skipped in drafts.skipped]
         out += ["", StoryDoc.FOOTER]
         return "\n".join(out) + "\n"
 
-    def _story(self, n: int, story: UserStory, by_id: dict[str, Action]) -> list[str]:
+    @staticmethod
+    def _skipped(skipped: SkippedAction, titles: dict[str, str]) -> str:
+        covered_by = StoryDoc.DUPLICATE_OF.format(title=titles.get(skipped.duplicate_of, skipped.duplicate_of)) if skipped.duplicate_of else ""
+        if skipped.source_line is None:   # a planner-era entry: its action is no longer loadable
+            return StoryDoc.SKIPPED_LINE.format(id=skipped.action_id, reason=skipped.reason, covered_by=covered_by)
+        return StoryDoc.SKIPPED_BLOCK_LINE.format(line=_code(skipped.source_line), reason=skipped.reason, covered_by=covered_by)
+
+    def _story(self, n: int, story: UserStory) -> list[str]:
         out = [StoryDoc.STORY_TITLE.format(n=n, title=story.title)]
         meta: list[str] = []
         if story.kind:
@@ -92,11 +91,6 @@ class MarkdownStoryRenderer:
             out += ["", story.details]
         if story.open_questions:
             out += ["", StoryDoc.QUESTIONS, *(StoryDoc.BULLET.format(text=q) for q in story.open_questions)]
-        sources = [by_id[i] for i in story.source_action_ids if i in by_id]
-        if sources:
-            out += ["", StoryDoc.SOURCES]
-            out += [
-                StoryDoc.SOURCE_LINE.format(id=a.id, description=a.description, at=StoryDoc.AT.format(at=a.at) if a.at else "")
-                for a in sources
-            ]
+        if story.source_text:
+            out += ["", StoryDoc.SOURCE_BLOCK, *(StoryDoc.QUOTE.format(line=line).rstrip() for line in story.source_text.split("\n"))]
         return out

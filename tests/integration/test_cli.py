@@ -10,9 +10,7 @@ from teams_recorder.adapters.outbound.launchd import AgentStatus
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.config import ENV_PROJECT_DIR
 from teams_recorder.constants import Files
-from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
-from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
-from teams_recorder.domain import Action, DailyPlan, Meeting, Publication, StoryDrafts, UserStory
+from teams_recorder.domain import Meeting, Publication, StoryDrafts, UserStory
 from teams_recorder.domain.status import AUDIO
 from teams_recorder.messages import Cli, Err, Notify
 
@@ -28,7 +26,7 @@ def _project(tmp_path: Path, monkeypatch) -> Path:
 def test_help_lists_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("status", "doctor", "purge", "start", "stop", "transcribe", "analyze", "plan", "stories"):
+    for cmd in ("status", "doctor", "purge", "start", "stop", "transcribe", "analyze", "stories"):
         assert cmd in result.output
 
 
@@ -50,29 +48,7 @@ def test_status_shows_meetings_and_next_step(tmp_path: Path, monkeypatch):
     assert "Meetings: 1" in result.output
     assert "2026-10-06_14-00-00 Daily  [recorded] → next: transcribe" in result.output
     assert "API key: MISSING" in result.output
-    assert "Open actions: 0" in result.output
-
-
-def test_plan_requires_provider_prerequisites(tmp_path: Path, monkeypatch):
-    _project(tmp_path, monkeypatch)
-    result = runner.invoke(app, ["plan"])
-    assert result.exit_code == 1 and "ANTHROPIC_API_KEY" in result.output
-
-
-def test_plan_invalid_date(tmp_path: Path, monkeypatch):
-    _project(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    result = runner.invoke(app, ["plan", "--date", "yesterday"])
-    assert result.exit_code == 1 and "invalid date" in result.output
-
-
-def test_plan_empty_day_writes_plan_without_calling_model(tmp_path: Path, monkeypatch):
-    project = _project(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    result = runner.invoke(app, ["plan", "--date", "2026-10-06", "--purge"])
-    assert result.exit_code == 0, result.output
-    assert "0 new actions" in result.output and "Audio files removed by retention: 0" in result.output
-    assert (project / "data" / "plans" / "2026-10-06.md").read_text().startswith("# Plan 2026-10-06")
+    assert Cli.ACTIVITIES_STATUS_NONE in result.output and "Open actions" not in result.output
 
 
 def test_daemon_once_reports_detector_state(tmp_path: Path, monkeypatch):
@@ -91,7 +67,7 @@ def test_agent_status_when_not_installed(tmp_path: Path, monkeypatch):
         lambda self: AgentStatus(loaded=False, plist=self.plist_path, plist_exists=False, pid=None, state=None),
     )
     result = runner.invoke(app, ["agent", "status"])
-    assert result.exit_code == 1 and "loaded: no" in result.output and "not scheduled" in result.output
+    assert result.exit_code == 1 and "loaded: no" in result.output and "planner" not in result.output
 
 
 def test_analyze_requires_api_key(tmp_path: Path, monkeypatch):
@@ -216,52 +192,13 @@ def test_minutes_command(tmp_path: Path, monkeypatch):
     assert "minutes.md" in runner.invoke(app, ["minutes", "--all"]).output
 
 
-def test_plan_with_stories_enabled_writes_empty_drafts_without_calling_model(tmp_path: Path, monkeypatch):
-    project = _project(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    (project / "config.toml").write_text('[stories]\nenabled = true\nguide = "guide.md"\n')
-    (project / "guide.md").write_text("# Guia\n")
-    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
-    assert result.exit_code == 0, result.output
-    assert "Drafting user stories for 2026-10-06…" + Cli.STORIES_OK.format(stories=0, tasks=0, skipped=0) in result.output
-    drafts = (project / "data" / "plans" / "2026-10-06.stories.md").read_text()
-    assert "Nenhuma ação nova no plano deste dia." in drafts
-
-
-def test_stories_without_a_plan_fails(tmp_path: Path, monkeypatch):
-    _project(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    result = runner.invoke(app, ["stories", "--date", "2026-10-06"])
-    assert result.exit_code == 1 and "no plan for 2026-10-06" in result.output
-
-
-def test_plan_refuses_to_redraft_a_published_day_but_keeps_the_plan(tmp_path: Path, monkeypatch):
-    project = _project(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    notified: list[tuple[str, str]] = []
-    monkeypatch.setattr("teams_recorder.adapters.outbound.notifier_macos.MacOSNotifier.notify", lambda self, t, b: notified.append((t, b)))
-    (project / "config.toml").write_text('[stories]\nenabled = true\nguide = "guide.md"\n')
-    (project / "guide.md").write_text("# Guia\n")
-    published = UserStory("Exportar horas", "n", publications=[Publication("backlog-md", "TASK-1", datetime(2026, 10, 6, 18, 0))])
-    FsMeetingRepository(project / "data").save_story_drafts(StoryDrafts(date(2026, 10, 6), [published]), "# published\n")
-
-    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
-
-    assert result.exit_code == 1
-    assert Err.STORIES_ALREADY_PUBLISHED.format(day="2026-10-06") in result.output
-    assert (project / "data" / "plans" / "2026-10-06.md").exists()
-    assert (project / "data" / "plans" / "2026-10-06.stories.md").read_text() == "# published\n"
-    assert notified[-1][0] == Notify.STORIES_FAILED
-
-
 def test_unknown_story_destination_stops_the_command(tmp_path: Path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     (project / "config.toml").write_text('[stories]\ndestinations = ["trello"]\n')
-    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
+    result = runner.invoke(app, ["stories"])
     message = Err.INVALID_DESTINATION.format(value="trello", options=("backlog-md",))
     assert result.exit_code != 0 and str(result.exception) == message
-    assert not (project / "data" / "plans" / "2026-10-06.md").exists()
 
 
 
@@ -284,17 +221,16 @@ def _board_project(tmp_path: Path, monkeypatch, *, publish: bool = False, board:
     (project / "backlog" / "config.yml").write_text(board)
     (project / "guide.md").write_text("# Guia\n")
     (project / "config.toml").write_text(
-        f'[stories]\nenabled = true\nguide = "guide.md"\ndestinations = ["backlog-md"]\npublish = {str(publish).lower()}\n'
+        f'[stories]\nguide = "guide.md"\ndestinations = ["backlog-md"]\npublish = {str(publish).lower()}\n'
         f'dedup_days = {dedup_days}\n[stories.backlog_md]\nproject_dir = "."\n'
     )
     return project
 
 
-def _drafts(project: Path, *titles: str, day: date = DAY, plan: bool = True) -> FsMeetingRepository:
+def _drafts(project: Path, *titles: str, day: date = DAY) -> FsMeetingRepository:
+    """Drafts on disk and no plan file: publishing and `trec status` need none."""
     fs = FsMeetingRepository(project / "data")
-    if plan:
-        fs.save_plan(DailyPlan(day, "# plano\n", new_actions=[Action("Exportar horas", "usuário", "m1", id="a1")]))
-    fs.save_story_drafts(StoryDrafts(day, [UserStory(t, "Como gestor, quero isso", source_action_ids=["a1"]) for t in titles]), "#\n")
+    fs.save_story_drafts(StoryDrafts(day, [UserStory(t, "Como gestor, quero isso", source_text=f"- [ ] {t} #história") for t in titles]), "#\n")
     return fs
 
 
@@ -354,59 +290,6 @@ def test_publish_failure_exits_1(tmp_path: Path, monkeypatch):
     result = runner.invoke(app, ["publish", "--date", "2026-10-09"])
     assert result.exit_code == 1
     assert Cli.PUBLISH_FAILURE_LINE.format(title="Um", destination="backlog-md", error="").rstrip() in result.output
-
-
-def _plan_with_one_story(monkeypatch):
-    monkeypatch.setattr(ClaudePlanner, "plan", lambda self, day, analyses, previous, open_actions: DailyPlan(
-        day, "# plano\n", new_actions=[Action("Exportar horas", "usuário", "m1", id="a1")]))
-    monkeypatch.setattr(ClaudeStoryWriter, "draft", lambda self, day, actions, analyses, existing: StoryDrafts(
-        day, [UserStory("Exportar horas", "Como gestor, quero isso", source_action_ids=[a.id for a in actions])]))
-
-
-def test_plan_drafts_and_publishes(tmp_path: Path, monkeypatch):
-    _board_project(tmp_path, monkeypatch, publish=True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    _plan_with_one_story(monkeypatch)
-
-    result = runner.invoke(app, ["plan", "--date", "2026-10-09", "--purge"])
-
-    assert result.exit_code == 0, result.output
-    assert _published("Exportar horas", "TASK-1") in result.output
-    assert Cli.PURGED_RETENTION.format(count=0) in result.output
-
-
-def test_plan_keeps_the_plan_and_purges_when_publishing_fails(tmp_path: Path, monkeypatch):
-    project = _board_project(tmp_path, monkeypatch, publish=True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    monkeypatch.setenv("FAKE_BACKLOG_MODE", "fail")
-    _plan_with_one_story(monkeypatch)
-
-    result = runner.invoke(app, ["plan", "--date", "2026-10-09", "--purge"])
-
-    assert result.exit_code == 1
-    assert Cli.PURGED_RETENTION.format(count=0) in result.output                  # the purge still ran
-    assert (project / "data" / "plans" / "2026-10-09.md").exists()
-    assert FsMeetingRepository(project / "data").load_story_drafts(DAY).stories[0].publications == []
-
-
-def test_stories_publish_right_after_drafting(tmp_path: Path, monkeypatch):
-    project = _board_project(tmp_path, monkeypatch, publish=True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    _plan_with_one_story(monkeypatch)
-    _drafts(project)   # the plan with one new action; no stories yet
-
-    result = runner.invoke(app, ["stories", "--date", "2026-10-09"])
-
-    assert result.exit_code == 0, result.output
-    assert _published("Exportar horas", "TASK-1") in result.output
-
-
-def test_plan_on_an_empty_day_publishes_nothing(tmp_path: Path, monkeypatch):
-    _board_project(tmp_path, monkeypatch, publish=True)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    result = runner.invoke(app, ["plan", "--date", "2026-10-06"])
-    assert result.exit_code == 0, result.output
-    assert Cli.NOTHING_TO_PUBLISH in result.output and _backlog_calls(tmp_path) == 0
 
 
 def test_doctor_lists_the_destination_and_its_problems(tmp_path: Path, monkeypatch):
@@ -512,14 +395,14 @@ def test_a_damaged_transcript_is_reported_not_a_traceback(tmp_path: Path, monkey
 
 def test_status_reports_a_damaged_file_instead_of_a_traceback(tmp_path: Path, monkeypatch):
     project = _project(tmp_path, monkeypatch)
-    plans = project / "data" / "plans"
-    plans.mkdir(parents=True)
-    (plans / Files.OPEN_ACTIONS).write_text('[{"description": "sem id"}]')
+    log = project / "data" / Files.LOG_DIR / Files.ACTIVITIES_LOG
+    log.parent.mkdir(parents=True)
+    log.write_text("not json\n{}\n")
 
     result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
-    assert "Open actions: unreadable (invalid JSON in" in result.output and Files.OPEN_ACTIONS in result.output
+    assert "Activities: unreadable (invalid JSON in" in result.output and Files.ACTIVITIES_LOG in result.output
     assert "Meetings: 0" in result.output   # the rest of the status is still shown
 
 
@@ -534,7 +417,7 @@ def test_status_shows_a_damaged_meeting_on_its_own_line(tmp_path: Path, monkeypa
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit)
     assert f"  {broken.id}  [unreadable: invalid JSON in" in result.output
-    assert f"{fine.id} Daily  [recording]" in result.output and "Open actions: 0" in result.output
+    assert f"{fine.id} Daily  [recording]" in result.output and Cli.ACTIVITIES_STATUS_NONE in result.output
 
 
 def test_transcribe_and_status_mark_a_teams_track_recorded_at_the_wrong_rate(tmp_path: Path, monkeypatch):

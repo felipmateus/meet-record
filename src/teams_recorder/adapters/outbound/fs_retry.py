@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import errno
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
-from teams_recorder.constants import Proc
+from teams_recorder.constants import Files, Proc
 from teams_recorder.messages import Log
 
 log = logging.getLogger(__name__)
@@ -37,3 +39,16 @@ def retry_io(operation: Callable[[], T], what: str, *, attempts: int = Proc.IO_R
             log.warning(Log.IO_RETRY, what, exc.strerror, attempt, attempts)
             sleep(delay)
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def atomic_write(path: Path, text: str) -> None:
+    """Writes `text` (UTF-8, newlines untouched) to `path` through a temporary file and `os.replace`, creating the parent folders; a failed
+    write leaves `path` as it was and no temporary file behind."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + Files.TMP_SUFFIX)
+    try:
+        retry_io(lambda: tmp.write_bytes(text.encode("utf-8")), str(tmp))   # bytes: newlines are written as they are, on Windows too
+        retry_io(lambda: os.replace(tmp, path), str(path))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise

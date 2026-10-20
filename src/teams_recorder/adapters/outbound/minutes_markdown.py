@@ -2,7 +2,7 @@
 
 Rendered from the structured analysis, without another LLM call: title, date, participants,
 type and purpose, summary, topics, decisions, an action table (owner, due date, priority and
-the transcript timestamp where it was said), risks, open questions and next steps. Empty
+the transcript timestamp where it was said), the progress reported on earlier work (`status_updates`), risks, open questions and next steps. Empty
 sections are left out. A degraded transcript (whisper hallucination loop) or one made from a Teams
 track recorded at the wrong sample rate puts a warning banner under the title, saying that the items
 were not checked against it (verification skips such a transcript), and a claim the verifier did not confirm is kept, marked ⚠️ with the reason
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from teams_recorder.constants import Llm
-from teams_recorder.domain import Action, Analysis, Meeting, TranscriptHealth, Verification, unconfirmed, unconfirmed_reason, verifications
+from teams_recorder.domain import Action, Analysis, Meeting, StatusChange, StatusUpdate, TranscriptHealth, Verification, unconfirmed, unconfirmed_reason, verifications
 from teams_recorder.messages import Minutes
 
 
@@ -31,6 +31,18 @@ def _mark(v: Verification | None, table: bool = False) -> str:
         return Minutes.MARK_NO_REASON
     reason = reason.replace("_", "\\_").replace("*", "\\*")   # the mark is in italics
     return Minutes.MARK.format(reason=reason.replace("|", "/") if table else reason)   # a pipe would split a table cell
+
+
+def _short_date(day: date) -> str:
+    return f"{Minutes.WEEKDAYS_SHORT[day.weekday()]} {day:%d/%m}"
+
+
+def _status_mark(v: Verification | None) -> str:
+    """The ⚠️ mark of an unconfirmed status update, in the words of its section: not italic, like the other lines."""
+    reason = unconfirmed_reason(v)
+    if reason is None:
+        return ""
+    return Minutes.STATUS_MARK.format(reason=reason) if reason else Minutes.STATUS_MARK_NO_REASON
 
 
 @dataclass
@@ -52,6 +64,21 @@ class MarkdownMinutesRenderer:
             due=_br(a.due) if a.due else Minutes.DASH,
             priority=Minutes.PRIORITY_LABELS.get(a.priority.value, Minutes.DASH) if a.priority else Minutes.DASH,
             at=a.at or Minutes.DASH,
+        )
+
+    def _status_line(self, u: StatusUpdate) -> str:
+        if u.who == Llm.OWNER_SELF:
+            who = Minutes.STATUS_WHO_SELF
+        else:
+            who = Minutes.STATUS_WHO_UNKNOWN if u.who == Llm.OWNER_UNKNOWN or not u.who else u.who
+        detail = ""
+        if u.change in (StatusChange.DUE_CHANGED, StatusChange.DELAYED) and u.new_due:
+            detail = Minutes.STATUS_NEW_DUE.format(date=_short_date(u.new_due))
+        elif u.change is StatusChange.REASSIGNED and u.new_owner:
+            detail = Minutes.STATUS_NEW_OWNER.format(owner=u.new_owner)
+        return Minutes.STATUS_LINE.format(
+            who=who, change=Minutes.STATUS_CHANGE_LABELS[u.change.value], about=" ".join(u.about.split()), detail=detail,
+            evidence=" ".join(u.evidence.split()), at=Minutes.STATUS_AT.format(at=u.at) if u.at else "", mark=_status_mark(u.verification),
         )
 
     def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
@@ -98,6 +125,10 @@ class MarkdownMinutesRenderer:
             out += [self._action_row(i, a) for i, a in enumerate(actions, 1)]
         else:
             out.append(Minutes.NO_ACTIONS)
+
+        if analysis.status_updates:
+            out += ["", Minutes.STATUS_UPDATES]
+            out += [self._status_line(u) for u in analysis.status_updates]
 
         for header, items in ((Minutes.RISKS, analysis.risks), (Minutes.QUESTIONS, analysis.open_questions)):
             if items:

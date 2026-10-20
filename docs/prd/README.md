@@ -4,7 +4,7 @@
 
 ## 1. System overview
 
-teams-recorder is a personal macOS (and, untested so far, Windows) utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and, in the next phase, consolidates the day's meetings into an activity plan.
+teams-recorder is a personal macOS (and, untested so far, Windows) utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and keeps one activities document that an agent updates after each meeting (it replaced a daily activity plan on 2026-10-20). User stories for a backlog are drafted on demand from the items the user tags in that document.
 
 It runs in the background with no graphical interface: a daemon watches Teams and starts recording when a call begins; when the call ends, it processes everything on its own and reports through macOS notifications. A command line (`trec`) lets the user operate and inspect each step manually. Audio and transcripts never leave the Mac; only the transcript text is sent to the language model, through the API or through the locally installed Claude Code.
 
@@ -19,9 +19,10 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | Analysis | analyze | Extract summary, decisions, actions, deadlines and questions from the transcript | Delivered (phase 4) |
 | Automation | daemon, agent | Detect Teams calls and chain recording → transcription → analysis with no intervention | Delivered (phase 5) |
 | Speaker labels | (inside recording and transcription) | Read who is speaking from the Teams window and label each transcript line with the person's name; the user's own lines from the two tracks | Delivered on macOS (2026-10-17); gates on real meetings pending |
-| Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention | Delivered (phases 1 to 5) |
-| Planning | plan, scheduler | Consolidate the day's analyses into a Markdown plan and keep open actions up to date | Delivered (phase 6) |
-| User stories | stories, publish | Draft user stories from the plan's new actions, following the user's guide, and publish them to a board for review | Delivered: drafts and the Backlog.md board; publishing by hand until the user approves the stories, then automatic (GitHub and Azure later) |
+| Operations | status, doctor, purge, version | Inspect state, check dependencies, apply retention (the daemon also applies it once a day) | Delivered (phases 1 to 5) |
+| Planning (retired) | — | Consolidated the day's analyses into a Markdown plan at 6 pm and kept open actions up to date | Delivered in phase 6, removed on 2026-10-20 and replaced by the Activities module |
+| Activities | activities, activities curate, activities undo | A curator agent updates one document (`data/activities/atividades.md`) after each analyzed meeting: the user's open actions, what they wait on, dates, recent context; the user's edits and ticks are respected, nothing is deleted | Delivered (`docs/tasks/activities-curator/`); replaced the daily plan on 2026-10-20; the quality evaluations on real data were not run |
+| User stories | stories, publish | Draft a user story for each item of the activities document the user tags `#história`, following the user's guide, and publish them to a board for review | Delivered: drafts from tagged items and the Backlog.md board; publishing by hand until the user approves the stories, then automatic (GitHub and Azure later) |
 | Installation | install.sh, uninstall.sh | Install from scratch on another Mac/user | Delivered (phase 7) |
 | Windows | install.ps1, Windows adapters | Same flows on Windows 10 2004+/11 | Implemented, not yet run on Windows |
 
@@ -34,9 +35,10 @@ It runs in the background with no graphical interface: a daemon watches Teams an
 | 3 | Analysis | `trec analyze [id]` | Analysis | [→](./pages/03-analysis.md) |
 | 4 | Automatic recording | `trec daemon`, `trec agent …` | Automation | [→](./pages/04-automation.md) |
 | 5 | Operations and diagnostics | `trec status` / `doctor` / `purge` / `version` | Operations | [→](./pages/05-operations.md) |
-| 6 | Daily plan | `trec plan` | Planning | [→](./pages/06-daily-plan.md) |
+| 6 | Daily plan (removed 2026-10-20) | — (`trec plan` no longer exists) | Planning (retired) | [→](./pages/06-daily-plan.md) |
 | 7 | Installation | `scripts/install.sh` / `install.command` / `scripts/uninstall.sh` | Installation | [→](./pages/07-installation.md) |
-| 8 | User story drafts and publishing | `trec stories`, `trec publish` (and after `trec plan`) | User stories | [→](./pages/08-user-stories.md) |
+| 8 | User story drafts and publishing | `trec stories`, `trec publish` | User stories | [→](./pages/08-user-stories.md) |
+| 9 | Activities document | `trec activities [--open]`, `trec activities curate`, `trec activities undo` (automatic after each analysis) | Activities | [→](./pages/09-activities.md) |
 
 Appendices: [state and enumeration dictionary](./appendix/enum-dictionary.md) · [external integrations](./appendix/integrations.md) · [data layout and schemas](./appendix/data-layout.md) · [relationships between flows](./appendix/relationships.md).
 
@@ -57,23 +59,25 @@ Two permissions are required and requested on the first recording: **Microphone*
 ### Interaction patterns
 - Processing commands (`transcribe`, `analyze`) with no argument act on **all** meetings pending that step and keep going even when one fails; they exit with code 1 if any failed.
 - Every error line starts with `error: `; commands from future phases exist in the help and report which phase they arrive in (exit code 2).
-- macOS notifications: "Recording started", "Recording stopped", "Recording cancelled", "Transcription failed" / "Analysis failed", "Daily plan ready".
+- macOS notifications: "Recording started", "Recording stopped", "Recording cancelled", "Transcription failed" / "Analysis failed", "Activities updated" / "Activity curation failed", "User story drafts failed", "User stories published" / "Publishing user stories failed".
 
 ### Language
-Analysis and plan content (summaries, actions, the daily Markdown plan) is produced in Brazilian Portuguese because the meetings are in Portuguese; CLI messages and notifications are also in Portuguese, and this document quotes them verbatim with an English gloss.
+Analysis and activities-document content (summaries, actions, progress statements, the activities document, the story drafts) is produced in Brazilian Portuguese because the meetings are in Portuguese; CLI messages and notifications are also in Portuguese, and this document quotes them verbatim with an English gloss.
 
 ### Cost and privacy
 - Transcription is 100 % local (whisper.cpp). Model `large-v3-turbo-q5_0`, 574 MB.
-- Analysis: Claude Opus 5.5 through the API (prepaid, ~US$ 0.10 per hour of meeting) or headless Claude Code (subscription). Each call logs tokens and cost to `data/log/llm_usage.jsonl`.
+- Analysis: Claude Opus 5.5 through the API (prepaid, ~US$ 0.10 per hour of meeting) or headless Claude Code (subscription). Each call logs tokens and cost to `data/log/llm_usage.jsonl`. The activities curator makes one more call per pass (up to four meetings), at medium effort, on the same provider, and `trec stories` makes one call per run that has new tagged items.
 - Transcripts with fewer than 20 words are not sent to the model.
-- Audio is deleted after 30 days (configurable) once transcribed; transcript and analysis remain.
+- Audio is deleted after 30 days (`[audio] retention_days`) once transcribed, by the daemon once a day; transcript and analysis remain.
 
 ## 5. Roadmap
 
 | Phase | Deliverable | Status |
 |---|---|---|
 | 1–5 | Recording, transcription, analysis, automation, operations | Delivered and validated with real Teams calls on 2026-10-05 |
-| 6 | Daily planner (`trec plan`), scheduling at 6 pm, open-action updates | Delivered 2026-10-05; validation with a real meeting pending |
+| 6 | Daily planner (`trec plan`), scheduling at 6 pm, open-action updates | Delivered 2026-10-05; removed 2026-10-20 (replaced by the activities document) |
+| — | Activities document, slice 1: progress statements in the analysis and minutes, the curator, `trec activities`, doctor and status lines | Implemented 2026-10-20 (`docs/tasks/activities-curator/`) |
+| — | Activities document, slice 2: planner removed, stories drafted from `#história` items, audio retention in the daemon | Implemented 2026-10-20 after the user's go; the quality evaluations on real data were not run |
 | 7 | `install.sh`, `trec status` with the month's spend, installation README | Pending |
 | — | Speaker labels from the Teams window (`teams-speakers`, track energy, labelling at transcription) | Implemented 2026-10-17; gates G1–G5 on real meetings pending (`docs/tasks/speaker-attribution/prd.md`) |
 

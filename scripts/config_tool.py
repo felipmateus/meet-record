@@ -1,7 +1,8 @@
 """Installer helper, run with the project's virtualenv Python (scripts/install.sh and install.ps1).
 
   config_tool.py get                         prints the settings the installers need, as key=value
-  config_tool.py set <section> <key> <value> rewrites one `key = "value"` line in config.toml
+  config_tool.py set <section> <key> <value> rewrites one `key = value` line in config.toml: `true`, `false` and whole
+                                             numbers are written as TOML booleans and integers, anything else as a string
 """
 from __future__ import annotations
 
@@ -25,9 +26,18 @@ def get() -> None:
         "provider": s.llm_provider.value,
         "user_name": s.user_name,
         "active": s.data_dir / Files.ACTIVE_RECORDING,
+        "activities_enabled": str(s.activities_enabled).lower(),   # [activities] enabled
+        "retention_days": s.retention_days,                        # [audio] retention_days (falls back to the old [planner] one)
     }
     for key, value in values.items():
         print(f"{key}={value}")
+
+
+def _toml_value(value: str) -> str:
+    """The TOML literal for a command-line value: a boolean or an integer when it reads as one, else a string."""
+    if value in ("true", "false") or re.fullmatch(r"[0-9]+", value):
+        return value
+    return json.dumps(value, ensure_ascii=False)
 
 
 def set_value(section: str, key: str, value: str) -> None:
@@ -39,7 +49,7 @@ def set_value(section: str, key: str, value: str) -> None:
         if header:
             current = header.group(1).strip()
         elif current == section and re.match(rf"\s*{re.escape(key)}\s*=", line):
-            lines[i] = f"{key} = {json.dumps(value, ensure_ascii=False)}\n"
+            lines[i] = f"{key} = {_toml_value(value)}\n"
             path.write_text("".join(lines), encoding="utf-8")
             return
     sys.exit(f"[{section}] {key} not found in {path}")

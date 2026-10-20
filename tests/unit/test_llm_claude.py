@@ -108,7 +108,7 @@ def test_strict_schema_closes_objects_and_requires_all_fields():
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == set(schema["properties"])
     action = schema["$defs"]["ActionOut"]
-    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due", "priority", "at", "kind"}
+    assert action["additionalProperties"] is False and set(action["required"]) == {"description", "owner", "due", "priority", "at", "kind", "for_whom"}
     assert "default" not in action["properties"]["due"]
 
 

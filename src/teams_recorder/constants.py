@@ -74,6 +74,7 @@ class Bin:
     DOTNET = "dotnet"
     BACKLOG = "backlog"           # Backlog.md CLI (npm i -g backlog.md / brew install backlog-md)
     GIT = "git"
+    OPEN = "open"                 # macOS: opens a file with its default application
 
 
 # --- files and folders -------------------------------------------------------
@@ -83,18 +84,16 @@ class Files:
     DOTENV = ".env"
     PROMPTS_DIR = "prompts"
     ANALYZE_PROMPT = "analyze_system.md"
-    PLAN_PROMPT = "plan_system.md"
     STORIES_PROMPT = "stories_system.md"
     VERIFY_PROMPT = "verify_system.md"
+    CURATE_PROMPT = "curate_system.md"
     STORY_GUIDE = "user_story_guide.md"  # default guide, in the prompts dir; [stories] guide overrides it
     RECORDINGS_DIR = "recordings"
     PLANS_DIR = "plans"
-    PLAN_GLOB = "????-??-??.json"     # every saved plan (see PLAN_JSON below)
     TMP_SUFFIX = ".tmp"               # atomic writes: <name>.tmp then os.replace
     MODELS_DIR = "models"
     LOG_DIR = "log"
     DEBUG_DIR = "debug"              # raw tracks kept on mixing anomalies
-    OPEN_ACTIONS = "open_actions.json"
     ACTIVE_RECORDING = "current_recording.json"
     DAEMON_LOG = "teams-recorder.log"
     CAPTURE_LOG = "capture.log"
@@ -120,14 +119,32 @@ class Files:
     PLIST_SUBDIR = Path("Library") / "LaunchAgents"   # relative to the home dir (resolved at call time so tests can fake it)
     PLIST_DIR = Path.home() / PLIST_SUBDIR
     VENV_TREC = Path(".venv") / "bin" / CLI_NAME       # relative to the project dir
-    AGENT_OUT_LOG = "{name}.out.log"                   # name: last label segment (daemon / planner)
+    AGENT_OUT_LOG = "{name}.out.log"                   # name: last label segment (daemon / speakers)
     AGENT_ERR_LOG = "{name}.err.log"
-    PLAN_MARKDOWN = "{day}.md"                         # day: ISO date
-    PLAN_JSON = "{day}.json"
-    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day's plan (not matched by PLAN_GLOB)
+    STORIES_MARKDOWN = "{day}.stories.md"              # user story drafts of that day
     STORIES_JSON = "{day}.stories.json"
     STORIES_GLOB = "????-??-??.stories.json"         # every saved set of story drafts
     NOTICES_DIR = "notices"                          # in the data dir: one file per once-a-day notice, holding the day it last fired
+    ACTIVITIES_DIR = "activities"                    # in the data dir: the curated document, its archive and the curator's own state
+    ACTIVITIES_DOC = "atividades.md"
+    ARCHIVE_DIR = "arquivo"                          # in the activities dir: append-only, one file per month
+    ARCHIVE_MONTH = "{month}.md"                     # month: YYYY-MM
+    CURATOR_DIR = ".curator"                         # in the activities dir: lock, base.md and the versions
+    CURATOR_LOCK = "lock"                            # flock target, always empty
+    CURATOR_BASE = "base.md"                         # the document as the last pass left it
+    VERSIONS_DIR = "versions"                        # in the curator dir
+    VERSION_FILE = "{version}_{part}"                # part: a VersionPart value
+    ACTIVITIES_LOG = "activities.jsonl"              # in the log dir: one PassRecord per line, the commit point of a pass
+
+
+class VersionPart(StrEnum):
+    """The files a pass leaves in `.curator/versions/` (named `<version>_<part>`)."""
+
+    BEFORE = "before.md"      # the document the pass read
+    AFTER = "after.md"        # the document the pass wrote
+    BASE = "base.md"          # base.md after the pass; absent when the pass left none
+    PREVBASE = "prevbase.md"  # base.md as the pass found it; absent when there was none
+    PASS = "pass.json"        # the PassRecord, with the archive sizes
 
 
 def raw_bytes_per_hour(bit_depth: int) -> int:
@@ -142,7 +159,6 @@ def ggml_model_file(name: str) -> str:
 # --- launchd ---------------------------------------------------------------------
 class Launchd:
     DAEMON_LABEL = f"local.{APP_NAME}.daemon"
-    PLANNER_LABEL = f"local.{APP_NAME}.planner"
     SPEAKERS_LABEL = f"local.{APP_NAME}.speakers"              # the helper, one job per recording (at most one at a time)
     SPEAKERS_CHECK_LABEL = f"local.{APP_NAME}.speakers-check"  # its short-lived `--check` job, run by the doctor
     PATH = ":".join(["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
@@ -151,11 +167,9 @@ class Launchd:
     BOOTSTRAP_RETRY_DELAY = 1.0
     BOOTOUT_TIMEOUT = 15.0
     BOOTOUT_POLL_SECONDS = 0.5
-    PLANNER_WEEKDAYS = range(1, 6)  # Monday..Friday in StartCalendarInterval
     DOMAIN = "gui/{uid}"            # launchctl target domain for the logged-in user
     TIMEOUT_EXIT = 124              # the exit code a launchctl call that timed out is reported with (the `timeout(1)` convention)
     DAEMON_ARGS = ("daemon",)       # `trec` arguments run by each agent
-    PLANNER_ARGS = ("plan", "--purge")
 
 
 # --- LLM -------------------------------------------------------------------------
@@ -167,7 +181,6 @@ class Llm:
     MIN_WORDS = 20                  # below this an LLM call is not worth it
     OWNER_SELF = "usuário"          # data contract with the prompts: the recording owner
     OWNER_UNKNOWN = "indefinido"    # data contract with the prompts: unknown owner
-    MAX_PREVIOUS_PLAN_CHARS = 6000
     CLAUDE_CODE_TIMEOUT = 900.0
 
 
@@ -182,6 +195,7 @@ class Audio:
     MASTER_FILTER = "loudnorm=I=-18:TP=-2:LRA=11,alimiter=limit=0.891:level=0"
     WAIT_AUDIO_SECONDS = 20.0
     DEFAULT_MIC_DEVICE = "default"
+    RETENTION_DAYS = 30             # delete audio.m4a of transcribed meetings older than this ([audio] retention_days)
     DEFAULT_LANGUAGE = "pt"
     DEFAULT_WHISPER_MODEL = "large-v3-turbo-q5_0"
     DEFAULT_WHISPER_THREADS = 0     # 0 = let whisper-cli decide
@@ -271,6 +285,12 @@ class Parse:
     BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
     DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
     DIALOG_GAVE_UP = "gave up:true"
+    ACTIVITY_OPEN = r"^\s*[-*+] \[ \] "            # an open checkbox line of the activities document
+    ACTIVITY_TICKED = r"^\s*[-*+] \[[xX]\] "       # a ticked one
+    ACTIVITY_LABEL = r"\]\[([^\]\s]+)\]"            # the label of a reference link: `[text][label]`
+    ACTIVITY_ITEM_PREFIX = r"^\s*[-*+]\s+(?:\[[ xX]\]\s+)?"   # the list marker and checkbox that open an item line
+    ACTIVITY_TITLE_END = r" [—·] "                    # what follows an item's title on its line: ` — p/ Carla`, ` · sex 16/10`
+    ACTIVITY_LINK = r"\[([^\]]*)\]\[[^\]\s]+\]"        # a reference link `[text][label]`; group 1 is its text
 
 
 # --- detection -------------------------------------------------------------------
@@ -314,13 +334,11 @@ class Windows:
         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{app_id}').Show([Windows.UI.Notifications.ToastNotification]::new($t))"
     )
     POWERSHELL_ARGS = ("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command")
-    TASK_FOLDER = APP_NAME           # Task Scheduler folder: \teams-recorder\daemon and \teams-recorder\planner
-    TASK_DAEMON, TASK_PLANNER = "daemon", "planner"
+    TASK_FOLDER = APP_NAME           # Task Scheduler folder: \teams-recorder\daemon
+    TASK_DAEMON = "daemon"
     TASK_STATE_SCRIPT = "(Get-ScheduledTask -TaskPath '\\{folder}\\' -TaskName '{name}' -ErrorAction Stop).State"
     TASK_RUNNING, TASK_DISABLED = "Running", "Disabled"
     TASK_NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-    TASK_START_DATE = "2026-01-01T{hour:02d}:00:00"
-    TASK_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
     TASK_RESTART_INTERVAL = "PT1M"
     TASK_RESTART_COUNT = 999
 
@@ -356,9 +374,11 @@ class Logging:
     BACKUP_COUNT = 30
 
 
-class Planner:
-    DEFAULT_HOUR = 18
-    RETENTION_DAYS = 30
+class Legacy:
+    """What an older version installed and this one removes. Used only to build the agent whose `uninstall()` removes it."""
+
+    PLANNER_LABEL = f"local.{APP_NAME}.planner"   # macOS LaunchAgent that ran `trec plan --purge` at 18:00
+    PLANNER_TASK = "planner"                      # Windows scheduled task of the same job (folder \\teams-recorder\\)
 
 
 class BacklogMd:
@@ -406,14 +426,71 @@ class Speakers:
     LAUNCHCTL_TIMEOUT = 20.0        # seconds the other launchctl calls get (bootout waits for the helper to leave)
 
 
+class Activities:
+    ENABLED = True                       # [activities] enabled: the daemon's worker and the curation step of `trec analyze`
+    DEFAULT_CLI_MODEL = "opus"           # [activities] cli_model, with provider = "claude-code" ([activities] model defaults to the analyzer's)
+    DEFAULT_EFFORT = Effort.MEDIUM       # [activities] effort
+    NOTIFY = True                        # [activities] notify
+    WORKER_DRAIN = 3                     # ids the daemon's worker takes from its queue after the one it woke up for (one batch in all)
+    SKELETON_STAMP = "00000000-000000"   # the stamp in the closing marker of the skeleton's box; no pass version equals it
+    KEEP_VERSIONS = 50                   # passes whose version files are kept for undo
+    ARCHIVE_LINK_UP = "../"              # the archive sits one folder below the document: its link targets go one level further up
+    ARCHIVE_ENTRY_LIMIT = 60             # recent archive entries shown to the curator
+    COMMIT_ATTEMPTS = 3                  # tries of base.md and the pass-log line once the document has been replaced
+    LOCK_POLL = 0.1                      # seconds between tries of the Windows lock
+    DATE_FORMAT = "%d/%m/%Y"             # date in an archive entry's heading
+    MONTH_FORMAT = "%Y-%m"               # archive file name
+    VERSION_FORMAT = "%Y%m%d-%H%M%S"     # a pass's version: its version files' name and the stamp in the box's closing marker
+    BATCH_SIZE = 4                       # meetings curated by one pass (oldest first)
+    MAX_ATTEMPTS = 2                     # failed passes a meeting curated alone may cost before the daemon stops retrying it
+    RETRY_WORKING_DAYS = 2               # `pending()` looks this many working days back (today is day 0)
+    LISTING_WORKING_DAYS = 10            # `not_curated()` (the `trec activities` listing) looks this many working days back
+    EXCERPT_WINDOW = 60                  # seconds of transcript kept before and after each status update
+    TARGET_CHARS = 60                    # characters of an edit's target quoted in a failure message
+    EST_SECONDS_PER_PASS = 160           # the bootstrap's time estimate per pass (`trec activities curate --since`)
+    ESTIMATE_STEP_MINUTES = 5            # the estimate is rounded up to a multiple of this
+
+
+class Curator:
+    """The curator's call: tags of its user message and the letters of its refs (the data contract with
+    prompts/curate_system.md), the usage tags, and the formats of the dates it is shown."""
+
+    DOCUMENT = "document"
+    MEETING = "meeting"
+    EXCERPTS = "excerpts"
+    EXCERPT = "excerpt"
+    CALENDAR = "calendar"
+    USER_EDITS = "user_edits"
+    BOX_LINES = "box_lines"
+    LAST_PASS = "last_pass"
+    RECENT_ARCHIVE = "recent_archive"
+    TASK = "task"
+    FAILED_EDITS = "failed_edits"
+    REF_MY_ACTION = "a"       # refs are `<meeting n>.<letter><i>`: 1.a1, 1.o2, ...
+    REF_OTHERS_ACTION = "o"
+    REF_STATUS = "u"
+    REF_DEADLINE = "p"
+    REF_NEXT_MEETING = "n"
+    REF_DECISION = "d"
+    REF_QUESTION = "q"
+    REF_RISK = "r"
+    TAG = "curate"            # llm_usage.jsonl tag: curate:<first meeting id>
+    REPAIR_TAG = "curate-repair"
+    DATE_FORMAT = "%d/%m/%Y"
+    TIME_FORMAT = "%H:%M"
+    HEALTH_SEPARATOR = ", "
+
+
 class Stories:
-    ENABLED = False   # without [stories] enabled = true, `trec plan` drafts no stories
     DEDUP_DAYS = 30   # stories of this many previous days are shown to the writer to avoid duplicates
     PUBLISH = False   # without [stories] publish = true, drafts are published only with `trec publish`
+    BLOCK_REF = "b{n}"                    # the ref a tagged block has in one call to the writer, numbered from 1
+    DRAFTS_LINK = "../{folder}/{name}"    # from the activities document to a drafts document (the tag's replacement)
+    LINK_DATE_FORMAT = "%d/%m"
     BACKLOG_STATUS = "Triagem"            # Backlog.md column where new stories wait for review
     BACKLOG_LABELS = ("teams-recorder",)
     # Analysis fields sent as context with the candidate actions (the user's own actions go separately).
     CONTEXT_FIELDS = ("meeting_id", "title", "purpose", "meeting_type", "participants", "summary", "topics",
-                      "decisions", "others_actions", "open_questions", "risks")
+                      "decisions", "my_actions", "others_actions", "deadlines", "open_questions", "risks")
     # Story fields the writer sees for each recent story, to recognise an action it already covers.
     EXISTING_FIELDS = ("id", "title", "narrative")

@@ -7,18 +7,31 @@ import unicodedata
 from dataclasses import replace
 from typing import Iterable
 
-from .models import SUGGESTION, Action, Analysis, Claim, ClaimKind, ClaimRef, Criterion, Transcript, Verification, VerificationStatus, clock_time
+from .models import (
+    SUGGESTION, Action, Analysis, Claim, ClaimKind, ClaimRef, Criterion, StatusChange, StatusUpdate, Transcript, Verification, VerificationStatus,
+    clock_time,
+)
 
 
 def claims(analysis: Analysis) -> list[Claim]:
     """Every verifiable claim of an analysis, in reading order: decisions and deadlines by position, actions by id,
-    participants by name. The one place that says which claims there are and how they are keyed."""
+    participants by name, status updates by position. The one place that says which claims there are and how they are
+    keyed."""
     return [
         *(Claim(ClaimRef(ClaimKind.DECISION, str(i)), d.text, at=d.at) for i, d in enumerate(analysis.decisions)),
         *(Claim(ClaimRef(ClaimKind.ACTION, a.id), a.description, a.owner, a.due, a.at) for a in analysis.all_actions),
         *(Claim(ClaimRef(ClaimKind.DEADLINE, str(i)), d.what, d.who, d.when) for i, d in enumerate(analysis.deadlines)),
         *(Claim(ClaimRef(ClaimKind.PARTICIPANT, name), name) for name in dict.fromkeys(analysis.participants)),
+        *(_status_claim(i, u) for i, u in enumerate(analysis.status_updates)),
     ]
+
+
+def _status_claim(position: int, u: StatusUpdate) -> Claim:
+    """What the verifier reads for a status update: what changed, about what, the quote, who it concerns (as written,
+    like an action's owner) and the new date, not only the topic."""
+    change = f"{u.change.value} to {u.new_owner}" if u.change is StatusChange.REASSIGNED and u.new_owner else u.change.value
+    text = f'{change}: {u.about} — "{u.evidence}"'  # literal-ok: claim text of the verification protocol, read by the model
+    return Claim(ClaimRef(ClaimKind.STATUS_UPDATE, str(position)), text, u.who, u.new_due, u.at)
 
 
 def claim_refs(analysis: Analysis) -> list[ClaimRef]:
@@ -54,6 +67,8 @@ def _claim_verification(analysis: Analysis, ref: ClaimRef) -> Verification | Non
         return analysis.decisions[int(ref.key)].verification
     if ref.kind is ClaimKind.DEADLINE:
         return analysis.deadlines[int(ref.key)].verification
+    if ref.kind is ClaimKind.STATUS_UPDATE:
+        return analysis.status_updates[int(ref.key)].verification
     return next((a.verification for a in analysis.all_actions if a.id == ref.key), None)
 
 
@@ -88,6 +103,7 @@ def with_verifications(analysis: Analysis, verdicts: dict[ClaimRef, Verification
         others_actions=actions(analysis.others_actions),
         deadlines=[replace(d, verification=get(ClaimKind.DEADLINE, str(i), d.verification)) for i, d in enumerate(analysis.deadlines)],
         participant_checks=checks,
+        status_updates=[replace(u, verification=get(ClaimKind.STATUS_UPDATE, str(i), u.verification)) for i, u in enumerate(analysis.status_updates)],
     )
 
 

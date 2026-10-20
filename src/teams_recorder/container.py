@@ -5,11 +5,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from teams_recorder.adapters.outbound.activities_fs import FsActivityStore
 from teams_recorder.adapters.outbound.capture_coreaudio import CoreAudioTapCapture
 from teams_recorder.adapters.outbound.capture_wasapi import WasapiMicCapture, WasapiTapCapture
 from teams_recorder.adapters.outbound.capture_mic_coreaudio import CoreAudioMicCapture
 from teams_recorder.adapters.outbound.capture_mic_ffmpeg import FfmpegMicCapture
 from teams_recorder.adapters.outbound.clock import SystemClock
+from teams_recorder.adapters.outbound.curator_claude import ClaudeCurator
 from teams_recorder.adapters.outbound.confirm_macos import DialogRecordingConfirmation
 from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecordingConfirmation
 from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
@@ -22,7 +24,6 @@ from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeC
 from teams_recorder.adapters.outbound.mixer_ffmpeg import FfmpegMixer
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
-from teams_recorder.adapters.outbound.planner_claude import ClaudePlanner
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
@@ -32,6 +33,8 @@ from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTr
 from teams_recorder.adapters.outbound.verifier_claude import ClaudeClaimVerifier
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.application.ports import (
+    ActivityCurator,
+    ActivityStore,
     AudioMixer,
     CallDetector,
     ClaimVerifier,
@@ -43,7 +46,6 @@ from teams_recorder.application.ports import (
     MicCapture,
     MinutesRenderer,
     Notifier,
-    Planner,
     ProcessAudioCapture,
     RecordingConfirmation,
     SpeakerObserver,
@@ -54,9 +56,8 @@ from teams_recorder.application.ports import (
 )
 from teams_recorder.application.use_cases import (
     AnalyzeMeeting,
-    BuildDailyPlan,
     CancelRecording,
-    DraftUserStories,
+    DraftStoriesFromTags,
     PublishUserStories,
     PurgeOldAudio,
     stories_waiting,
@@ -66,6 +67,7 @@ from teams_recorder.application.use_cases import (
     TranscribeMeeting,
     VerifyAnalysis,
 )
+from teams_recorder.application.use_cases.activities import ActivitiesSummary, CurateMeetings, UndoLastPass, doc_format
 from teams_recorder.config import Settings, find_tool
 from teams_recorder.constants import Bin, Effort, Files, LlmProvider, MicBackend, Platform, StoryDestination, Transcription
 from teams_recorder.domain import UserStory
@@ -100,12 +102,13 @@ class Container:
     mixer: AudioMixer
     transcriber: Transcriber
     analyzer: MeetingAnalyzer
-    planner: Planner
     detector: CallDetector
     minutes: MinutesRenderer
     story_writer: StoryWriter
     story_renderer: StoryRenderer
     story_publishers: list[StoryPublisher]
+    curator: ActivityCurator
+    activity_store: ActivityStore
     confirmation: RecordingConfirmation | None = None   # None: never ask whether to keep a recording
     disk: DiskSpace | None = None
     retry_transcriber: Transcriber | None = None   # anti-loop pass for a degraded transcript; None: no retry
@@ -134,14 +137,24 @@ class Container:
     def render_minutes(self) -> RenderMinutes:
         return RenderMinutes(self.repo, self.minutes)
 
-    def pipeline(self) -> Pipeline:
-        return Pipeline(self.repo, self.notifier, self.stop_recording(), self.transcribe_meeting(), self.analyze_meeting())
+    def curate_meetings(self) -> CurateMeetings:
+        """The activities curator's pass. `[activities] enabled` is not read here: it switches off only the automatic triggers
+        (the daemon's worker, `trec analyze`), never the explicit `trec activities` commands."""
+        return CurateMeetings(self.repo, self.activity_store, self.curator, self.notifier, self.clock,
+                              user_name=self.settings.user_name, notify=self.settings.activities_notify)
 
-    def build_daily_plan(self) -> BuildDailyPlan:
-        return BuildDailyPlan(self.repo, self.planner, self.notifier)
+    def activities_summary(self) -> ActivitiesSummary:
+        return ActivitiesSummary(self.repo, self.activity_store, self.curate_meetings())
 
-    def draft_user_stories(self) -> DraftUserStories:
-        return DraftUserStories(self.repo, self.story_writer, self.story_renderer, self.notifier, self.settings.story_dedup_days)
+    def undo_last_pass(self) -> UndoLastPass:
+        return UndoLastPass(self.activity_store, self.clock)
+
+    def pipeline(self, after_analysis: Callable[[str], None] | None = None) -> Pipeline:
+        return Pipeline(self.repo, self.notifier, self.stop_recording(), self.transcribe_meeting(), self.analyze_meeting(), after_analysis)
+
+    def draft_stories_from_tags(self) -> DraftStoriesFromTags:
+        return DraftStoriesFromTags(self.repo, self.activity_store, self.story_writer, self.story_renderer, self.clock,
+                                    self.settings.story_dedup_days)
 
     def stories_waiting(self) -> list[UserStory]:
         destinations = [p.destination for p in self.story_publishers]
@@ -194,7 +207,7 @@ def _windows_adapters(settings: Settings, headless: bool) -> _PlatformAdapters:
 
 
 def build_container(settings: Settings, *, headless: bool = False) -> Container:
-    transport = build_transport(settings)  # shared by analyzer and planner
+    transport = build_transport(settings)  # shared by the analyzer and the story writer
     platform = (_windows_adapters if settings.platform is Platform.WINDOWS else _macos_adapters)(settings, headless)
     ffmpeg = find_tool(Bin.FFMPEG, settings.project_dir)
     return Container(
@@ -212,7 +225,6 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         retry_transcriber=build_retry_transcriber(settings),
         verifier=build_verifier(settings),
         analyzer=ClaudeAnalyzer(transport, prompt_path=settings.prompts_dir / Files.ANALYZE_PROMPT, user_name=settings.user_name),
-        planner=ClaudePlanner(transport, prompt_path=settings.prompts_dir / Files.PLAN_PROMPT, user_name=settings.user_name),
         detector=platform.detector,
         minutes=MarkdownMinutesRenderer(settings.user_name),
         story_writer=ClaudeStoryWriter(
@@ -220,6 +232,8 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         ),
         story_renderer=MarkdownStoryRenderer(),
         story_publishers=build_story_publishers(settings),
+        curator=build_curator(settings),
+        activity_store=build_activity_store(settings),
         confirmation=platform.confirmation,
         disk=DataDirDiskSpace(settings.data_dir),
         speakers=platform.speakers,
@@ -280,6 +294,18 @@ def build_verifier(settings: Settings) -> ClaimVerifier | None:
         return None
     transport = _transport(settings, settings.verify_model, settings.verify_cli_model, settings.verify_effort)
     return ClaudeClaimVerifier(transport, prompt_path=settings.prompts_dir / Files.VERIFY_PROMPT, user_name=settings.user_name)
+
+
+def build_curator(settings: Settings) -> ActivityCurator:
+    """The activities curator, on its own transport: [activities] model (API) or cli_model (Claude Code) and effort, on the
+    provider of [llm]. Its calls go to the same usage log, tagged curate:<id> and curate-repair:<id>."""
+    transport = _transport(settings, settings.activities_model, settings.activities_cli_model, settings.activities_effort)
+    return ClaudeCurator(transport, prompt_path=settings.prompts_dir / Files.CURATE_PROMPT)
+
+
+def build_activity_store(settings: Settings) -> ActivityStore:
+    """The activities document, its base, versions, archive and pass log under <data_dir>/activities."""
+    return FsActivityStore(settings.data_dir, doc_format(), settings.activities_keep_versions)
 
 
 def _transport(settings: Settings, model: str, cli_model: str, effort: Effort) -> StructuredTransport:

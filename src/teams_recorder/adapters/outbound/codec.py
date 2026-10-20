@@ -19,13 +19,14 @@ from teams_recorder.domain import (
     Analysis,
     CaptureStats,
     Criterion,
-    DailyPlan,
     Deadline,
     Decision,
     EnergyTimeline,
     LabelSummary,
     Meeting,
     MeetingType,
+    PassKind,
+    PassRecord,
     Priority,
     Publication,
     Segment,
@@ -33,6 +34,8 @@ from teams_recorder.domain import (
     SpeakerEvent,
     SpeakerLog,
     SILENCE_DB,
+    StatusChange,
+    StatusUpdate,
     StoryDrafts,
     Topic,
     Transcript,
@@ -270,7 +273,7 @@ def energy_from_dict(d: dict[str, Any]) -> dict[str, EnergyTimeline]:
 
 
 # Verification (fidelity guard). Written only when a claim was verified, so files and the JSON
-# sent to the planner and the story writer stay as before for claims that were not. Read back
+# sent to the story writer and the curator stay as before for claims that were not. Read back
 # strictly: absent, null or {} means "not verified"; any other value that is not an object
 # (false, 0, "", [] included) raises TypeError, and the repository reports the file.
 def _verification_to_dict(v: Verification) -> dict[str, Any]:
@@ -321,6 +324,7 @@ def action_to_dict(a: Action) -> dict[str, Any]:
         "priority": a.priority.value if a.priority else None,
         "at": a.at,
         "kind": a.kind.value if a.kind else None,
+        **({"for_whom": a.for_whom} if a.for_whom else {}),
         **_verified(a.verification),
     }
 
@@ -337,6 +341,7 @@ def action_from_dict(d: dict[str, Any]) -> Action:
         at=d.get("at"),
         kind=ActionKind(d["kind"]) if d.get("kind") else None,
         verification=_verification_or_none(d.get("verification")),
+        for_whom=d.get("for_whom") or None,
     )
 
 
@@ -345,6 +350,33 @@ def _decision_from(value: Any) -> Decision:
     if isinstance(value, str):
         return Decision(value)
     return Decision(value["text"], value.get("at"), _verification_or_none(value.get("verification")))
+
+
+# Status update: progress the meeting reported on earlier work. Optional keys are written only when set.
+def status_update_to_dict(u: StatusUpdate) -> dict[str, Any]:
+    return {
+        "about": u.about,
+        "change": u.change.value,
+        "who": u.who,
+        "evidence": u.evidence,
+        "at": u.at,
+        **({"new_due": u.new_due.isoformat()} if u.new_due else {}),
+        **({"new_owner": u.new_owner} if u.new_owner else {}),
+        **_verified(u.verification),
+    }
+
+
+def status_update_from_dict(d: dict[str, Any]) -> StatusUpdate:
+    return StatusUpdate(
+        about=d["about"],
+        change=StatusChange(d["change"]),
+        who=d.get("who", ""),
+        evidence=d.get("evidence", ""),
+        at=d.get("at"),
+        new_due=_parse_d(d.get("new_due")),
+        new_owner=d.get("new_owner") or None,
+        verification=_verification_or_none(d.get("verification")),
+    )
 
 
 # Analysis
@@ -365,6 +397,7 @@ def analysis_to_dict(a: Analysis) -> dict[str, Any]:
         "next_meetings": list(a.next_meetings),
         "risks": list(a.risks),
         **_participant_checks(a.participant_checks),
+        **({"status_updates": [status_update_to_dict(u) for u in a.status_updates]} if a.status_updates else {}),
     }
 
 
@@ -386,29 +419,7 @@ def analysis_from_dict(d: dict[str, Any]) -> Analysis:
         topics=[Topic(x["title"], list(x.get("points", []))) for x in d.get("topics", [])],
         risks=list(d.get("risks", [])),
         participant_checks=_participant_checks_from(d.get("participant_checks")),
-    )
-
-
-# DailyPlan
-def plan_to_dict(p: DailyPlan) -> dict[str, Any]:
-    return {
-        "day": p.day.isoformat(),
-        "markdown": p.markdown,
-        "priorities": list(p.priorities),
-        "new_actions": [action_to_dict(x) for x in p.new_actions],
-        "completed_action_ids": list(p.completed_action_ids),
-        "overdue_action_ids": list(p.overdue_action_ids),
-    }
-
-
-def plan_from_dict(d: dict[str, Any]) -> DailyPlan:
-    return DailyPlan(
-        day=date.fromisoformat(d["day"]),
-        markdown=d.get("markdown", ""),
-        priorities=list(d.get("priorities", [])),
-        new_actions=[action_from_dict(x) for x in d.get("new_actions", [])],
-        completed_action_ids=list(d.get("completed_action_ids", [])),
-        overdue_action_ids=list(d.get("overdue_action_ids", [])),
+        status_updates=[status_update_from_dict(x) for x in d.get("status_updates", [])],
     )
 
 
@@ -447,6 +458,7 @@ def story_to_dict(s: UserStory) -> dict[str, Any]:
             {"destination": pub.destination, "ref": pub.ref, "published_at": _dt(pub.published_at)} for pub in s.publications
         ],
         "kind": s.kind.value if s.kind else None,
+        **({"source_text": s.source_text} if s.source_text is not None else {}),   # absent on planner-era drafts and unchanged files
         **_verified(s.verification),
     }
 
@@ -468,14 +480,24 @@ def story_from_dict(d: dict[str, Any]) -> UserStory:
         ],
         kind=ActionKind(d["kind"]) if d.get("kind") else None,
         verification=_verification_or_none(d.get("verification")),
+        source_text=d.get("source_text"),
     )
+
+
+def skipped_to_dict(k: SkippedAction) -> dict[str, Any]:
+    return {"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of,
+            **({"source_line": k.source_line} if k.source_line is not None else {})}
+
+
+def skipped_from_dict(d: dict[str, Any]) -> SkippedAction:
+    return SkippedAction(d["action_id"], d.get("reason", ""), d.get("duplicate_of"), d.get("source_line"))
 
 
 def story_drafts_to_dict(drafts: StoryDrafts) -> dict[str, Any]:
     return {
         "day": drafts.day.isoformat(),
         "stories": [story_to_dict(s) for s in drafts.stories],
-        "skipped": [{"action_id": k.action_id, "reason": k.reason, "duplicate_of": k.duplicate_of} for k in drafts.skipped],
+        "skipped": [skipped_to_dict(k) for k in drafts.skipped],
     }
 
 
@@ -483,5 +505,60 @@ def story_drafts_from_dict(d: dict[str, Any]) -> StoryDrafts:
     return StoryDrafts(
         day=date.fromisoformat(d["day"]),
         stories=[story_from_dict(x) for x in d.get("stories", [])],
-        skipped=[SkippedAction(x["action_id"], x.get("reason", ""), x.get("duplicate_of")) for x in d.get("skipped", [])],
+        skipped=[skipped_from_dict(x) for x in d.get("skipped", [])],
     )
+
+
+# Activities pass record: one line of the pass log, and `_pass.json` in the version folder.
+def pass_record_to_dict(r: PassRecord) -> dict[str, Any]:
+    return {
+        "ts": r.ts.isoformat(),
+        "kind": r.kind.value,
+        "meetings": list(r.meetings),
+        "ops_applied": r.ops_applied,
+        "retried": r.retried,
+        "retried_by_kind": dict(r.retried_by_kind),
+        "unaccounted_refs": list(r.unaccounted_refs),
+        "ignored": r.ignored,
+        "user_removed": r.user_removed,
+        "box_rescued": r.box_rescued,
+        "during_edits": r.during_edits,
+        "summary": r.summary,
+        "version": r.version,
+        "archive_file": r.archive_file,
+        "archive_bytes_before": r.archive_bytes_before,
+        "archive_bytes_after": r.archive_bytes_after,
+        "carried_edits": r.carried_edits,
+        "undoes": r.undoes,
+        "doc_chars": r.doc_chars,
+        "error": r.error,
+    }
+
+
+def pass_record_from_dict(d: dict[str, Any]) -> PassRecord:
+    return PassRecord(
+        ts=datetime.fromisoformat(d["ts"]),
+        kind=PassKind(d["kind"]),
+        meetings=tuple(d["meetings"]),
+        ops_applied=int(d["ops_applied"]),
+        retried=bool(d["retried"]),
+        retried_by_kind={str(k): int(v) for k, v in d["retried_by_kind"].items()},
+        unaccounted_refs=tuple(d["unaccounted_refs"]),
+        ignored=int(d["ignored"]),
+        user_removed=int(d["user_removed"]),
+        box_rescued=int(d["box_rescued"]),
+        during_edits=d["during_edits"],
+        summary=d["summary"],
+        version=d["version"],
+        archive_file=d["archive_file"],
+        archive_bytes_before=_optional_int(d["archive_bytes_before"]),
+        archive_bytes_after=_optional_int(d["archive_bytes_after"]),
+        carried_edits=d["carried_edits"],
+        undoes=d["undoes"],
+        doc_chars=int(d["doc_chars"]),
+        error=d["error"],
+    )
+
+
+def _optional_int(value: Any) -> int | None:
+    return None if value is None else int(value)

@@ -20,7 +20,7 @@ Install from scratch on another Mac, or for another user, with a single script, 
 7. Ask for the user's name (default: the current `[user] name`) and the LLM provider (`claude-code` or `api`), and write them to `config.toml`. For `claude-code`, check that Claude Code is installed. For `api`, create `.env` from the example with permission 600.
 8. Download the whisper model (and the VAD model when `vad = true`) into the configured models folder.
 9. Run `trec doctor`.
-10. Install the daemon and the planner, unless a recording is in progress, or the services run another copy of the project and the user declines.
+10. Install the daemon (and remove the daily planner job an older version installed, saying so when the old plist exists), unless a recording is in progress, or the services run another copy of the project and the user declines.
 11. Explain the three macOS permissions (Microphone, Screen & System Audio Recording, Accessibility) and offer to open their settings pages. Accessibility is for `teams-speakers`: macOS does not ask for it, so the text says to add `native/teams-speakers/.build/release/teams-speakers` with the **+** button (the daemon runs the helper as its own launchd job, so the grant must be on the helper), that a rebuild may require adding it again, and that `trec doctor` verifies it.
 12. Summarize the items that need attention.
 
@@ -39,7 +39,7 @@ Install from scratch on another Mac, or for another user, with a single script, 
 - Running it again is safe: each step only does what is missing.
 - Installing Homebrew, logging in to Claude Code and granting the macOS permissions stay with the user (the installer never touches a permission, and `trec agent restart` after an update stays with the user too).
 - The uninstaller removes the `teams-tap` build with `--all`; it does not yet remove `native/teams-speakers/.build` or the helper's launchd job.
-- `scripts/uninstall.sh` removes only the services that run its own copy. `--all` also deletes `.venv` and the `teams-tap` build. Data (recordings, transcripts, plans, models) is never deleted.
+- `scripts/uninstall.sh` removes only the services that run its own copy. `--all` also deletes `.venv` and the `teams-tap` build. The legacy planner job is removed too, by name. Data (recordings, transcripts, the activities document, story drafts, models) is never deleted.
 
 ## Acceptance criterion
 A from-scratch installation for another user on the Mac works and `trec doctor` comes up green.
@@ -47,7 +47,7 @@ A from-scratch installation for another user on the Mac works and `trec doctor` 
 Verified on 2026-10-05 with a fresh copy outside the repository: every step passed in under a minute, with the model download and services skipped on purpose; a second run changed nothing. Pending from the original plan: the month's LLM spend in `trec status`.
 
 ## Windows
-- `scripts\install.ps1`, or double-click `install.cmd`. Same idempotent approach and options (`-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`).
-- Steps: Windows build 19041 or later, warning if the project is in OneDrive or Teams is missing; winget for Python 3.12 and ffmpeg; whisper.cpp release zip into `tools\whisper`; `.venv`; `teams-tap.exe` (built with the .NET 8 SDK from winget when missing); name and provider; model; `trec doctor`; scheduled tasks (same takeover and in-progress guards); the microphone privacy setting, with an option to open it.
-- `scripts\uninstall.ps1` removes only this copy's tasks; `-All` also deletes `.venv` and the build; data is kept.
+- `scripts\install.ps1`, or double-click `install.cmd`. Same idempotent approach and options (`-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`), plus `-NoActivities`, which sets `[activities] enabled = false` (the installer also prints whether the activities curator is on; the macOS installer does not touch that key, and its default is on), and `-RetentionDays N`, which sets `[audio] retention_days` (the installer prints how long audio is kept after transcription; the daemon deletes older audio once a day).
+- Steps: Windows build 19041 or later, warning if the project is in OneDrive or Teams is missing; winget for Python 3.12 and ffmpeg; whisper.cpp release zip into `tools\whisper`; `.venv`; `teams-tap.exe` (built with the .NET 8 SDK from winget when missing); name and provider; model; `trec doctor`; the scheduled task of the daemon (same takeover and in-progress guards; an old `planner` task is removed); the microphone privacy setting, with an option to open it.
+- `scripts\uninstall.ps1` removes only this copy's tasks (the daemon, and the legacy `planner` task by name); `-All` also deletes `.venv` and the build; data is kept.
 - `[TBC]` Parsed with the PowerShell parser; not yet run on Windows.

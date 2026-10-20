@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from teams_recorder.domain import (
-    Action, Analysis, CaptureStats, ClaimRef, DailyPlan, EnergyTimeline, Meeting, SpeakerLog, StoryDrafts, Transcript, TranscriptHealth,
-    UserStory, Verification,
+    Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, EnergyTimeline, Meeting, Op, OpFailure, PassRecord,
+    SpeakerLog, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
 )
 
 
@@ -126,31 +126,21 @@ class MinutesRenderer(Protocol):
 
 
 @runtime_checkable
-class Planner(Protocol):
-    def plan(
-        self,
-        day: date,
-        analyses: list[Analysis],
-        previous_plan: DailyPlan | None,
-        open_actions: list[Action],
-    ) -> DailyPlan: ...
-
-
-@runtime_checkable
 class StoryWriter(Protocol):
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
-        """Drafts user stories from the given actions. `analyses` are the meetings they came from (context);
-        `existing` are recent stories, which an action already covered by one of them must not duplicate."""
+    def draft_from_blocks(self, day: date, blocks: list[TaggedBlock], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
+        """Drafts a story for each tagged block of the activities document. `analyses` are the meetings the blocks link to
+        (context); `existing` are recent stories, which a block already covered by one of them must not duplicate. A block that
+        is not a story ends up in `skipped` with a reason, its `source_line` set; `action_id` holds the block's ref."""
         ...
 
 
 @runtime_checkable
 class StoryRenderer(Protocol):
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
-               degraded: dict[str, TranscriptHealth] | None = None) -> str:
-        """The review document; `existing` names the stories that left-out duplicates point to; `degraded`, by
-        meeting id, the source meetings whose transcript cannot be trusted (degraded, or made from a Teams track
-        recorded at the wrong sample rate), each shown with its warning banner."""
+    def render(self, drafts: StoryDrafts, existing: list[UserStory], degraded: dict[str, TranscriptHealth] | None = None) -> str:
+        """The review document, built only from what `*.stories.json` stores: a block story prints its `source_text`, a
+        skipped block its `source_line`, a planner-era story its stored meetings. `existing` names the stories that left-out
+        duplicates point to; `degraded`, by meeting id, the source meetings whose transcript cannot be trusted (degraded, or
+        made from a Teams track recorded at the wrong sample rate), each shown with its warning banner."""
         ...
 
 
@@ -219,17 +209,81 @@ class MeetingRepository(Protocol):
     def save_minutes(self, meeting_id: str, markdown: str) -> None: ...
     def mark_failed(self, meeting_id: str, message: str) -> None: ...
     def clear_failed(self, meeting_id: str) -> None: ...
-    # plans
-    def save_plan(self, plan: DailyPlan) -> None: ...
-    def load_plan(self, day: date) -> DailyPlan | None: ...
-    def latest_plan_before(self, day: date) -> DailyPlan | None: ...
-    def load_open_actions(self) -> list[Action]: ...
-    def save_open_actions(self, actions: list[Action]) -> None: ...
-    # user story drafts (one set per plan day)
+    def mark_curation_failed(self, meeting_id: str, message: str) -> None:
+        """Writes recordings/<id>/curation_error.txt (status.CURATION_ERROR) atomically, without the meeting lock: no other
+        step touches it and derive_status ignores it."""
+        ...
+    def clear_curation_failed(self, meeting_id: str) -> None: ...
+    def curation_error(self, meeting_id: str) -> str | None: ...
+    # user story drafts (one set per day)
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None: ...
+    def story_drafts_path(self, day: date) -> Path:
+        """The review document (`plans/<day>.stories.md`)."""
+        ...
     def load_story_drafts(self, day: date) -> StoryDrafts | None: ...
     def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
         """Drafts of the days in [before - days, before), oldest first."""
+        ...
+
+
+@runtime_checkable
+class ActivityCurator(Protocol):
+    def curate(self, data: CuratorInput) -> CuratorOutput: ...
+    def repair(self, data: CuratorInput, current: str, failures: list[OpFailure]) -> list[Op]:
+        """Replacement ops for the failed ones; `current` is the in-memory text after the ops that applied."""
+        ...
+
+
+class VersionFiles(NamedTuple):
+    """The files of one committed pass. None means the file does not exist: commit writes no `_base` / `_prevbase` file for it."""
+
+    before: str
+    after: str
+    base: str | None      # base.md after the pass (None: the pass left no base, an undo of the first pass)
+    prevbase: str | None  # base.md as it was when the pass committed (the base the pass read); None for the first pass
+
+
+@runtime_checkable
+class ActivityStore(Protocol):
+    def lock(self, wait: bool = True) -> AbstractContextManager[bool]:
+        """Serialises passes. Yields False when `wait` is False and the lock is held. On entry, reconciles a commit that a
+        hard stop interrupted: rolled forward only when the document's box stamp is not None and equals the stamp of the
+        pass's `_after`, rolled back otherwise (a missing stamp is never "replaced")."""
+        ...
+    def read_document(self) -> str | None: ...
+    def read_base(self) -> str | None: ...
+    def recent_archive(self, limit: int) -> list[str]:
+        """The last `limit` archive entries, newest last, each as its header line and its first line."""
+        ...
+    def commit(self, before: str, after: str, archived: list[tuple[str, str]], base: str | None, record: PassRecord) -> None:
+        """All or nothing for the document, base.md, the archive and the versions: the version files (`_pass.json` holds the
+        archive sizes), the archive entries, the document, base.md and, as the commit point, the pass-log line. `archived`
+        holds (text, reason); `base=None` deletes base.md and writes no `_base` file. Raises `CommitIncomplete` when it
+        failed after the document replace (the pass happened; the next `lock()` finishes it), any other `RepositoryError`
+        when it failed before it (nothing was changed)."""
+        ...
+    def rewrite_document(self, document: str, base: str | None = None) -> None:
+        """Replaces the document and, when `base` is given, base.md, with no version files and no pass-log line: for a small edit
+        that is not a pass (a story's tag replaced by its link). The caller holds `lock()`; the box is left as it is, so a stamp
+        reconciliation is unaffected. Raises `RepositoryError`."""
+        ...
+    def log_pass(self, record: PassRecord) -> None:
+        """Appends the record of a pass that changed nothing (kind skipped_empty or failed) to the pass log, and nothing
+        else: no version files, no document or base write. Such a record has no version set, so it can never be undone."""
+        ...
+    def passes(self) -> list[PassRecord]:
+        """The pass log, oldest first; a torn last line counts as absent."""
+        ...
+    def version(self, name: str) -> VersionFiles: ...
+    def version_names(self) -> list[str]:
+        """The names of the version sets that have files, oldest first: the committed passes in the keep window and a set a
+        commit left unreconciled (its pass-log line is still missing). A new pass or undo never takes one of these names."""
+        ...
+    def truncate_archive(self, record: PassRecord) -> bool:
+        """Truncates record.archive_file to archive_bytes_before only while its size equals archive_bytes_after; False when left in place."""
+        ...
+    def path(self) -> Path:
+        """The document."""
         ...
 
 

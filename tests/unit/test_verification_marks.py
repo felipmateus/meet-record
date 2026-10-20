@@ -1,22 +1,17 @@
-"""Task 4.0 of the fidelity guard: unconfirmed claims are marked (never dropped) in the minutes, kept out of story
-sources, published marked on task cards, and degraded source transcripts are announced in the drafts."""
+"""Task 4.0 of the fidelity guard: unconfirmed claims are marked (never dropped) in the minutes, published marked on stored task
+cards, and degraded source transcripts are announced in the drafts."""
 import json
 from datetime import date, datetime
 from pathlib import Path
 
 from teams_recorder.adapters.outbound import codec
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
-from teams_recorder.adapters.outbound.planner_claude import build_user_message
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
-from teams_recorder.application.use_cases import DraftUserStories, PublishUserStories
-from teams_recorder.config import load_settings
-from teams_recorder.constants import Files
 from teams_recorder.domain import (
     Action,
     ActionKind,
     Analysis,
-    DailyPlan,
     Deadline,
     Decision,
     Meeting,
@@ -27,15 +22,18 @@ from teams_recorder.domain import (
     UserStory,
     Verification,
     VerificationStatus,
-    task_card,
 )
 from teams_recorder.domain.status import AUDIO, TRANSCRIPT_JSON
 from teams_recorder.messages import Minutes, StoryDoc
-from tests.fakes import FakeStoryPublisher, FakeStoryRenderer, FakeStoryWriter
 
 YES = Verification(VerificationStatus.CONFIRMED, "dito em 00:01:10")
 NO = Verification(VerificationStatus.UNCONFIRMED, "a transcrição não diz quem fará")
 DEGRADED = TranscriptHealth(0.668, 28, 86, True, ((0, 14), (15, 59)))
+
+
+def stored_card(title: str, verification: Verification | None = None) -> UserStory:
+    """A task card as the planner stored it: its action's verification travels with it."""
+    return UserStory(title, "", source_action_ids=["t1"], source_meetings=["m0"], kind=ActionKind.TECHNICAL, verification=verification)
 
 
 def _meeting() -> Meeting:
@@ -80,83 +78,29 @@ def test_unverified_minutes_are_exactly_as_before():
     assert MarkdownMinutesRenderer("Felipe").render(_meeting(), only_confirmed) == unverified
 
 
-# --- planner ------------------------------------------------------------------------------------
-def test_the_planner_receives_the_marks_and_is_told_what_they_mean():
-    unconfirmed = Action("Enviar o cronograma", "usuário", "m", verification=NO)
-    message = build_user_message(date(2026, 10, 14), [_analysis(verified=True)], None, [], [unconfirmed], [])
-    assert '"status": "unconfirmed"' in message and "a transcrição não diz quem fará" in message
-    prompt = (load_settings().prompts_dir / Files.PLAN_PROMPT).read_text(encoding="utf-8")
-    assert "`verification.status` is `unconfirmed`" in prompt and '"(a confirmar)"' in prompt and "never drop it" in prompt
-
-
 # --- stories ------------------------------------------------------------------------------------
-def test_an_unconfirmed_action_is_never_a_story_source_but_a_task_card_keeps_its_mark(repo, notifier, clock):
-    day = clock.now().date()
-    actions = [
-        Action("Exportar horas", "usuário", "m0", id="f1", kind=ActionKind.FEATURE, verification=YES),
-        Action("Corrigir o login", "usuário", "m0", id="b1", kind=ActionKind.BUG, verification=NO),
-        Action("Mapa offline", "usuário", "m0", id="u1", kind=ActionKind.FEATURE),   # never verified: as before
-        Action("Estimar o mapa", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL, verification=NO),
-    ]
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=actions))
-    writer = FakeStoryWriter()
-
-    drafts = DraftUserStories(repo, writer, FakeStoryRenderer(), notifier).execute(day)
-
-    assert [a.id for a in writer.calls[0][1]] == ["f1", "u1"]   # the unconfirmed bug never reaches the writer
-    skipped = {k.action_id: k.reason for k in drafts.skipped}
-    assert skipped == {"b1": StoryDoc.NOT_CONFIRMED.format(reason="a transcrição não diz quem fará")}
-    card = next(s for s in drafts.stories if s.is_task_card)
-    assert card.source_action_ids == ["t1"] and card.verification == NO   # PRD decision 10: published marked
-
-
-def test_a_reason_less_unconfirmed_action_is_still_left_out(repo, notifier, clock):
-    day = clock.now().date()
-    bare = Action("Corrigir o login", "usuário", "m0", id="b1", kind=ActionKind.BUG,
-                  verification=Verification(VerificationStatus.UNCONFIRMED))
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=[bare]))
-    drafts = DraftUserStories(repo, FakeStoryWriter(), FakeStoryRenderer(), notifier).execute(day)
-    assert [(k.action_id, k.reason) for k in drafts.skipped] == [("b1", StoryDoc.NOT_CONFIRMED_NO_REASON)]
-
-
-def test_degraded_source_meetings_reach_the_renderer_when_drafting_and_publishing(repo, notifier, clock, meeting):
-    day = clock.now().date()
-    healthy = Meeting.start(datetime(2026, 10, 6, 15, 0, 0))
-    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=Transcript([Segment(0, 1, "A CIDADE NO BRASIL")], health=DEGRADED))
-    repo.seed(healthy, {AUDIO, TRANSCRIPT_JSON}, transcript=Transcript([Segment(0, 1, "oi")], health=TranscriptHealth(0.0, 1, 1, False)))
-    actions = [Action("Exportar horas", "usuário", meeting.id, id="f1"), Action("Mapa", "usuário", healthy.id, id="f2"),
-               Action("De uma reunião apagada", "usuário", "gone", id="f3")]
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=actions))
-    renderer = FakeStoryRenderer()
-
-    DraftUserStories(repo, FakeStoryWriter(), renderer, notifier).execute(day)
-    PublishUserStories(repo, [FakeStoryPublisher()], renderer, notifier, clock).execute(day)
-
-    assert renderer.degraded[0] == {meeting.id: DEGRADED} and renderer.degraded[-1] == {meeting.id: DEGRADED}
-
-
 def test_the_drafts_document_shows_the_banner_and_the_card_mark():
-    card = task_card(Action("Estimar o mapa", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL, verification=NO))
+    card = stored_card("Estimar o mapa", NO)
     drafts = StoryDrafts(date(2026, 10, 14), [card])
-    md = MarkdownStoryRenderer().render(drafts, [], [], {"2026-10-08_10-30-52": DEGRADED})
+    md = MarkdownStoryRenderer().render(drafts, [], {"2026-10-08_10-30-52": DEGRADED})
     assert StoryDoc.DEGRADED.format(meeting="2026-10-08_10-30-52", loop=0.668,
                                     gaps=Minutes.DEGRADED_GAPS.format(ranges="00:00:00–00:14:00, 00:15:00–00:59:00")) in md
     assert StoryDoc.UNCONFIRMED.format(reason="a transcrição não diz quem fará") in md
     assert md.count(StoryDoc.NOT_VERIFIED.format(meeting="2026-10-08_10-30-52")) == 1   # verification skipped it (task 7.0)
-    plain = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [task_card(Action("Estimar", "usuário", "m0", id="t2"))]), [], [])
+    plain = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [stored_card("Estimar")]), [])
     assert "⚠️" not in plain
 
 
 def test_a_marked_card_carries_the_mark_into_the_board_description(tmp_path: Path):
     publisher = BacklogMdPublisher(tmp_path, "Triagem", ("teams-recorder",))
-    card = task_card(Action("Estimar o mapa", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL, verification=NO))
+    card = stored_card("Estimar o mapa", NO)
     body = publisher.body(card, date(2026, 10, 14))
     assert body.startswith(StoryDoc.UNCONFIRMED.format(reason="a transcrição não diz quem fará") + "\n\n")
-    assert "⚠️" not in publisher.body(task_card(Action("Estimar", "usuário", "m0", id="t2")), date(2026, 10, 14))
+    assert "⚠️" not in publisher.body(stored_card("Estimar"), date(2026, 10, 14))
 
 
 def test_a_card_mark_survives_saving_and_unmarked_stories_are_written_as_before():
-    card = task_card(Action("Estimar o mapa", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL, verification=NO))
+    card = stored_card("Estimar o mapa", NO)
     assert codec.story_from_dict(json.loads(json.dumps(codec.story_to_dict(card)))) == card
     assert "verification" not in codec.story_to_dict(UserStory("s", "n"))
 
@@ -183,42 +127,22 @@ def test_the_verifier_hands_back_one_line_reasons():
 
 
 def test_without_a_reason_the_card_mark_does_not_repeat_itself(tmp_path: Path):
-    bare = task_card(Action("Estimar", "usuário", "m0", id="t1", kind=ActionKind.TECHNICAL,
-                            verification=Verification(VerificationStatus.UNCONFIRMED)))
+    bare = stored_card("Estimar", Verification(VerificationStatus.UNCONFIRMED))
     body = BacklogMdPublisher(tmp_path, "Triagem", ()).body(bare, date(2026, 10, 14))
     assert body.startswith(StoryDoc.UNCONFIRMED_NO_REASON)
-    assert StoryDoc.UNCONFIRMED_NO_REASON in MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [bare]), [], [])
+    assert StoryDoc.UNCONFIRMED_NO_REASON in MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14), [bare]), [])
 
 
 def test_the_drafts_banner_lists_every_gap_like_the_minutes():
     health = TranscriptHealth(0.5, 10, 30, True, ((0, 2), (4, 6), (8, 10), (12, 14), (20, 25)))
-    md = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14)), [], [], {"m": health})
+    md = MarkdownStoryRenderer().render(StoryDrafts(date(2026, 10, 14)), [], {"m": health})
     assert "00:20:00–00:25:00. O que veio dela" in md and " and " not in md   # no English, no cut-off list
 
 
-def test_an_unconfirmed_plan_only_action_is_marked_in_the_drafts(repo, notifier, clock):
-    day = clock.now().date()
-    email = Action("Mandar o e-mail", "usuário", "m0", id="c1", kind=ActionKind.COMMUNICATION, verification=NO)
-    report = Action("Atualizar o relatório", "usuário", "m0", id="g1", kind=ActionKind.MANAGEMENT)
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=[email, report]))
-    drafts = DraftUserStories(repo, FakeStoryWriter(), FakeStoryRenderer(), notifier).execute(day)
-    reasons = {k.action_id: k.reason for k in drafts.skipped}
-    assert reasons["c1"] == (StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["communication"])
-                             + StoryDoc.UNCONFIRMED_SUFFIX.format(reason="a transcrição não diz quem fará"))
-    assert reasons["g1"] == StoryDoc.PLAN_ONLY.format(kind=StoryDoc.KIND_LABELS["management"])   # unverified: as before
-
-
-def test_a_source_meeting_recorded_at_the_wrong_rate_gets_its_own_banner_in_the_drafts(repo, notifier, clock, meeting):
+def test_a_source_meeting_recorded_at_the_wrong_rate_gets_its_own_banner_in_the_drafts(clock, meeting):
     day = clock.now().date()
     wrong_rate = TranscriptHealth(0.0, 12, 12, False, rate_mismatch=True, short_padding_share=0.669)
-    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=Transcript([Segment(0, 1, "oi")], health=wrong_rate))
-    repo.save_plan(DailyPlan(day, "# plan", new_actions=[Action("Exportar horas", "usuário", meeting.id, id="f1")]))
-    renderer = FakeStoryRenderer()
-
-    DraftUserStories(repo, FakeStoryWriter(), renderer, notifier).execute(day)
-
-    assert renderer.degraded[0] == {meeting.id: wrong_rate}   # not degraded by loops, still announced
-    md = MarkdownStoryRenderer().render(StoryDrafts(day), [], [], {meeting.id: wrong_rate})
+    md = MarkdownStoryRenderer().render(StoryDrafts(day), [], {meeting.id: wrong_rate})
     assert StoryDoc.RATE_MISMATCH.format(meeting=meeting.id, share=0.669) in md
     assert md.index(StoryDoc.RATE_MISMATCH.split("{meeting}")[0]) < md.index(StoryDoc.NOT_VERIFIED.format(meeting=meeting.id))
     assert StoryDoc.DEGRADED.split("{meeting}")[0] not in md   # only the banner that applies

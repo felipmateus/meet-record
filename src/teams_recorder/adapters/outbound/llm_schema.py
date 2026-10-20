@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from teams_recorder.adapters.outbound.fs_retry import retry_io
 from teams_recorder.constants import Llm
-from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Deadline, Decision, Meeting, MeetingType, Priority, Topic, Transcript
+from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Deadline, Decision, Meeting, MeetingType, Priority, StatusChange, StatusUpdate, Topic, Transcript
 from teams_recorder.messages import Err, Prompt
 
 MIN_WORDS = Llm.MIN_WORDS  # module alias kept for callers and tests
@@ -41,6 +41,17 @@ class ActionOut(BaseModel):
     priority: Priority | None = Field(default=None, description=Prompt.FIELD_PRIORITY)
     at: str | None = Field(default=None, description=Prompt.FIELD_AT)
     kind: ActionKind = Field(description=Prompt.FIELD_ACTION_KIND)
+    for_whom: str | None = Field(default=None, description=Prompt.FIELD_FOR_WHOM)
+
+
+class StatusUpdateOut(BaseModel):
+    about: str = Field(description=Prompt.FIELD_STATUS_ABOUT)
+    change: StatusChange = Field(description=Prompt.FIELD_STATUS_CHANGE)
+    who: str = Field(description=Prompt.FIELD_STATUS_WHO.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN))
+    evidence: str = Field(description=Prompt.FIELD_STATUS_EVIDENCE)
+    at: str | None = Field(default=None, description=Prompt.FIELD_AT)
+    new_due: str | None = Field(default=None, description=Prompt.FIELD_STATUS_NEW_DUE)
+    new_owner: str | None = Field(default=None, description=Prompt.FIELD_STATUS_NEW_OWNER)
 
 
 class DecisionOut(BaseModel):
@@ -73,6 +84,7 @@ class AnalysisOut(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
     next_meetings: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list, description=Prompt.FIELD_RISKS)
+    status_updates: list[StatusUpdateOut] = Field(default_factory=list, description=Prompt.FIELD_STATUS_UPDATES)
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -92,7 +104,13 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
     def act(a: ActionOut, default_owner: str | None = None) -> Action:
         return Action(
             description=a.description.strip(), owner=(default_owner or a.owner).strip(), source_meeting=meeting.id,
-            due=_parse_date(a.due), priority=a.priority, at=(a.at or None), kind=a.kind,
+            due=_parse_date(a.due), priority=a.priority, at=(a.at or None), kind=a.kind, for_whom=((a.for_whom or "").strip() or None),
+        )
+
+    def status(u: StatusUpdateOut) -> StatusUpdate:
+        return StatusUpdate(
+            about=u.about.strip(), change=u.change, who=u.who.strip() or Llm.OWNER_UNKNOWN, evidence=u.evidence.strip(),
+            at=(u.at or None), new_due=_parse_date(u.new_due), new_owner=((u.new_owner or "").strip() or None),
         )
 
     return Analysis(
@@ -110,6 +128,7 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
         deadlines=[Deadline(d.what.strip(), _parse_date(d.when), d.who.strip() or Llm.OWNER_UNKNOWN) for d in out.deadlines],
         open_questions=_clean(out.open_questions),
         next_meetings=_clean(out.next_meetings),
+        status_updates=[status(u) for u in out.status_updates if u.about.strip()],
     )
 
 

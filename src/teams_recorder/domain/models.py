@@ -176,7 +176,7 @@ def clock_time(seconds: float) -> str:
 class ActionStatus(StrEnum):
     OPEN = "open"
     DONE = "done"
-    OVERDUE = "overdue"
+    OVERDUE = "overdue"   # decode only: files written before the planner was removed may hold it; nothing sets it any more
 
 
 class Priority(StrEnum):
@@ -187,39 +187,16 @@ class Priority(StrEnum):
     LOW = "low"
 
 
-class ActionRoute(StrEnum):
-    """Where an action goes after the plan."""
-
-    STORY = "story"   # the story writer (a user story)
-    TASK = "task"     # a task card on the board, as the action is
-    PLAN = "plan"     # nowhere else: it stays in the daily plan
-
-
 class ActionKind(StrEnum):
-    """What kind of work an action is; its route decides where the action goes after the plan."""
+    """What kind of work an action is. A tagged item the story writer classes as feature or bug becomes a user story,
+    one it classes as technical or operation becomes a task card; any other kind is not drafted."""
 
     FEATURE = "feature"              # a change in how the product behaves → user story
     BUG = "bug"                      # something that should work and does not → user story (bug)
     TECHNICAL = "technical"          # engineering work without direct user value: estimate, spike, mock → task card
     OPERATION = "operation"          # deploy, access, infrastructure, environment → task card
-    MANAGEMENT = "management"        # process, reports, metrics, prioritisation → stays in the plan
-    COMMUNICATION = "communication"  # e-mail, meeting, follow-up, review → stays in the plan
-
-    @property
-    def route(self) -> ActionRoute:
-        return _ROUTES[self]
-
-
-_ROUTES = {
-    ActionKind.FEATURE: ActionRoute.STORY, ActionKind.BUG: ActionRoute.STORY,
-    ActionKind.TECHNICAL: ActionRoute.TASK, ActionKind.OPERATION: ActionRoute.TASK,
-    ActionKind.MANAGEMENT: ActionRoute.PLAN, ActionKind.COMMUNICATION: ActionRoute.PLAN,
-}
-
-
-def route_of(kind: ActionKind | None) -> ActionRoute:
-    """Unclassified actions (from analyses made before kinds existed) go to the story writer, as before."""
-    return kind.route if kind is not None else ActionRoute.STORY
+    MANAGEMENT = "management"        # process, reports, metrics, prioritisation → no story
+    COMMUNICATION = "communication"  # e-mail, meeting, follow-up, review → no story
 
 
 class VerificationStatus(StrEnum):
@@ -243,6 +220,7 @@ class ClaimKind(StrEnum):
     ACTION = "action"
     DEADLINE = "deadline"
     PARTICIPANT = "participant"
+    STATUS_UPDATE = "status_update"
 
 
 @dataclass(frozen=True)
@@ -285,13 +263,7 @@ class Action:
     at: str | None = None  # transcript timestamp (HH:MM:SS) where it was said, for verification
     kind: ActionKind | None = None  # None: extracted before actions were classified
     verification: Verification | None = None  # None: not verified
-
-    @property
-    def route(self) -> ActionRoute:
-        return route_of(self.kind)
-
-    def is_overdue_on(self, day: date) -> bool:
-        return self.status == ActionStatus.OPEN and self.due is not None and self.due < day
+    for_whom: str | None = None  # who receives or waits for the result, when the meeting said so
 
 
 @dataclass(frozen=True)
@@ -315,6 +287,33 @@ class Deadline:
     verification: Verification | None = None  # None: not verified
 
 
+class StatusChange(StrEnum):
+    """What a meeting said happened to work that already existed."""
+
+    DONE = "done"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    DELAYED = "delayed"
+    DUE_CHANGED = "due_changed"
+    REASSIGNED = "reassigned"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class StatusUpdate:
+    """Progress reported in a meeting on work that existed before it. The analyzer does not know which item of the
+    activities document it concerns: `about` is in the meeting's words and the curator matches it."""
+
+    about: str
+    change: StatusChange
+    who: str                       # Llm.OWNER_SELF, a name, or Llm.OWNER_UNKNOWN
+    evidence: str                  # literal quote, at most 20 words, hedges kept
+    at: str | None = None          # HH:MM:SS where it was said
+    new_due: date | None = None    # for due_changed and delayed
+    new_owner: str | None = None   # for reassigned
+    verification: Verification | None = None  # None: not verified
+
+
 @dataclass
 class Analysis:
     meeting_id: str
@@ -332,20 +331,11 @@ class Analysis:
     topics: list[Topic] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     participant_checks: dict[str, Verification] = field(default_factory=dict)  # by name, as in `participants`; absent: not verified
+    status_updates: list[StatusUpdate] = field(default_factory=list)  # progress on earlier work, in the order it was said
 
     @property
     def all_actions(self) -> list[Action]:
         return [*self.my_actions, *self.others_actions]
-
-
-@dataclass
-class DailyPlan:
-    day: date
-    markdown: str
-    priorities: list[str] = field(default_factory=list)
-    new_actions: list[Action] = field(default_factory=list)
-    completed_action_ids: list[str] = field(default_factory=list)
-    overdue_action_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -375,42 +365,44 @@ class Criterion:
 
 @dataclass
 class UserStory:
-    """A user story drafted from one or more of the user's actions. A draft until the user publishes it."""
+    """A user story (or a task card) drafted from an item of the activities document. A draft until the user publishes it."""
 
     title: str
     narrative: str  # "As a <persona>, I want <capability>, so that <benefit>", in the user's language
     acceptance_criteria: list[Criterion] = field(default_factory=list)
     details: str = ""  # other sections the user's story guide asks for, in Markdown
     open_questions: list[str] = field(default_factory=list)
-    source_action_ids: list[str] = field(default_factory=list)
+    source_action_ids: list[str] = field(default_factory=list)  # planner-era drafts only; a block story has none
     source_meetings: list[str] = field(default_factory=list)
-    priority: Priority | None = None  # the strongest priority among the source actions
-    due: date | None = None           # the earliest due date among the source actions
+    priority: Priority | None = None  # set by the story writer from the item and its meetings' analyses
+    due: date | None = None           # likewise
     id: str = field(default_factory=_new_action_id)
     publications: list[Publication] = field(default_factory=list)
     kind: ActionKind | None = None   # feature/bug for stories, technical/operation for task cards; None if unclassified
-    verification: Verification | None = None   # a task card's: its action's, so an unconfirmed card is published marked
+    verification: Verification | None = None   # a planner-era task card's: its action's, so an unconfirmed card is published marked
+    source_text: str | None = None   # the tagged block verbatim, its first line the tagged line; None on planner-era drafts
 
     def publication(self, destination: str) -> Publication | None:
         return next((p for p in self.publications if p.destination == destination), None)
 
     @property
     def is_task_card(self) -> bool:
-        return route_of(self.kind) is ActionRoute.TASK
+        return self.kind in (ActionKind.TECHNICAL, ActionKind.OPERATION)
 
 
 @dataclass(frozen=True)
 class SkippedAction:
-    """An action that did not become a story, and why."""
+    """A tagged block (or, on a planner-era draft, an action) that did not become a story, and why."""
 
-    action_id: str
+    action_id: str  # the per-run block ref (`b1`) for a block, never looked up after the call; the action's id on planner-era drafts
     reason: str
-    duplicate_of: str | None = None  # id of an existing story that already covers the action
+    duplicate_of: str | None = None  # id of an existing story that already covers it
+    source_line: str | None = None   # the block's tagged line verbatim: what a later render and a later run read; None on planner-era entries
 
 
 @dataclass
 class StoryDrafts:
-    """The user story drafts written from one day's plan; each story records where it was published."""
+    """The user story drafts of one day; each story records where it was published."""
 
     day: date
     stories: list[UserStory] = field(default_factory=list)
@@ -419,52 +411,3 @@ class StoryDrafts:
     @property
     def has_publications(self) -> bool:
         return any(story.publications for story in self.stories)
-
-
-_PRIORITY_RANK = {Priority.HIGH: 0, Priority.MEDIUM: 1, Priority.LOW: 2}
-
-
-def strongest_priority(actions: list[Action]) -> Priority | None:
-    stated = [a.priority for a in actions if a.priority is not None]
-    return min(stated, key=_PRIORITY_RANK.__getitem__) if stated else None
-
-
-def story_kind(actions: list[Action]) -> ActionKind | None:
-    """Kind of a story written from story actions: bug if any is a bug, feature if any is classified, else None."""
-    kinds = {a.kind for a in actions if a.kind is not None}
-    if ActionKind.BUG in kinds:
-        return ActionKind.BUG
-    return ActionKind.FEATURE if kinds else None
-
-
-def task_card(action: Action) -> UserStory:
-    """A technical or operation action as a board card: the action itself, no story sentence or criteria."""
-    return UserStory(
-        title=action.description, narrative="", source_action_ids=[action.id], source_meetings=[action.source_meeting],
-        priority=action.priority, due=action.due, kind=action.kind, verification=action.verification,
-    )
-
-
-def earliest_due(actions: list[Action]) -> date | None:
-    dues = [a.due for a in actions if a.due is not None]
-    return min(dues) if dues else None
-
-
-def merge_open_actions(current: list[Action], plan: DailyPlan) -> list[Action]:
-    """Apply a plan to the open-actions list: drop completed, flag overdue, append new ones."""
-    completed = set(plan.completed_action_ids)
-    overdue = set(plan.overdue_action_ids)
-    result: list[Action] = []
-    known_ids: set[str] = set()
-    for action in current:
-        if action.id in completed:
-            continue
-        if action.id in overdue:
-            action.status = ActionStatus.OVERDUE
-        result.append(action)
-        known_ids.add(action.id)
-    for action in plan.new_actions:
-        if action.id not in known_ids:
-            result.append(action)
-            known_ids.add(action.id)
-    return result

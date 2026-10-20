@@ -151,13 +151,17 @@ def test_the_prompt_ships_with_the_project_and_the_schema_is_strict():
 def test_the_shipped_prompt_is_the_measured_prototype_prompt():
     # The evaluation's numbers (§14.3) came from scripts/fidelity_eval.py VERIFY_SYSTEM. The product's prompt may
     # differ only where it must: the user's name comes in the message, the reason is written in Portuguese, and
-    # the transcript may carry speaker labels and the roster (speaker attribution; the numbers predate the sentence).
+    # the transcript may carry speaker labels and the roster (speaker attribution; the numbers predate the sentence),
+    # and it holds one paragraph for the `status_update` kind (activities curator), which the prototype never checked.
     import ast
     script = Path(__file__).resolve().parents[2] / "scripts" / "fidelity_eval.py"
     tree = ast.parse(script.read_text(encoding="utf-8"))
     measured = next(n.value.value for n in tree.body if isinstance(n, ast.Assign)
                     and getattr(n.targets[0], "id", None) == "VERIFY_SYSTEM")
     shipped = load_prompt(load_settings().prompts_dir / Files.VERIFY_PROMPT)
+    paragraph = [line for line in shipped.splitlines() if line.startswith("A claim of kind `status_update`")]
+    assert len(paragraph) == 1   # the one addition to the measured prompt
+    shipped = shipped.replace(paragraph[0] + "\n", "")
     expected = (measured
                 .replace("The user who records the meetings is Felipe.",
                          "The message starts with the name of the user who records the meetings, when known, and the meeting date.")

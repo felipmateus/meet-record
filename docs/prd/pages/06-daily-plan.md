@@ -1,41 +1,20 @@
-# Daily plan
+# Daily plan (removed)
 
-> **Command:** `trec plan [--date YYYY-MM-DD] [--purge]` · scheduled Mon–Fri at 6 pm (`planner.hour`) through the `local.teams-recorder.planner` LaunchAgent
-> **Module:** Planning · **Generated:** 2026-10-05 · **Status:** delivered (phase 6); validation with a real meeting pending
+> **Command:** none · `trec plan` and the 6 pm planner were removed on 2026-10-20
+> **Module:** Planning (retired) · **Status:** removed; replaced by the [activities document](./09-activities.md)
 
-## Overview
-Once a day, consolidates the analyses of the day's meetings, the previous day's plan and the accumulated list of open actions into a Markdown activity plan, and updates the action list (new, completed, overdue).
+## What happened
+Until 2026-10-20 the product consolidated the day's analyses, the previous plan and a list of open actions (`open_actions.json`) into a Markdown plan once a day at 6 pm. The user decided it should go ("pode remover o plano das 18h") after the activities document had run beside it: the plan had no section for an open action that was neither new nor overdue, showed an overdue one once, never accumulated other people's actions and ignored meetings analyzed after 6 pm.
 
-## Inputs
-| Input | Source | Rule |
-|---|---|---|
-| Day's analyses | meetings with `started_at` on that day and state `analyzed` | only analyzed meetings count |
-| Previous plan | the latest `data/plans/<date>.json` before that day | may not exist |
-| Open actions | `data/plans/open_actions.json` | list accumulated across days |
-
-## Output
-| Artifact | Content |
+## What replaced each part
+| Before | Now |
 |---|---|
-| `data/plans/YYYY-MM-DD.md` | Title with weekday and date; sections **Prioridades** (3 to 5), **Ações novas**, **Vencidas** (only the computed overdue ids), **Aguardando terceiros** (others' actions to follow up), **Agenda** (next meetings and dated milestones) and **Conflitos e alertas** (conflicting deadlines, overload, actions without owner, risks); empty sections omitted except Prioridades |
-| `data/plans/YYYY-MM-DD.json` | priorities, new actions, completed ids, overdue ids, markdown |
-| updated `open_actions.json` | removes completed actions, flags overdue ones (`status = overdue`), appends new ones without duplicating ids |
-
-## Planning rules (prompt already written in `prompts/plan_system.md`)
-- Prioritizes by deadline and impact: overdue/due soon first, then whatever unblocks others, then the rest.
-- Does not invent actions: every new action comes from one of the day's analyses; completed/overdue must match an id in the open list.
-- Marks an action completed only on a clear indication in some analysis; overdue when the deadline has passed as of the plan date.
-- Brazilian Portuguese, direct.
-- Once claim verification is switched on (fidelity-guard task 7.0), an action, decision or deadline the verifier did not confirm stays in the plan marked "(a confirmar)" with the reason. It is never presented as a fact or made a priority unless overdue or due on the plan date, and the user's unconfirmed actions are also listed under "Conflitos e alertas". Unverified items are treated as before.
-
-## Interactions
-- `trec plan` without a date: today. With `--date`: rebuilds that day's plan (replaces that day's files). `--purge` applies audio retention afterwards.
-- Division of labor: new actions (the user's actions in the day's analyses whose ids are not in the open list) and overdue ones (due date < day) are computed by the code; the model receives everything and returns Markdown, priorities and completed ids, filtered against the existing ids.
-- A day with no analyses and no open actions: a minimal plan generated locally, with no model call. A day with only open actions: the model is called to re-prioritize.
-- Same pre-validation as the analysis (key or `claude`). Notification "Daily plan ready: N meeting(s), M new action(s)" (plan of the day ready: N meeting(s), M new action(s)).
-- Scheduler: `trec agent install` also registers the planner (`StartCalendarInterval` Mon–Fri at `planner.hour`), which runs `trec plan --purge`; `agent status` shows whether it is scheduled.
-
-## Integrations
-Same provider as the analysis (API or Claude Code), with schema-constrained structured output.
+| `trec plan`, scheduled Mon–Fri at 6 pm | Nothing is scheduled. A curator agent updates the [activities document](./09-activities.md) after each analyzed meeting |
+| `plans/<day>.md` and `.json`, `open_actions.json` | `activities/atividades.md`, its archive and its pass log (see the [data layout](../appendix/data-layout.md)). Old plan files stay on disk and are not read |
+| Overdue and completed actions computed from the open list | The document's dates and the user's own ticks; a meeting that says something is done adds a 💬 suggestion, and only the user ticks |
+| Stories drafted from the plan's new actions, also by `trec plan` | Stories drafted from the items the user tags `#história`, only with `trec stories` (see [User story drafts](./08-user-stories.md)) |
+| Audio retention applied by `trec plan --purge` | The daemon runs the retention once a day; `trec purge` runs it on demand (see [Operations](./05-operations.md)) |
+| The `local.teams-recorder.planner` LaunchAgent (Windows task `planner`) | Removed by `trec agent install`, `restart` and `uninstall` and by the installers, whichever finds it |
 
 ## Relationships
-- **From:** [Analysis](./03-analysis.md). **To:** the user reads the Markdown; with `[stories] enabled = true`, [User story drafts](./08-user-stories.md) run right after the plan. Other integrations (To Do, Obsidian) are left for later.
+- **From:** [Analysis](./03-analysis.md). **To:** [Activities document](./09-activities.md).

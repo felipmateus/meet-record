@@ -7,10 +7,11 @@ import pytest
 
 from teams_recorder.adapters.inbound.daemon import Daemon
 from teams_recorder.application.ports import CallState, ConfirmAnswer
-from teams_recorder.application.use_cases import AnalyzeMeeting, CancelRecording, StartRecording, StopRecording, TranscribeMeeting
+from teams_recorder.application.use_cases import AnalyzeMeeting, CancelRecording, PurgeOldAudio, StartRecording, StopRecording, TranscribeMeeting
 from teams_recorder.application.pipeline import Pipeline
 from teams_recorder.domain import Meeting, MeetingStatus, derive_status
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK
+from teams_recorder.messages import Log
 from tests.fakes import FakeAnalyzer, FakeCallDetector, FakeMicCapture, FakeMixer, FakeProcessCapture, FakeSpeakerObserver, FakeTranscriber
 
 
@@ -28,6 +29,7 @@ class FakeContainer:
     confirmation: object = None
     disk: object = None
     speakers: object = None   # the speaker observer; None: not wired (the daemon reads it with getattr)
+    purge: object = None      # the audio retention the daemon schedules daily; None: PurgeOldAudio on the fake repository
 
     @property
     def process_capture(self):
@@ -53,17 +55,24 @@ class FakeContainer:
     def cancel_recording(self):
         return CancelRecording(self.repo, self.proc, self.mic, self.notifier, self.speakers)
 
-    def pipeline(self):
-        return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()))
+    def purge_old_audio(self):
+        return self.purge or PurgeOldAudio(self.repo, self.clock)
+
+    def pipeline(self, after_analysis=None):
+        return Pipeline(self.repo, self.notifier, self.stop_recording(), TranscribeMeeting(self.repo, FakeTranscriber()), AnalyzeMeeting(self.repo, FakeAnalyzer()),
+                        after_analysis)
 
 
 def _inline(fn):
     fn()  # synchronous background work in tests
 
 
-def _daemon(repo, notifier, clock, states, confirmation=None, runner=_inline, **kw):
+def _daemon(repo, notifier, clock, states, confirmation=None, runner=_inline, fresh_day=False, **kw):
+    """`fresh_day=False`: today's audio retention counts as already scheduled, so the tests of calls see only their own jobs."""
     c = FakeContainer(repo, FakeCallDetector(states), notifier, clock, FakeProcessCapture(), FakeMicCapture(), confirmation=confirmation)
-    return Daemon(c, poll_seconds=0, start_after=2, stop_after=3, sleep=lambda s: None, run_in_background=runner, **kw), c
+    daemon = Daemon(c, poll_seconds=0, start_after=2, stop_after=3, sleep=lambda s: None, run_in_background=runner, **kw)
+    daemon.purge_day = None if fresh_day else clock.now().date()
+    return daemon, c
 
 
 class FakeConfirmation:
@@ -462,3 +471,78 @@ def test_enough_disk_is_not_warned(repo, notifier, clock):
     c.disk = FakeDisk(50_000_000_000)
     _run(d, clock, 4)
     assert "Disk almost full" not in [t for t, _ in notifier.messages]
+
+
+# --- the daily audio retention (UT-094, UT-098) ------------------------------------------------------------------------
+class SpyPurge:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.runs = 0
+        self.error = error
+
+    def execute(self) -> list[str]:
+        self.runs += 1
+        if self.error is not None:
+            raise self.error
+        return ["m1", "m2"]
+
+
+def test_the_first_tick_of_a_day_schedules_the_purge_in_the_background_once(repo, notifier, clock):    # UT-094
+    spy, queued = SpyPurge(), []
+    d, c = _daemon(repo, notifier, clock, [CallState.IDLE] * 4, runner=queued.append, fresh_day=True)
+    c.purge = spy
+
+    d.tick()
+
+    assert len(queued) == 1 and spy.runs == 0       # scheduled, and the tick returned without running it
+    assert d.container.detector.states == [CallState.IDLE] * 3   # the call state was read in that same tick
+    d.tick()
+    assert len(queued) == 1                         # same day: not scheduled again
+    queued[0]()
+    assert spy.runs == 1
+
+
+def test_the_purge_is_scheduled_again_on_the_next_calendar_day(repo, notifier, clock):
+    queued = []
+    d, c = _daemon(repo, notifier, clock, [CallState.IDLE] * 4, runner=queued.append, fresh_day=True)
+    c.purge = SpyPurge()
+    d.tick()
+    clock.advance(hours=1)
+    d.tick()
+    assert len(queued) == 1
+    clock.advance(days=1)
+    d.tick()
+    assert len(queued) == 2 and d.purge_day == clock.now().date()
+
+
+def test_the_purge_runs_apart_from_a_call_in_progress(repo, notifier, clock):
+    queued = []
+    d, c = _daemon(repo, notifier, clock, [CallState.IN_CALL, CallState.IN_CALL, CallState.IN_CALL], runner=queued.append, fresh_day=True)
+    d.run_in_background = lambda fn: (queued.append(fn) if fn.__name__ == "_purge" else fn())
+    c.purge = SpyPurge()
+    for _ in range(3):
+        d.tick()
+    assert d.active is not None and len(queued) == 1      # the recording started and the purge is still only queued
+
+
+def test_a_failing_purge_is_logged_and_not_retried_the_same_day(repo, notifier, clock, caplog):    # UT-098
+    spy = SpyPurge(error=RuntimeError("disk gone"))
+    d, c = _daemon(repo, notifier, clock, [CallState.IDLE] * 4, fresh_day=True)   # inline background
+    c.purge = spy
+
+    with caplog.at_level("ERROR"):
+        d.tick()
+        d.tick()
+
+    assert spy.runs == 1                                           # recorded before scheduling: no second attempt today
+    assert Log.PURGE_FAILED in caplog.text and "disk gone" in caplog.text
+    clock.advance(days=1)
+    d.tick()
+    assert spy.runs == 2                                           # tomorrow it is tried again
+
+
+def test_a_purge_that_works_logs_how_many_files_it_removed(repo, notifier, clock, caplog):
+    d, c = _daemon(repo, notifier, clock, [CallState.IDLE], fresh_day=True)
+    c.purge = SpyPurge()
+    with caplog.at_level("INFO"):
+        d.tick()
+    assert Log.PURGE_DONE % 2 in caplog.text

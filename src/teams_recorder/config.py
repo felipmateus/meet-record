@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from dotenv import load_dotenv
 
 from teams_recorder.constants import (
+    Activities,
     Audio,
     Confirm,
     Detector,
@@ -22,7 +23,6 @@ from teams_recorder.constants import (
     Llm,
     LlmProvider,
     MicBackend,
-    Planner,
     Platform,
     Speakers,
     Stories,
@@ -84,14 +84,12 @@ class Settings:
     llm_cli_model: str
     llm_effort: Effort
     llm_max_tokens: int
-    plan_hour: int
     user_name: str
     confirm_recording: bool
     confirm_timeout_seconds: int
     retention_days: int
     anthropic_api_key: str | None
     platform: Platform = Platform.MACOS
-    stories_enabled: bool = Stories.ENABLED
     story_guide: Path | None = None   # None: <project>/prompts/user_story_guide.md
     story_auto_publish: bool = Stories.PUBLISH   # publish right after drafting ([stories] publish)
     story_destinations: tuple[StoryDestination, ...] = ()
@@ -108,6 +106,12 @@ class Settings:
     verify_cli_model: str = Verify.DEFAULT_CLI_MODEL
     verify_effort: Effort = Verify.DEFAULT_EFFORT
     speakers_enabled: bool = Speakers.ENABLED   # [speakers]: read who speaks from the Teams window during each recording
+    activities_enabled: bool = Activities.ENABLED   # [activities]: automatic curation (the daemon's worker, `trec analyze`); the explicit commands always run
+    activities_model: str = Llm.DEFAULT_API_MODEL   # [activities] model, with provider = "api"; load_settings defaults it to [llm] model
+    activities_cli_model: str = Activities.DEFAULT_CLI_MODEL   # [activities] cli_model, with provider = "claude-code"
+    activities_effort: Effort = Activities.DEFAULT_EFFORT
+    activities_notify: bool = Activities.NOTIFY   # [activities] notify: `Activities updated` when a pass changed something of the user's
+    activities_keep_versions: int = Activities.KEEP_VERSIONS   # passes whose version files `trec activities undo` can restore
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -237,12 +241,13 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     detector = raw.get("detector", {})
     transcription = raw.get("transcription", {})
     llm = raw.get("llm", {})
-    planner = raw.get("planner", {})
+    planner = raw.get("planner", {})   # only `retention_days` is read, as the fallback of [audio] retention_days (one release)
     user = raw.get("user", {})
     confirmation = raw.get("confirmation", {})
-    stories = raw.get("stories", {})
+    stories = raw.get("stories", {})   # `enabled` of older configs is not read: stories are drafted on demand, from tags
     verification = raw.get("verification", {})
     speakers = raw.get("speakers", {})
+    activities = raw.get("activities", {})
     backlog_md = stories.get("backlog_md", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
@@ -274,14 +279,12 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         llm_cli_model=str(llm.get("cli_model", Llm.DEFAULT_CLI_MODEL)),
         llm_effort=_parse_enum(Effort, llm.get("effort", Effort.HIGH), Err.INVALID_EFFORT),
         llm_max_tokens=int(llm.get("max_tokens", Llm.DEFAULT_MAX_TOKENS)),
-        plan_hour=int(planner.get("hour", Planner.DEFAULT_HOUR)),
         user_name=str(user.get("name", "")).strip(),
         confirm_recording=bool(confirmation.get("enabled", Confirm.ENABLED)),
         confirm_timeout_seconds=int(confirmation.get("timeout_seconds", Confirm.TIMEOUT_SECONDS)),
-        retention_days=int(planner.get("retention_days", Planner.RETENTION_DAYS)),
+        retention_days=int(audio.get("retention_days", planner.get("retention_days", Audio.RETENTION_DAYS))),
         anthropic_api_key=os.environ.get(Env.API_KEY) or None,
         platform=platform,
-        stories_enabled=bool(stories.get("enabled", Stories.ENABLED)),
         story_guide=_project_path(project_dir, stories.get("guide")),
         story_auto_publish=bool(stories.get("publish", Stories.PUBLISH)),
         story_destinations=tuple(_parse_enum(StoryDestination, d, Err.INVALID_DESTINATION) for d in _as_list(stories.get("destinations", []))),
@@ -298,7 +301,24 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         verify_cli_model=str(verification.get("cli_model", Verify.DEFAULT_CLI_MODEL)),
         verify_effort=_parse_enum(Effort, verification.get("effort", Verify.DEFAULT_EFFORT), Err.INVALID_VERIFY_EFFORT),
         speakers_enabled=bool(speakers.get("enabled", Speakers.ENABLED)),
+        activities_enabled=bool(activities.get("enabled", Activities.ENABLED)),
+        activities_model=str(activities.get("model", llm.get("model", Llm.DEFAULT_API_MODEL))),
+        activities_cli_model=str(activities.get("cli_model", Activities.DEFAULT_CLI_MODEL)),
+        activities_effort=_parse_enum(Effort, activities.get("effort", Activities.DEFAULT_EFFORT), Err.INVALID_ACTIVITIES_EFFORT),
+        activities_notify=bool(activities.get("notify", Activities.NOTIFY)),
+        activities_keep_versions=_parse_keep_versions(activities.get("keep_versions", Activities.KEEP_VERSIONS)),
     )
+
+
+def _parse_keep_versions(value: object) -> int:
+    """A whole number of at least 1: [activities] keep_versions (undo needs the last pass's files)."""
+    try:
+        count = int(str(value))
+    except ValueError:
+        count = 0
+    if count < 1:
+        raise ValueError(Err.INVALID_KEEP_VERSIONS.format(value=value))
+    return count
 
 
 def _parse_share(value: object) -> float:
