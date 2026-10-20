@@ -51,43 +51,52 @@ See the [flowchart](#how-it-works) for the whole pipeline.
 flowchart LR
     subgraph perCall["On every call · daemon"]
         direction TB
-        detect("<b>Detect the call</b><br/><small>Teams holds a pmset assertion</small>")
-        record("<b>Record two tracks</b><br/><small>teams-tap: Teams + microphone</small>")
-        mix("<b>Mix the audio</b><br/><small>ffmpeg → audio.m4a</small>")
-        transcribe("<b>Transcribe locally</b><br/><small>whisper.cpp → transcript</small>")
-        analyze("<b>Analyze with Claude</b><br/><small>analysis.json + minutes.md</small>")
-        curate("<b>Update the activities document</b><br/><small>atividades.md</small>")
-        detect --> record --> mix --> transcribe --> analyze --> curate
+        detect("<b>Detect the call</b><br/><small>macOS: Teams' pmset assertion</small><br/><small>Windows: Teams holds the microphone</small>")
+        record("<b>Record</b><br/><small>teams-tap: Teams + microphone</small><br/><small>teams-speakers: who speaks (macOS)</small>")
+        discard("<b>Discarded</b><br/><small>files deleted, rest of the call ignored</small>")
+        mix("<b>Mix the audio</b><br/><small>energy.json · ffmpeg → audio.m4a</small>")
+        transcribe("<b>Transcribe locally</b><br/><small>whisper.cpp · loop check and retry</small><br/><small>speaker labels</small>")
+        analyze("<b>Analyze with Claude</b><br/><small>decisions, actions, progress → analysis.json</small>")
+        verify("<b>Verify, then write the minutes</b><br/><small>⚠️ on what the transcript does not confirm</small><br/><small>→ minutes.md</small>")
+        curate("<b>Update the activities document</b><br/><small>curator worker → atividades.md</small>")
+        purge("<b>Delete old audio</b><br/><small>once a day, after 30 days</small>")
+        detect --> record
+        record -. "Discard" .-> discard
+        record -- "hang-up" --> mix --> transcribe --> analyze --> verify --> curate
+        transcribe -.-> purge
     end
 
-    subgraph onDemand["When you ask · trec stories"]
+    subgraph you["Whenever you want"]
         direction TB
-        tag("<b>You tag an item</b><br/><small>#história in atividades.md</small>")
-        draft("<b>Draft the stories</b><br/><small>plans/YYYY-MM-DD.stories.md</small>")
-        publish("<b>Publish to Backlog.md</b><br/><small>Triagem column</small>")
+        edit("<b>Work in atividades.md</b><br/><small>tick what is done, add your lines</small><br/><small>the next pass keeps them · trec activities undo</small>")
+        tag("<b>Tag an item</b><br/><small>#história</small>")
+        draft("<b>Draft the stories</b><br/><small>trec stories → plans/YYYY-MM-DD.stories.md</small><br/><small>the tag becomes a link</small>")
+        publish("<b>Publish to Backlog.md</b><br/><small>trec publish, or publish = true</small><br/><small>Triagem column</small>")
         review("<b>You review the board</b><br/><small>To Do approves, archive rejects</small>")
-        tag --> draft --> publish --> review
+        edit --> tag --> draft --> publish --> review
     end
 
-    perCall --> onDemand
+    perCall -- "atividades.md" --> you
 
     classDef daemon fill:#EEEDFE,stroke:#534AB7,stroke-width:1px,color:#3C3489
     classDef stories fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#085041
-    class detect,record,mix,transcribe,analyze,curate daemon
-    class tag,draft,publish,review stories
+    classDef neutral fill:#F1EFE8,stroke:#888780,stroke-width:1px,color:#444441
+    class detect,record,mix,transcribe,analyze,verify,curate daemon
+    class discard,purge neutral
+    class edit,tag,draft,publish,review stories
     style perCall fill:none,stroke:#7F77DD,stroke-width:1px,stroke-dasharray:6 4
-    style onDemand fill:none,stroke:#1D9E75,stroke-width:1px,stroke-dasharray:6 4
+    style you fill:none,stroke:#1D9E75,stroke-width:1px,stroke-dasharray:6 4
 ```
 
 1. **Detect.** Every second the daemon reads `pmset -g assertions`. While Teams is in a call, it holds a "prevent sleep" assertion, and that is the signal. On Windows, the signal is Teams holding the microphone, as recorded by the privacy indicator in the registry.
 2. **Record.** Recording starts on the first positive reading. `teams-tap` (a small Swift binary) writes Teams audio to `tap.wav` and the microphone to `mic.wav`. On macOS, `teams-speakers` (a second Swift binary) also watches the Teams meeting window and writes who speaks when to `speakers.jsonl`. A dialog asks whether to keep the recording; recording does not wait for the answer.
 3. **Mix.** After hang-up, the level of each raw track is saved to `energy.json`, then ffmpeg cleans each track (80 Hz high-pass, noise reduction), mixes them, normalizes to -18 LUFS and writes `audio.m4a`. The raw tracks are deleted.
-4. **Transcribe.** whisper.cpp writes `transcript.json` and `transcript.txt` (`[hh:mm:ss] text`, or `[hh:mm:ss] Name: text` for a line whose speaker is known).
-5. **Analyze.** The transcript text is sent to Claude with a JSON schema. The result is saved as `analysis.json` and rendered to `minutes.md`.
+4. **Transcribe.** whisper.cpp writes `transcript.json` and `transcript.txt` (`[hh:mm:ss] text`, or `[hh:mm:ss] Name: text` for a line whose speaker is known). A transcript caught in a hallucination loop is transcribed once more (see [Transcription](#transcription)).
+5. **Analyze and verify.** The transcript text is sent to Claude with a JSON schema. A second call checks every claim against the transcript and marks what it cannot confirm. The result is saved as `analysis.json` and rendered to `minutes.md`.
 6. **Curate.** Right after the analysis is saved, the daemon's curator worker updates `activities/atividades.md` with what the meeting added, suggested or changed. It never blocks the steps above, and a failure only writes `curation_error.txt` in the meeting folder.
 7. **Draft and publish stories.** Nothing here is scheduled. When you tag items of `atividades.md` with `#história` and run `trec stories`, a story is drafted for each one into `plans/YYYY-MM-DD.stories.md`, and the tag becomes a link to it. With `[stories] publish = true` the drafts are also sent to the **Triagem** column of a Backlog.md board; otherwise `trec publish` sends them.
 
-Steps 3–6 run in the background, so a call that starts right after another one is still recorded. A step that fails writes `error.txt` in the meeting folder and stops only that meeting; re-running resumes from there. Every step can also be run by hand with `trec`.
+Steps 3–6 run in the background, so a call that starts right after another one is still recorded. A step that fails writes `error.txt` in the meeting folder and stops only that meeting; re-running resumes from there. Every step can also be run by hand with `trec`. Once a day the daemon also deletes the `audio.m4a` of transcribed meetings older than `[audio] retention_days` (30).
 
 ## Tech stack
 
@@ -157,7 +166,7 @@ What it does:
 
 Installing Homebrew, logging in to Claude Code and granting macOS permissions need your password or browser, so they are left to you.
 
-**Uninstall.** `scripts/uninstall.sh` removes this copy's LaunchAgents. `--all` also deletes `.venv` and the `teams-tap` build. Recordings, transcripts, the activities document, story drafts and models are never deleted.
+**Uninstall.** `scripts/uninstall.sh` removes this copy's LaunchAgents (the daemon, and the planner job an older version installed). `--all` also deletes `.venv` and the `teams-tap` build (not yet the `teams-speakers` build); `--yes` asks nothing. Recordings, transcripts, the activities document, story drafts and models are never deleted.
 
 ### Manual installation
 
@@ -185,7 +194,7 @@ git clone https://github.com/felipmateus/meet-record.git C:\Projetos\teams-recor
 C:\Projetos\teams-recorder\scripts\install.ps1
 ```
 
-Or double-click `install.cmd`. The installer uses winget for Python 3.12, ffmpeg and, when `teams-tap.exe` must be built, the .NET 8 SDK. It downloads whisper.cpp into `tools\whisper` and the model into `data\models`, then installs the scheduled tasks. Options mirror the macOS installer: `-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`; `-NoActivities` also sets `[activities] enabled = false`. `scripts\uninstall.ps1` removes the tasks; `-All` also removes `.venv` and the build.
+Or double-click `install.cmd`. The installer installs with winget only what is missing: Python 3.12, ffmpeg and, when `teams-tap.exe` must be built, the .NET 8 SDK (a .NET runtime alone cannot build it), so a PC that already has them needs no winget. It downloads whisper.cpp from a pinned release (checked by SHA-256) into `tools\whisper` and the model into `data\models` (`scripts\download-model.ps1`), then installs the daemon's scheduled task and removes the planner task an older version installed. Options mirror the macOS installer: `-Name`, `-Provider`, `-SkipModel`, `-NoAgent`, `-Yes`, `-DryRun`; `-NoActivities` also sets `[activities] enabled = false`, and `-RetentionDays N` sets `[audio] retention_days`. `scripts\uninstall.ps1` removes the tasks; `-All` also removes `.venv` and the build.
 
 Only the parts that talk to the operating system differ:
 
@@ -242,7 +251,7 @@ Once installed, there is nothing to do: join Teams calls as usual.
 | `trec publish [--date YYYY-MM-DD] [--only 1,3]` | Sends a day's drafts (default today) to the configured boards, skipping what is already there |
 | `trec purge` | Deletes `audio.m4a` from transcribed meetings older than `audio.retention_days` (the daemon also does it once a day) |
 | `trec daemon [--once]` | Runs the detector loop (used by the LaunchAgent); `--once` is a single diagnostic reading |
-| `trec agent install [--env K=V]` | Installs the daemon as a service (starts at login, restarts on a crash) and removes the daily planner job an older version installed |
+| `trec agent install [--env K=V]` | Installs the daemon as a service (starts at login, restarts on a crash) and removes the daily planner job an older version installed; `--env` is macOS only |
 | `trec agent status \| restart \| uninstall` | Inspects, restarts or removes the service (`restart` and `uninstall` also remove the old planner job when it is still there) |
 | `trec version` | Prints the version |
 
@@ -355,7 +364,7 @@ Safeguards:
 
 ### Provider: API or Claude Code
 
-`llm.provider` in `config.toml` selects the transport. The same provider serves the analysis, the activities curator and the stories.
+`llm.provider` in `config.toml` selects the transport. The same provider serves the analysis, the claim verifier, the activities curator and the stories.
 
 | `provider` | Uses | Billing | Notes |
 |---|---|---|---|
@@ -399,23 +408,28 @@ trec stories     # a draft for every tagged item → data/plans/YYYY-MM-DD.stori
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 40, "rankSpacing": 36, "curve": "basis", "padding": 12}}}%%
 flowchart TB
-    tagged("<b>Tagged items</b><br/><small>#história in atividades.md</small>")
+    tagged("<b>Tagged items</b><br/><small>#história in atividades.md, with the notes under them</small>")
+    writer("<b>One model call</b><br/><small>your guide + the analyses of the linked meetings</small><br/><small>items drafted before are not sent again</small>")
     story("<b>User story</b><br/><small>feature · bug</small>")
     task("<b>Task card</b><br/><small>technical · operation</small>")
-    left("<b>Left out, with the reason</b><br/><small>management · communication · duplicate</small>")
-    drafts("<b>Drafts of the day</b><br/><small>plans/YYYY-MM-DD.stories.md</small><br/><small>no repeats of the last 30 days</small>")
+    dup("<b>Already exists</b><br/><small>repeats a story of the last 30 days</small>")
+    left("<b>Left out, with the reason</b><br/><small>management · communication · no story</small>")
+    drafts("<b>Drafts of the day</b><br/><small>plans/YYYY-MM-DD.stories.md</small><br/><small>a criterion citing a time absent from the meetings → suggestion</small>")
+    link("<b>Tag replaced</b><br/><small>história: rascunho 20/10 · história: já existe</small>")
+    kept("<b>Tag kept</b><br/><small>not sent to the model again</small>")
     board("<b>Backlog.md board</b><br/><small>Triagem column</small>")
     review("<b>You review</b><br/><small>To Do approves, archive rejects</small>")
 
-    tagged --> story & task & left
-    story & task --> drafts
-    drafts -- "trec publish<br/>or publish = true" --> board
-    board --> review
+    tagged --> writer --> story & task & dup & left
+    story & task & dup & left --> drafts
+    drafts -- "story · task card · duplicate" --> link
+    drafts -- "left out" --> kept
+    drafts -- "trec publish<br/>or publish = true" --> board --> review
 
     classDef board fill:#E1F5EE,stroke:#0F6E56,stroke-width:1px,color:#085041
     classDef neutral fill:#F1EFE8,stroke:#888780,stroke-width:1px,color:#444441
-    class story,task,drafts,board,review board
-    class tagged,left neutral
+    class story,task,drafts,link,board,review board
+    class tagged,writer,dup,left,kept neutral
 ```
 
 - One model call writes the drafts of all the new tagged items, by the rules of your guide (`[stories] guide`, default `prompts/user_story_guide.md`). Edit that file to change how stories are written; it is re-read on every call. The call also sees the analyses of the meetings the items link to.
@@ -463,6 +477,7 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `teams_process_name` / `_windows` | `"MSTeams"` / `"ms-teams.exe"` | Process the detector and the capture watch |
 | | `bitrate_kbps` | `64` | AAC bitrate of `audio.m4a` |
 | | `bit_depth` | `16` | Raw WAV tracks: `16` or `32` (float) |
+| | `denoise` | `true` | Per-track 80 Hz high-pass and noise reduction before mixing; `false` mixes the raw tracks |
 | | `retention_days` | `30` | The daemon deletes `audio.m4a` of transcribed meetings older than this once a day (`trec purge` does it on demand). Falls back to `[planner] retention_days` of an older `config.toml` for one release |
 | `[detector]` | `poll_seconds` | `1` | Detector interval |
 | | `start_after_positive_polls` | `1` | Readings needed to start recording |
@@ -492,7 +507,7 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | `[user]` | `name` | `""` | Your name as said in meetings, sent to the model; also the label of your own lines when set |
 | `[confirmation]` | `enabled`, `timeout_seconds` | `true`, `30` | Keep-or-discard dialog |
 | `[stories]` | `guide` | `"prompts/user_story_guide.md"` | Your story-writing rules; drafting fails if it is missing or empty |
-| | `destinations` | — | Boards to publish to; `["backlog-md"]` or empty for drafts only |
+| | `destinations` | `[]` | Boards to publish to; `["backlog-md"]` or empty for drafts only |
 | | `publish` | `false` | Publish today's drafts right after `trec stories` drafts them |
 | | `dedup_days` | `30` | Days of earlier stories shown to the model |
 | `[stories.backlog_md]` | `project_dir`, `status`, `labels` | `"."`, `"Triagem"`, `["teams-recorder"]` | Backlog.md project, intake column and labels |
@@ -512,6 +527,7 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | File | Used by |
 |---|---|
 | `prompts/analyze_system.md` | Meeting analysis, including the rules for action kinds |
+| `prompts/verify_system.md` | Claim verifier (checks the analysis against the transcript) |
 | `prompts/curate_system.md` | Activities curator |
 | `prompts/stories_system.md` | Story drafting (your guide is appended to it) |
 | `prompts/user_story_guide.md` | Your story-writing rules; edit freely |
@@ -552,6 +568,9 @@ data/                                   # paths.data_dir (git-ignored)
 │   └── YYYY-MM-DD.stories.md / .json   # story drafts and where they were published
                                         # (older plans, YYYY-MM-DD.md / .json and open_actions.json, are no longer read)
 ├── models/                             # ggml-*.bin
+├── run/                                # teams-speakers' launchd job definition (macOS), the recorders' stop files (Windows)
+├── notices/                            # the day each once-a-day notification last fired
+├── tasks/                              # Task Scheduler definitions written on install (Windows)
 └── log/
     ├── teams-recorder.log              # daemon (daily rotation, 30 days)
     ├── daemon.out.log, daemon.err.log
@@ -667,6 +686,9 @@ TREC_REAL_WHISPER=1 pytest -m slow tests/integration/test_transcriber_whispercpp
 TREC_REAL_CLAUDE=1 pytest -m slow tests/integration/test_llm_claude_real.py           # spends API credit
 TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_llm_claude_cli_real.py   # Claude Code headless
 TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_publisher_backlogmd_real.py # throwaway board
+TREC_REAL_CLAUDE_CLI=1 pytest -m slow tests/integration/test_verifier_claude_real.py  # claim verifier, Claude Code
+TREC_REAL_CLAUDE_CLI=1 TREC_REAL_BACKLOG=1 pytest -m slow tests/integration/test_story_publishing_e2e_real.py  # stories end to end
+pytest -m slow tests/integration/test_mixer_ffmpeg_real.py tests/integration/test_energy_ffmpeg_real.py   # real ffmpeg, no model
 ```
 
 Test layout:
@@ -677,7 +699,8 @@ tests/
 ├── integration/   # subprocess adapters and opt-in real-tool tests
 ├── fakes/         # in-memory fake for every port
 └── fixtures/      # fake_recorder.py, fake_whisper_cli.py, fake_claude_cli.py, fake_backlog_cli.py,
-                   # fake_call.py, sample transcripts and analyses
+                   # fake_speakers.py, fake_call.py, sample transcripts and analyses,
+                   # activities documents, the synthetic meeting corpus (wiki_corpus/)
 ```
 
 Do not run two pytest sessions at once: subprocess-based tests time out under contention. Coverage is opt-in because on a machine with little free memory, macOS has killed test subprocesses.
@@ -687,6 +710,17 @@ Do not run two pytest sessions at once: subprocess-based tests time out under co
 ```bash
 TREC_TEAMS_PROCESS=python3.11 trec daemon --once   # while tests/fixtures/fake_call.py runs
 ```
+
+### Evaluation scripts
+
+Two scripts measure the pipeline on synthetic meetings whose dialogues say who said what (`tests/fixtures/wiki_corpus/`). Both call the model through your Claude Code subscription, so run them knowingly, and keep their data folders **outside** the repository (Claude Code reads every `CLAUDE.md` from the working directory up).
+
+```bash
+scripts/wiki_corpus.py <render|process|fill|ingest|ask|score|autorun|clean>   # dialogues → audio (the recorder's mixer) → this pipeline → Q&A eval
+scripts/fidelity_eval.py <setup|oracle|inject|defend|report|gate|stories|verify-stories|propagate|glossary|audit-wiki|review-kit>
+```
+
+`fidelity_eval.py` checks whether what reaches the activities document and the stories matches what was said: it injects known errors (wrong owner, invented date, phantom participant…), measures what the code checks and the claim verifier catch, and traces one error through the curator and the stories. Results and method: [`docs/tasks/prd-llm-wiki/evaluation.md`](docs/tasks/prd-llm-wiki/evaluation.md) and [`docs/tasks/prd-fidelity-guard/`](docs/tasks/prd-fidelity-guard/).
 
 ### Adding an adapter
 
@@ -700,7 +734,7 @@ TREC_TEAMS_PROCESS=python3.11 trec daemon --once   # while tests/fixtures/fake_c
 
 - Everything in the repository is in English. The only Portuguese is user-facing content built from LLM output (minutes labels, story labels, activities document labels) and test fixtures.
 - Commits are grouped per layer in dependency order (`docs`, `feat(domain)`, `feat(application)`, `feat(adapters)`, `feat(native)`, `feat(cli)`, `test`); see [`docs/COMMITS.md`](docs/COMMITS.md).
-- **After changing Python code, run `trec agent restart`**, or the running daemon keeps the old code. The Swift binary is spawned again for each recording, so rebuilding it is enough.
+- **After changing Python code, run `trec agent restart`**, or the running daemon keeps the old code (the curator's worker and the daily audio purge run inside it). The Swift binaries are spawned again for each recording, so rebuilding them is enough. `trec activities`, `analyze`, `stories`, `publish` and `purge` run in their own process and need no restart.
 - Coding agents: see [`AGENTS.md`](AGENTS.md).
 
 ## Troubleshooting
@@ -795,6 +829,8 @@ Not done yet: the month's LLM spend in `trec status`, GitHub Projects and Azure 
 | [`docs/SPEAKER-ATTRIBUTION.md`](docs/SPEAKER-ATTRIBUTION.md) | Investigation and spike runs behind the speaker labels; PRD in [`docs/tasks/speaker-attribution/`](docs/tasks/speaker-attribution/) |
 | [`docs/tasks/activities-curator/`](docs/tasks/activities-curator/) | Specification, user stories, developer-experience contract, tests, ADRs and tasks for the activities document |
 | [`docs/tasks/prd-story-publishing/`](docs/tasks/prd-story-publishing/) | PRD, tech spec and tasks for story publishing |
+| [`docs/tasks/prd-fidelity-guard/`](docs/tasks/prd-fidelity-guard/) | PRD, tech spec and tasks for the transcript-loop guard, claim verification and cited story criteria |
+| [`docs/tasks/prd-llm-wiki/`](docs/tasks/prd-llm-wiki/) | The LLM wiki of meetings, evaluated and not built (no better than giving the model all the minutes); its `evaluation.md` holds the fidelity measurements |
 | [`docs/COMMITS.md`](docs/COMMITS.md) | Commit conventions |
 | [`AGENTS.md`](AGENTS.md) | Guidance for coding agents |
 | [`native/teams-tap-win/README.md`](native/teams-tap-win/README.md) | The Windows capture binary |
