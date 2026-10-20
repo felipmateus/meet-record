@@ -23,7 +23,7 @@ from teams_recorder.domain import (
     Verification,
     VerificationStatus,
     claims,
-    timestamped_line,
+    excerpt_window,
 )
 from teams_recorder.messages import Err, Minutes, Prompt
 
@@ -82,23 +82,11 @@ def transcript_for(transcript: Transcript, claims: list[Claim], max_chars: int =
     timestamp: deadlines, participants) plus the lines within `window` seconds of each claim's timestamp,
     in order, with a gap marker where lines were left out.
     """
-    lines = [(s.start, timestamped_line(s)) for s in transcript.segments]
-    full = "\n".join(text for _, text in lines)
+    full = transcript.as_timestamped_text()
     if len(full) <= max_chars:
         return full, False
     times = [t for t in (_seconds(c.at) for c in claims) if t is not None]
-    keep: list[bool] = []
-    used = 0
-    for start, text in lines:
-        used += len(text) + 1
-        keep.append(used <= max_chars or any(abs(start - t) <= window for t in times))
-    out: list[str] = []
-    for (_, text), kept in zip(lines, keep):
-        if kept:
-            out.append(text)
-        elif out and out[-1] != Prompt.EXCERPT_GAP:
-            out.append(Prompt.EXCERPT_GAP)
-    return "\n".join(out), True
+    return excerpt_window(transcript, times, window, Prompt.EXCERPT_GAP, head_chars=max_chars), True
 
 
 def describe(claim: Claim) -> str:

@@ -1,7 +1,7 @@
 """File-based meeting repository (decision: state = files).
 
 Layout:
-  <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, .lock}
+  <data_dir>/recordings/<meeting_id>/{meta.json, audio.m4a, transcript.*, analysis.json, error.txt, curation_error.txt, .lock}
   <data_dir>/plans/{YYYY-MM-DD.md, YYYY-MM-DD.json, open_actions.json}
   <data_dir>/plans/{YYYY-MM-DD.stories.md, YYYY-MM-DD.stories.json}  (user story drafts)
 Writes are atomic (temporary file + os.replace).
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
 from teams_recorder.adapters.outbound import codec
-from teams_recorder.adapters.outbound.fs_retry import retry_io
+from teams_recorder.adapters.outbound.fs_retry import atomic_write, retry_io
 from teams_recorder.application.ports import ActiveRecording, CaptureHandle
 from teams_recorder.constants import Files
 from teams_recorder.domain import (
@@ -34,21 +34,14 @@ from teams_recorder.domain import (
     StoryDrafts,
     Transcript,
 )
-from teams_recorder.domain.status import ANALYSIS, ENERGY, ERROR, LOCK, META, MINUTES, SPEAKERS, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+from teams_recorder.domain.status import ANALYSIS, CURATION_ERROR, ENERGY, ERROR, LOCK, META, MINUTES, SPEAKERS, TAP_STATS, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import Err
 
 T = TypeVar("T")
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + Files.TMP_SUFFIX)
-    retry_io(lambda: tmp.write_text(text, encoding="utf-8"), str(tmp))
-    retry_io(lambda: os.replace(tmp, path), str(path))
-
-
 def _write_json(path: Path, data: object) -> None:
-    _write_atomic(path, json.dumps(data, ensure_ascii=False, indent=2))
+    atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def _load_json(path: Path) -> Any:
@@ -206,7 +199,7 @@ class FsMeetingRepository:
     def save_transcript(self, meeting_id: str, transcript: Transcript) -> None:
         d = self._require(meeting_id)
         _write_json(d / TRANSCRIPT_JSON, codec.transcript_to_dict(transcript))
-        _write_atomic(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
+        atomic_write(d / TRANSCRIPT_TXT, transcript.as_timestamped_text() + "\n")
 
     def load_capture_stats(self, meeting_id: str) -> CaptureStats | None:
         """None when there is no stats file; any other failure to read or parse it is a RepositoryError."""
@@ -223,7 +216,7 @@ class FsMeetingRepository:
             raise RepositoryError(Err.BAD_JSON.format(path=path, error=exc)) from exc
 
     def write_speakers_unavailable(self, meeting_id: str, reason: str) -> None:
-        _write_atomic(self._require(meeting_id) / SPEAKERS, codec.speakers_unavailable_line(reason, time.time()))
+        atomic_write(self._require(meeting_id) / SPEAKERS, codec.speakers_unavailable_line(reason, time.time()))
 
     def load_speaker_log(self, meeting_id: str, fallback_epoch: float, end: float) -> SpeakerLog | None:
         path = self._require(meeting_id) / SPEAKERS
@@ -253,7 +246,7 @@ class FsMeetingRepository:
             return None
 
     def save_notice_day(self, key: str, day: date) -> None:
-        _write_atomic(self._notice_path(key), day.isoformat() + "\n")
+        atomic_write(self._notice_path(key), day.isoformat() + "\n")
 
     def load_transcript(self, meeting_id: str) -> Transcript:
         return _decoded(self._require(meeting_id) / TRANSCRIPT_JSON, codec.transcript_from_dict)
@@ -265,13 +258,26 @@ class FsMeetingRepository:
         return _decoded(self._require(meeting_id) / ANALYSIS, codec.analysis_from_dict)
 
     def save_minutes(self, meeting_id: str, markdown: str) -> None:
-        _write_atomic(self._require(meeting_id) / MINUTES, markdown)
+        atomic_write(self._require(meeting_id) / MINUTES, markdown)
 
     def mark_failed(self, meeting_id: str, message: str) -> None:
-        _write_atomic(self._require(meeting_id) / ERROR, message + "\n")
+        atomic_write(self._require(meeting_id) / ERROR, message + "\n")
 
     def clear_failed(self, meeting_id: str) -> None:
         self.delete_file(meeting_id, ERROR)
+
+    def mark_curation_failed(self, meeting_id: str, message: str) -> None:
+        atomic_write(self._require(meeting_id) / CURATION_ERROR, message + "\n")
+
+    def clear_curation_failed(self, meeting_id: str) -> None:
+        self.delete_file(meeting_id, CURATION_ERROR)
+
+    def curation_error(self, meeting_id: str) -> str | None:
+        p = self._require(meeting_id) / CURATION_ERROR
+        try:
+            return retry_io(lambda: p.read_text(encoding="utf-8"), str(p)).strip()
+        except FileNotFoundError:
+            return None
 
     # --- plans ----------------------------------------------------------
     def _plan_json(self, day: date) -> Path:
@@ -282,7 +288,7 @@ class FsMeetingRepository:
 
     def save_plan(self, plan: DailyPlan) -> None:
         _write_json(self._plan_json(plan.day), codec.plan_to_dict(plan))
-        _write_atomic(self._plan_md(plan.day), plan.markdown)
+        atomic_write(self._plan_md(plan.day), plan.markdown)
 
     def load_plan(self, day: date) -> DailyPlan | None:
         p = self._plan_json(day)
@@ -317,7 +323,7 @@ class FsMeetingRepository:
 
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
         _write_json(self._stories_json(drafts.day), codec.story_drafts_to_dict(drafts))
-        _write_atomic(self.plans / Files.STORIES_MARKDOWN.format(day=drafts.day.isoformat()), markdown)
+        atomic_write(self.plans / Files.STORIES_MARKDOWN.format(day=drafts.day.isoformat()), markdown)
 
     @staticmethod
     def _load_drafts(path: Path) -> StoryDrafts:
