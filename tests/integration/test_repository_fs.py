@@ -11,8 +11,9 @@ from teams_recorder.domain import (
     Criterion,
     Action,
     ActionKind,
+    ActionStatus,
+    Analysis,
     CaptureStats,
-    DailyPlan,
     Meeting,
     MeetingNotFound,
     MeetingStatus,
@@ -152,23 +153,6 @@ def test_tmp_files_are_hidden_from_listing(fs: FsMeetingRepository):
     assert ANALYSIS not in fs.files(m.id) and "analysis.json.tmp" not in fs.files(m.id)
 
 
-def test_plans_and_open_actions(fs: FsMeetingRepository):
-    d1, d2, d3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
-    a = Action("x", "me", "m1", id="abc", due=d2)
-    fs.save_plan(DailyPlan(d1, "# day 1\n", new_actions=[a]))
-    fs.save_plan(DailyPlan(d3, "# day 3\n"))
-
-    assert fs.load_plan(d1).new_actions == [a]
-    assert fs.load_plan(d2) is None
-    assert fs.latest_plan_before(d3).day == d1
-    assert fs.latest_plan_before(d1) is None
-    assert (fs.plans / "2026-10-06.md").read_text() == "# day 1\n"
-
-    assert fs.load_open_actions() == []
-    fs.save_open_actions([a])
-    assert fs.load_open_actions() == [a]
-
-
 def test_corrupt_json_raises_repository_error(fs: FsMeetingRepository):
     m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
     fs.path(m.id, META).write_text("{nope")
@@ -203,14 +187,11 @@ def test_story_drafts_round_trip_next_to_the_plan(fs: FsMeetingRepository):
                       open_questions=["Qual formato?"], source_action_ids=["a1"], source_meetings=["m1"],
                       priority=Priority.HIGH, due=date(2026, 10, 9), id="s1")
     drafts = StoryDrafts(day, [story], [SkippedAction("a2", "e-mail")])
-    fs.save_plan(DailyPlan(day, "# day\n"))
-
     fs.save_story_drafts(drafts, "# Rascunhos\n")
 
     assert fs.load_story_drafts(day) == drafts
     assert fs.load_story_drafts(date(2026, 10, 7)) is None
     assert (fs.plans / "2026-10-06.stories.md").read_text() == "# Rascunhos\n"
-    assert fs.latest_plan_before(date(2026, 10, 7)).day == day   # the drafts file is not taken for a plan
 
 
 def test_story_drafts_keep_publications_and_duplicates(fs: FsMeetingRepository):
@@ -247,13 +228,11 @@ def test_recent_story_drafts_window(fs: FsMeetingRepository):
     for day in (date(2026, 10, 9), before, date(2026, 9, 9), date(2026, 10, 11), date(2026, 9, 10)):  # saved out of order
         fs.save_story_drafts(StoryDrafts(day, [UserStory(f"story {day}", "n")]), "# x\n")
     (fs.plans / "2026-13-45.stories.json").write_text("{}")   # matches the glob but is not a day: ignored
-    fs.save_plan(DailyPlan(date(2026, 10, 8), "# plan\n"))
 
     recent = fs.recent_story_drafts(before, 30)
 
     assert [d.day for d in recent] == [date(2026, 9, 10), date(2026, 10, 9)]   # first day in, `before` and older out
     assert fs.recent_story_drafts(before, 0) == []
-    assert fs.latest_plan_before(before).day == date(2026, 10, 8)            # drafts files are not plans
 
 
 def test_story_drafts_with_the_wrong_shape_raise_repository_error(fs: FsMeetingRepository):
@@ -265,11 +244,26 @@ def test_story_drafts_with_the_wrong_shape_raise_repository_error(fs: FsMeetingR
 
 
 def test_action_kind_round_trip_and_actions_from_before_classification(fs: FsMeetingRepository):
-    classified = Action("Estimar horas", "usuário", "m1", id="k1", kind=ActionKind.TECHNICAL)
-    fs.save_open_actions([classified])
-    assert fs.load_open_actions() == [classified]
-    (fs.plans / "open_actions.json").write_text(json.dumps([{"id": "o1", "description": "x", "owner": "usuário", "source_meeting": "m"}]))
-    assert fs.load_open_actions()[0].kind is None
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    classified = Action("Estimar horas", "usuário", m.id, id="k1", kind=ActionKind.TECHNICAL)
+    fs.save_analysis(m.id, Analysis(meeting_id=m.id, summary="s", my_actions=[classified]))
+    assert fs.load_analysis(m.id).my_actions == [classified]
+    assert codec.action_from_dict({"id": "o1", "description": "x", "owner": "usuário", "source_meeting": "m"}).kind is None
+
+
+def test_an_old_analysis_with_an_overdue_action_still_loads(fs: FsMeetingRepository):    # UT-056
+    """`ActionStatus.OVERDUE` survives only to decode what the removed planner stored: read, never written by the code."""
+    m = Meeting.start(datetime(2026, 10, 6, 14, 0, 0)); fs.create(m)
+    fs.save_analysis(m.id, Analysis(meeting_id=m.id, summary="s", my_actions=[Action("Enviar", "usuário", m.id, id="late")]))
+    path = fs.path(m.id, ANALYSIS)
+    data = json.loads(path.read_text())
+    data["my_actions"][0]["status"] = "overdue"
+    path.write_text(json.dumps(data))
+
+    loaded = fs.load_analysis(m.id)
+
+    assert loaded.my_actions[0].status == ActionStatus.OVERDUE and loaded.my_actions[0].id == "late"
+    assert codec.action_from_dict({"id": "x", "description": "d", "owner": "o", "source_meeting": "m", "status": "overdue"}).status == "overdue"
 
 
 def test_transcript_health_roundtrip_and_old_files_without_it(fs: FsMeetingRepository):
@@ -312,21 +306,17 @@ def _verified_analysis(meeting_id: str):
     )
 
 
-def test_verification_roundtrips_through_analysis_plan_and_open_actions(fs: FsMeetingRepository):
+def test_verification_roundtrips_through_the_analysis(fs: FsMeetingRepository):
     m = Meeting.start(datetime(2026, 10, 12, 9, 0, 0)); fs.create(m)
     analysis = _verified_analysis(m.id)
 
     fs.save_analysis(m.id, analysis)
-    fs.save_open_actions(analysis.all_actions)
-    fs.save_plan(DailyPlan(day=date(2026, 10, 12), markdown="# p", new_actions=analysis.all_actions))
 
     assert fs.load_analysis(m.id) == analysis
-    assert fs.load_open_actions() == analysis.all_actions
-    assert fs.load_plan(date(2026, 10, 12)).new_actions == analysis.all_actions
 
 
 def test_unverified_claims_are_written_exactly_as_before():
-    # files, and the JSON the planner and the story writer receive, only change once a claim is verified
+    # files, and the JSON the story writer and the curator receive, only change once a claim is verified
     old = json.loads((FIXTURES / "sample_analysis_v2.json").read_text())
     analysis = codec.analysis_from_dict(old)
     assert all(a.verification is None for a in analysis.all_actions) and analysis.participant_checks == {}
@@ -361,19 +351,6 @@ def test_a_damaged_verification_is_a_repository_error(fs: FsMeetingRepository, d
 
     with pytest.raises(RepositoryError, match="invalid JSON in"):
         fs.load_analysis(m.id)
-
-
-def test_damaged_open_actions_and_plans_are_repository_errors(fs: FsMeetingRepository):
-    fs.save_open_actions([Action("Enviar", "me", "m1")])
-    (fs.plans / Files.OPEN_ACTIONS).write_text('[{"description": "sem id"}]')
-    with pytest.raises(RepositoryError, match=Files.OPEN_ACTIONS):
-        fs.load_open_actions()
-    fs.save_plan(DailyPlan(day=date(2026, 10, 12), markdown="# p"))
-    (fs.plans / "2026-10-12.json").write_text('{"markdown": "sem dia"}')
-    with pytest.raises(RepositoryError, match="2026-10-12.json"):
-        fs.load_plan(date(2026, 10, 12))
-    with pytest.raises(RepositoryError, match="2026-10-12.json"):
-        fs.latest_plan_before(date(2026, 10, 13))
 
 
 @pytest.mark.parametrize("empty", [None, {}])

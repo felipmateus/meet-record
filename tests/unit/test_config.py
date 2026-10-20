@@ -4,14 +4,14 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.config import APP_SUPPORT_DIR, default_data_dir, is_icloud_synced, is_tcc_protected, load_settings
-from teams_recorder.constants import Effort, LlmProvider, MicBackend, Stories, StoryDestination
+from teams_recorder.constants import Audio, Effort, LlmProvider, MicBackend, Stories, StoryDestination
 from teams_recorder.messages import Err
 
 
 def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     (tmp_path / "config.toml").write_text(
-        '[audio]\nmic_device = "USB Mic"\n[planner]\nretention_days = 7\n[llm]\neffort = "medium"\n'
+        '[audio]\nmic_device = "USB Mic"\nretention_days = 7\n[llm]\neffort = "medium"\n'
     )
     (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=sk-test-123\n")
 
@@ -29,7 +29,7 @@ def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
 def test_load_settings_defaults_without_files(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     s = load_settings(tmp_path)
-    assert s.language == "pt" and s.plan_hour == 18 and s.retention_days == 30
+    assert s.language == "pt" and s.retention_days == Audio.RETENTION_DAYS == 30
     assert not s.has_api_key
 
 
@@ -193,15 +193,31 @@ def test_raw_bytes_per_hour():
 
 def test_stories_settings(tmp_path: Path):
     defaults = load_settings(tmp_path)
-    assert not defaults.stories_enabled
     assert defaults.story_guide_path == tmp_path.resolve() / "prompts" / "user_story_guide.md"
 
-    (tmp_path / "config.toml").write_text('[stories]\nenabled = true\nguide = "docs/guia.md"\n')
+    (tmp_path / "config.toml").write_text('[stories]\nguide = "docs/guia.md"\n')
     s = load_settings(tmp_path)
-    assert s.stories_enabled and s.story_guide_path == tmp_path.resolve() / "docs" / "guia.md"
+    assert s.story_guide_path == tmp_path.resolve() / "docs" / "guia.md"
 
     (tmp_path / "config.toml").write_text('[stories]\nguide = "~/guia.md"\n')
     assert load_settings(tmp_path).story_guide_path == Path("~/guia.md").expanduser()
+
+
+def test_retention_days_reads_audio_with_the_old_planner_key_as_fallback(tmp_path: Path):    # UT-092
+    config = tmp_path / "config.toml"
+    config.write_text("[planner]\nhour = 18\nretention_days = 10\n")
+    assert load_settings(tmp_path).retention_days == 10                       # no [audio] key: the old one is read, `hour` is ignored
+    config.write_text("[audio]\nretention_days = 45\n[planner]\nretention_days = 10\n")
+    assert load_settings(tmp_path).retention_days == 45                       # both: [audio] wins
+    config.write_text("[audio]\nmic_device = \"default\"\n")
+    assert load_settings(tmp_path).retention_days == 30                       # neither: the default
+    assert not hasattr(load_settings(tmp_path), "plan_hour")
+
+
+def test_an_old_stories_enabled_key_loads_and_is_ignored(tmp_path: Path):     # UT-093
+    (tmp_path / "config.toml").write_text('[stories]\nenabled = true\nguide = "docs/guia.md"\n')
+    s = load_settings(tmp_path)
+    assert s.story_guide_path == tmp_path.resolve() / "docs" / "guia.md" and not hasattr(s, "stories_enabled")
 
 
 def test_publishing_settings_default_to_off(tmp_path: Path):
@@ -242,7 +258,7 @@ def test_the_repository_config_loads(tmp_path: Path):
     repo_config = Path(__file__).resolve().parents[2] / "config.toml"
     (tmp_path / "config.toml").write_text(repo_config.read_text(encoding="utf-8"))   # a copy: no .env loaded
     s = load_settings(tmp_path)
-    assert s.stories_enabled and s.backlog_project_dir == tmp_path.resolve()
+    assert s.backlog_project_dir == tmp_path.resolve()
 
 
 def test_transcription_guard_defaults(tmp_path: Path):

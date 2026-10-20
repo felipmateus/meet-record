@@ -12,7 +12,7 @@ from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.adapters.outbound.winproc import root_pids
 from teams_recorder.application.ports import CallState, ConfirmAnswer
-from teams_recorder.constants import Windows
+from teams_recorder.constants import Legacy, Windows
 from teams_recorder.domain import Meeting
 from teams_recorder.messages import Ask
 
@@ -153,17 +153,6 @@ def test_daemon_task_definition(tmp_path: Path):
     assert exec_.find("t:WorkingDirectory", NS).text == str(tmp_path / "proj")
 
 
-def test_planner_task_runs_on_weekdays_at_the_hour(tmp_path: Path):
-    task = ScheduledTask.planner(tmp_path / "proj", tmp_path / "data", hour=18, runner=FakeSchtasks())
-    root = ET.fromstring(task.definition())
-    trigger = root.find("t:Triggers/t:CalendarTrigger", NS)
-    assert trigger.find("t:StartBoundary", NS).text.endswith("T18:00:00")
-    days = [d.tag.split("}")[1] for d in trigger.find("t:ScheduleByWeek/t:DaysOfWeek", NS)]
-    assert days == list(Windows.TASK_WEEKDAYS)
-    assert root.find("t:Actions/t:Exec/t:Arguments", NS).text.endswith("plan --purge")
-    assert root.find("t:Settings/t:RestartOnFailure", NS) is None
-
-
 def test_install_creates_and_starts_the_daemon_task(tmp_path: Path):
     runner = FakeSchtasks()
     path = _task(tmp_path, runner).install()
@@ -174,10 +163,19 @@ def test_install_creates_and_starts_the_daemon_task(tmp_path: Path):
     assert create[create.index("/TN") + 1] == "\\teams-recorder\\daemon" and "/F" in create
 
 
-def test_install_replaces_an_existing_task_and_planner_is_not_started(tmp_path: Path):
+def test_install_replaces_an_existing_daemon_task(tmp_path: Path):
     runner = FakeSchtasks(existing=True)
-    ScheduledTask.planner(tmp_path / "proj", tmp_path / "data", hour=18, runner=runner).install()
-    assert [c[1] for c in runner.calls] == ["/Query", "/End", "/Create"]
+    _task(tmp_path, runner).install()
+    assert [c[1] for c in runner.calls] == ["/Query", "/End", "/Create", "/Run"]
+
+
+def test_a_task_of_an_older_version_is_removed_by_name_through_uninstall(tmp_path: Path):
+    runner = FakeSchtasks(existing=True)
+    legacy = _task(tmp_path, runner, name=Legacy.PLANNER_TASK)
+    assert legacy.task_name == "\\teams-recorder\\planner"
+    assert legacy.uninstall() is True
+    assert [c[1] for c in runner.calls] == ["/Query", "/End", "/Delete"]
+    assert legacy.uninstall() is False
 
 
 def test_uninstall_and_status(tmp_path: Path):

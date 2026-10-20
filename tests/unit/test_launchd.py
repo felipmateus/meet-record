@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from teams_recorder.adapters.outbound.launchd import LABEL, AgentStatus, LaunchAgent
+from teams_recorder.constants import Launchd, Legacy
 
 
 class Recorder:
@@ -86,13 +87,17 @@ def test_extra_env_is_merged(tmp_path: Path, monkeypatch):
     assert env["TREC_LLM_PROVIDER"] == "claude-code" and "PATH" in env
 
 
-def test_planner_agent_is_scheduled_not_resident(tmp_path: Path, monkeypatch):
+def test_the_legacy_planner_job_is_addressed_by_its_label_and_only_removed(tmp_path: Path, monkeypatch):    # UT-091, UT-096
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    ag = LaunchAgent.planner(tmp_path / "p", tmp_path / "p" / "data", hour=18, extra_env={"TREC_LLM_PROVIDER": "claude-code"})
-    pl = ag.plist()
-    assert pl["Label"] == "local.teams-recorder.planner"
-    assert pl["ProgramArguments"][1:] == ["plan", "--purge"]
-    assert "KeepAlive" not in pl and "RunAtLoad" not in pl
-    assert pl["StartCalendarInterval"] == [{"Hour": 18, "Minute": 0, "Weekday": wd} for wd in range(1, 6)]
-    assert pl["StandardOutPath"].endswith("planner.out.log")
-    assert ag.plist_path.name == "local.teams-recorder.planner.plist"
+    recorder = Recorder({"print": (0, "\tstate = not running\n")})
+    legacy = LaunchAgent(tmp_path / "p", tmp_path / "p" / "data", label=Legacy.PLANNER_LABEL, runner=recorder, sleep=lambda s: None)
+    legacy.plist_path.parent.mkdir(parents=True)
+    legacy.plist_path.write_bytes(b"x")
+    assert legacy.plist_path.name == "local.teams-recorder.planner.plist"
+
+    assert legacy.uninstall() is True and not legacy.plist_path.exists()
+
+    bootouts = [c for c in recorder.calls if c[1] == "bootout"]
+    assert len(bootouts) == 1 and bootouts[0][2].endswith(f"/{Legacy.PLANNER_LABEL}")
+    assert not hasattr(LaunchAgent, "planner") and not hasattr(Launchd, "PLANNER_LABEL")
+    assert legacy.uninstall() is False   # nothing left: a second removal is quiet

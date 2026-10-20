@@ -111,7 +111,7 @@ def test_story_publishers_follow_the_configured_destinations(tmp_path: Path, mon
     assert [p.destination for p in c.story_publishers] == [f"board:{Stories.BACKLOG_STATUS}"]
     publish = c.publish_user_stories()
     assert publish.publishers is c.story_publishers and publish.dedup_days == 9
-    assert c.draft_user_stories().dedup_days == 9
+    assert c.draft_stories_from_tags().dedup_days == 9
 
 
 def test_story_publishers_keep_the_configured_order(tmp_path: Path, monkeypatch):

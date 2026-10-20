@@ -10,6 +10,7 @@ from typing import Callable, Iterator
 from teams_recorder.application.ports import ActiveRecording, CallState, CaptureHandle, VersionFiles
 from teams_recorder.domain import (
     Action,
+    ActionKind,
     Analysis,
     AnalysisError,
     CaptureError,
@@ -17,7 +18,6 @@ from teams_recorder.domain import (
     CaptureStats,
     CuratorInput,
     CuratorOutput,
-    DailyPlan,
     Decision,
     EnergyTimeline,
     Meeting,
@@ -32,6 +32,7 @@ from teams_recorder.domain import (
     SpeakerLog,
     SpeakersUnavailable,
     StoryDrafts,
+    TaggedBlock,
     Transcript,
     TranscriptHealth,
     TranscriptionError,
@@ -219,19 +220,6 @@ class FakeAnalyzer:
         )
 
 
-class FakePlanner:
-    def plan(self, day: date, analyses: list[Analysis], previous_plan: DailyPlan | None, open_actions: list[Action]) -> DailyPlan:
-        new = [a for an in analyses for a in an.my_actions]
-        overdue = [a.id for a in open_actions if a.is_overdue_on(day)]
-        return DailyPlan(
-            day=day,
-            markdown=f"# Plan {day}\n\n{len(analyses)} meetings, {len(new)} new actions.\n",
-            priorities=[a.description for a in new[:3]],
-            new_actions=new,
-            overdue_action_ids=overdue,
-        )
-
-
 class FakeCallDetector:
     def __init__(self, states: list[CallState], pid: int = 4242) -> None:
         self.states = list(states)
@@ -260,8 +248,6 @@ class InMemoryMeetingRepository:
 
     def __init__(self) -> None:
         self._recs: dict[str, _Rec] = {}
-        self.plans: dict[date, DailyPlan] = {}
-        self.open_actions: list[Action] = []
         self.active: ActiveRecording | None = None
         self.minutes: dict[str, str] = {}
         self.story_drafts: dict[date, tuple[StoryDrafts, str]] = {}
@@ -413,21 +399,8 @@ class InMemoryMeetingRepository:
         self._get(meeting_id)
         return self.curation_errors.get(meeting_id)
 
-    def save_plan(self, plan: DailyPlan) -> None:
-        self.plans[plan.day] = plan
-
-    def load_plan(self, day: date) -> DailyPlan | None:
-        return self.plans.get(day)
-
-    def latest_plan_before(self, day: date) -> DailyPlan | None:
-        earlier = [d for d in self.plans if d < day]
-        return self.plans[max(earlier)] if earlier else None
-
-    def load_open_actions(self) -> list[Action]:
-        return list(self.open_actions)
-
-    def save_open_actions(self, actions: list[Action]) -> None:
-        self.open_actions = list(actions)
+    def story_drafts_path(self, day: date) -> Path:
+        return Path("plans") / f"{day.isoformat()}.stories.md"
 
     def save_story_drafts(self, drafts: StoryDrafts, markdown: str) -> None:
         self.story_drafts[drafts.day] = (drafts, markdown)
@@ -468,19 +441,32 @@ class FakeMinutesRenderer:
 
 
 class FakeStoryWriter:
-    """One story per action, except actions whose description starts with "Email", which are skipped."""
+    """One story per tagged block (kind `kind`, the block as `source_text`, its link labels as meetings), except a block whose first
+    line contains a key of `skips` (skipped with that reason) or of `duplicates` (skipped as a duplicate of that story id)."""
 
-    def __init__(self, fail: bool = False) -> None:
+    def __init__(self, fail: bool = False, skips: dict[str, str] | None = None, duplicates: dict[str, str] | None = None,
+                 kind: ActionKind | None = ActionKind.FEATURE) -> None:
         self.fail = fail
-        self.calls: list[tuple[date, list[Action], list[Analysis], list[UserStory]]] = []
+        self.skips = skips or {}
+        self.duplicates = duplicates or {}
+        self.kind = kind
+        self.calls: list[tuple[date, list[TaggedBlock], list[Analysis], list[UserStory]]] = []
 
-    def draft(self, day: date, actions: list[Action], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
-        self.calls.append((day, actions, analyses, existing))
+    def draft_from_blocks(self, day: date, blocks: list[TaggedBlock], analyses: list[Analysis], existing: list[UserStory]) -> StoryDrafts:
+        self.calls.append((day, blocks, analyses, existing))
         if self.fail:
             raise AnalysisError("model is down")
-        stories = [UserStory(f"Story for {a.description}", "As someone, I want it", source_action_ids=[a.id])
-                   for a in actions if not a.description.startswith("Email")]
-        skipped = [SkippedAction(a.id, "not product work") for a in actions if a.description.startswith("Email")]
+        stories: list[UserStory] = []
+        skipped: list[SkippedAction] = []
+        for block in blocks:
+            first = block.lines[0]
+            skip = next((reason for key, reason in self.skips.items() if key in first), None)
+            twin = next((story_id for key, story_id in self.duplicates.items() if key in first), None)
+            if skip is not None or twin is not None:
+                skipped.append(SkippedAction(block.ref, skip or "already exists", twin, first))
+                continue
+            stories.append(UserStory(f"Story for {first.strip()}", "As someone, I want it", source_meetings=list(block.labels),
+                                     kind=self.kind, source_text="\n".join(block.lines)))
         return StoryDrafts(day=day, stories=stories, skipped=skipped)
 
 
@@ -505,12 +491,11 @@ class FakeStoryPublisher:
 
 class FakeStoryRenderer:
     def __init__(self) -> None:
-        self.calls: list[tuple[StoryDrafts, list[Action], list[UserStory]]] = []
+        self.calls: list[tuple[StoryDrafts, list[UserStory]]] = []
         self.degraded: list[dict[str, TranscriptHealth] | None] = []
 
-    def render(self, drafts: StoryDrafts, actions: list[Action], existing: list[UserStory],
-               degraded: dict[str, TranscriptHealth] | None = None) -> str:
-        self.calls.append((drafts, actions, existing))
+    def render(self, drafts: StoryDrafts, existing: list[UserStory], degraded: dict[str, TranscriptHealth] | None = None) -> str:
+        self.calls.append((drafts, existing))
         self.degraded.append(degraded)
         return f"# Stories {drafts.day}\n{len(drafts.stories)} stories\n"
 
@@ -565,6 +550,7 @@ class InMemoryActivityStore:
         self.commits: list[tuple[str, str, list[tuple[str, str]], str | None, PassRecord]] = []
         self.locks: list[bool] = []              # `wait` of every lock() call
         self.truncated: list[PassRecord] = []
+        self.rewrites: list[tuple[str, str | None]] = []   # every rewrite_document call (the document, the base)
         self.document_path = Path("activities") / "atividades.md"
 
     @contextmanager
@@ -599,6 +585,12 @@ class InMemoryActivityStore:
         self.document = after
         self.base = base
         self.records.append(record)
+
+    def rewrite_document(self, document: str, base: str | None = None) -> None:
+        self.rewrites.append((document, base))
+        self.document = document
+        if base is not None:
+            self.base = base
 
     def log_pass(self, record: PassRecord) -> None:
         if self.fail_log is not None:
