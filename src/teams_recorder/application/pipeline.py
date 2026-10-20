@@ -6,6 +6,7 @@ folder and other meetings are not affected (NFR05).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from teams_recorder.application.ports import MeetingRepository, Notifier
@@ -25,6 +26,7 @@ class Pipeline:
     stop: StopRecording
     transcribe: TranscribeMeeting
     analyze: AnalyzeMeeting
+    after_analysis: Callable[[str], None] | None = None   # called once a meeting reaches ANALYZED; failures are logged, never error.txt
 
     def run_after_call(self, active: ActiveRecording) -> Meeting:
         return self.after_stop(self.stop.stop_capture(active))
@@ -48,14 +50,18 @@ class Pipeline:
             MeetingStatus.RECORDED: (Step.TRANSCRIPTION, self.transcribe),
             MeetingStatus.TRANSCRIBED: (Step.ANALYSIS, self.analyze),
         }
+        analyzed_now = False
         while True:
             status = derive_status(self.repo.files(meeting_id))
             step = steps.get(status)
             if step is None:
+                if analyzed_now and status == MeetingStatus.ANALYZED:
+                    self._after_analysis(meeting_id)
                 return status
             name, use_case = step
             try:
                 use_case.execute(meeting_id)
+                analyzed_now = use_case is self.analyze
             except Exception as exc:  # noqa: BLE001 - any failure becomes error.txt
                 log.exception(Log.STEP_FAILED, name, meeting_id)
                 self.repo.mark_failed(meeting_id, Err.STEP_ERROR.format(step=name, error=exc))
@@ -64,6 +70,16 @@ class Pipeline:
                     Notify.STEP_FAILED_BODY.format(meeting_id=meeting_id, error=exc),
                 )
                 return MeetingStatus.FAILED
+
+    def _after_analysis(self, meeting_id: str) -> None:
+        """Tells the hook that the meeting was analyzed. What the hook does is not this meeting's pipeline: its failure is
+        logged, and the meeting stays analyzed without an error file."""
+        if self.after_analysis is None:
+            return
+        try:
+            self.after_analysis(meeting_id)
+        except Exception:  # noqa: BLE001 - never error.txt: the analysis itself succeeded
+            log.exception(Log.AFTER_ANALYSIS_FAILED, meeting_id)
 
     def resume_pending(self) -> dict[str, MeetingStatus]:
         """Resume every meeting that has not been analyzed yet, including stopped recordings that

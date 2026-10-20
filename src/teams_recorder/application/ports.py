@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, runtime_checkable
 
 from teams_recorder.domain import (
-    Action, Analysis, CaptureStats, ClaimRef, DailyPlan, EnergyTimeline, Meeting, SpeakerLog, StoryDrafts, Transcript, TranscriptHealth,
-    UserStory, Verification,
+    Action, Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, DailyPlan, EnergyTimeline, Meeting, Op, OpFailure, PassRecord,
+    SpeakerLog, StoryDrafts, Transcript, TranscriptHealth, UserStory, Verification,
 )
 
 
@@ -219,6 +219,12 @@ class MeetingRepository(Protocol):
     def save_minutes(self, meeting_id: str, markdown: str) -> None: ...
     def mark_failed(self, meeting_id: str, message: str) -> None: ...
     def clear_failed(self, meeting_id: str) -> None: ...
+    def mark_curation_failed(self, meeting_id: str, message: str) -> None:
+        """Writes recordings/<id>/curation_error.txt (status.CURATION_ERROR) atomically, without the meeting lock: no other
+        step touches it and derive_status ignores it."""
+        ...
+    def clear_curation_failed(self, meeting_id: str) -> None: ...
+    def curation_error(self, meeting_id: str) -> str | None: ...
     # plans
     def save_plan(self, plan: DailyPlan) -> None: ...
     def load_plan(self, day: date) -> DailyPlan | None: ...
@@ -230,6 +236,62 @@ class MeetingRepository(Protocol):
     def load_story_drafts(self, day: date) -> StoryDrafts | None: ...
     def recent_story_drafts(self, before: date, days: int) -> list[StoryDrafts]:
         """Drafts of the days in [before - days, before), oldest first."""
+        ...
+
+
+@runtime_checkable
+class ActivityCurator(Protocol):
+    def curate(self, data: CuratorInput) -> CuratorOutput: ...
+    def repair(self, data: CuratorInput, current: str, failures: list[OpFailure]) -> list[Op]:
+        """Replacement ops for the failed ones; `current` is the in-memory text after the ops that applied."""
+        ...
+
+
+class VersionFiles(NamedTuple):
+    """The files of one committed pass. None means the file does not exist: commit writes no `_base` / `_prevbase` file for it."""
+
+    before: str
+    after: str
+    base: str | None      # base.md after the pass (None: the pass left no base, an undo of the first pass)
+    prevbase: str | None  # base.md as it was when the pass committed (the base the pass read); None for the first pass
+
+
+@runtime_checkable
+class ActivityStore(Protocol):
+    def lock(self, wait: bool = True) -> AbstractContextManager[bool]:
+        """Serialises passes. Yields False when `wait` is False and the lock is held. On entry, reconciles a commit that a
+        hard stop interrupted: rolled forward only when the document's box stamp is not None and equals the stamp of the
+        pass's `_after`, rolled back otherwise (a missing stamp is never "replaced")."""
+        ...
+    def read_document(self) -> str | None: ...
+    def read_base(self) -> str | None: ...
+    def recent_archive(self, limit: int) -> list[str]:
+        """The last `limit` archive entries, newest last, each as its header line and its first line."""
+        ...
+    def commit(self, before: str, after: str, archived: list[tuple[str, str]], base: str | None, record: PassRecord) -> None:
+        """All or nothing for the document, base.md, the archive and the versions: the version files (`_pass.json` holds the
+        archive sizes), the archive entries, the document, base.md and, as the commit point, the pass-log line. `archived`
+        holds (text, reason); `base=None` deletes base.md and writes no `_base` file. Raises `CommitIncomplete` when it
+        failed after the document replace (the pass happened; the next `lock()` finishes it), any other `RepositoryError`
+        when it failed before it (nothing was changed)."""
+        ...
+    def log_pass(self, record: PassRecord) -> None:
+        """Appends the record of a pass that changed nothing (kind skipped_empty or failed) to the pass log, and nothing
+        else: no version files, no document or base write. Such a record has no version set, so it can never be undone."""
+        ...
+    def passes(self) -> list[PassRecord]:
+        """The pass log, oldest first; a torn last line counts as absent."""
+        ...
+    def version(self, name: str) -> VersionFiles: ...
+    def version_names(self) -> list[str]:
+        """The names of the version sets that have files, oldest first: the committed passes in the keep window and a set a
+        commit left unreconciled (its pass-log line is still missing). A new pass or undo never takes one of these names."""
+        ...
+    def truncate_archive(self, record: PassRecord) -> bool:
+        """Truncates record.archive_file to archive_bytes_before only while its size equals archive_bytes_after; False when left in place."""
+        ...
+    def path(self) -> Path:
+        """The document."""
         ...
 
 
