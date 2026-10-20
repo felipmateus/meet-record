@@ -142,7 +142,7 @@ dedup_days = 30
 [stories.backlog_md]
 # A Backlog.md project (Markdown kanban: https://github.com/MrLesk/Backlog.md). "." = this
 # project folder, with the tasks in ./backlog, which is git-ignored (this repository is public):
-# publishing refuses a board that Git would version. One-time setup in the README.
+# publishing refuses a board that Git would version. One-time setup in docs/guide/activities-and-stories.md.
 project_dir = "."
 # Column where new stories wait for your review; it must exist in the project's statuses.
 status = "Triagem"
