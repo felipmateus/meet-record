@@ -7,10 +7,11 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import Callable, NoReturn
 
 import typer
 
@@ -22,16 +23,17 @@ from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.scheduler_windows import ScheduledTask
 from teams_recorder.application.ports import ActiveRecording, MeetingRepository
 from teams_recorder.application.use_cases import gaps_text, stories_waiting
+from teams_recorder.application.use_cases.activities import ActivitiesStatus, NotCurated, PassResult, batches, passes_by_day
 from teams_recorder.config import Settings, find_tool, load_settings
-from teams_recorder.constants import CLI_NAME, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
+from teams_recorder.constants import CLI_NAME, Activities, Audio, Bin, Confirm, Env, Files, LlmProvider, Logging, Parse, Platform
 from teams_recorder.container import (
     Container, build_container, build_retry_transcriber, build_speaker_observer, build_story_publishers, teams_speakers_binary, teams_tap_binary,
 )
 from teams_recorder.domain import (
-    LabelSummary, MeetingStatus, SpeakerReason, TeamsRecorderError, Transcript, derive_status, next_step, unconfirmed, verifications,
+    CuratorBusy, LabelSummary, MeetingStatus, NothingToUndo, SpeakerReason, TeamsRecorderError, Transcript, UndoStale, derive_status, next_step, unconfirmed, verifications,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
-from teams_recorder.messages import Cli, Err, Notify, Step
+from teams_recorder.messages import ActivityDoc, Cli, Err, Notify, Step
 
 app = typer.Typer(
     name=CLI_NAME,
@@ -42,6 +44,9 @@ app = typer.Typer(
 
 agent_app = typer.Typer(help=Cli.AGENT_HELP, no_args_is_help=True)
 app.add_typer(agent_app, name="agent")
+
+activities_app = typer.Typer(help=Cli.ACTIVITIES_HELP, invoke_without_command=True)
+app.add_typer(activities_app, name="activities")
 
 
 def _settings() -> Settings:
@@ -126,10 +131,10 @@ def status() -> None:
         unreadable = True
         typer.echo(Cli.ACTIVE_UNREADABLE.format(error=exc))
     try:
-        typer.echo(Cli.OPEN_ACTIONS.format(count=len(c.repo.load_open_actions())))
+        typer.echo(_activities_status_line(c.activities_summary().execute()))
     except TeamsRecorderError as exc:
         unreadable = True
-        typer.echo(Cli.OPEN_ACTIONS_UNREADABLE.format(error=exc))
+        typer.echo(Cli.ACTIVITIES_STATUS_UNREADABLE.format(error=exc))
     if c.story_publishers:
         try:
             typer.echo(Cli.STORIES_WAITING.format(count=len(c.stories_waiting())))
@@ -138,6 +143,17 @@ def status() -> None:
             typer.echo(Cli.STORIES_WAITING_UNREADABLE.format(error=exc))
     if unreadable:
         raise typer.Exit(code=1)
+
+
+def _activities_status_line(status: ActivitiesStatus) -> str:
+    """The `Activities:` line of `trec status`: the open items of the document that are the user's and those waiting on others,
+    and when it was last updated. A section whose heading the user renamed or removed is left out."""
+    if not status.exists:
+        return Cli.ACTIVITIES_STATUS_NONE
+    labelled = ((ActivityDoc.HEADING_ACTIONS, Cli.ACTIVITIES_COUNT_ACTIONS), (ActivityDoc.HEADING_WAITING, Cli.ACTIVITIES_COUNT_WAITING))
+    counts = Cli.ACTIVITIES_COUNT_SEPARATOR.join(template.format(count=status.counts[heading]) for heading, template in labelled if heading in status.counts)
+    last = Cli.ACTIVITIES_STATUS_LAST.format(when=_when(status.last_pass.ts)) if status.last_pass is not None else ""
+    return Cli.ACTIVITIES_STATUS.format(counts=counts or Cli.ACTIVITIES_STATUS_NO_COUNTS, last=last)
 
 
 def _load_transcript(repo: MeetingRepository, meeting_id: str) -> Transcript | None:
@@ -219,6 +235,7 @@ def doctor() -> None:
     _check_transcript_health(settings)
     _check_verification(settings)
     _check_speakers(settings)
+    _check_activities(settings)
     key_needed = settings.llm_provider == LlmProvider.API
     typer.echo(Cli.API_KEY_LINE.format(mark=_mark(settings.has_api_key, key_needed), hint="" if key_needed else Cli.API_KEY_NOT_REQUIRED))
     env_file = settings.project_dir / Files.DOTENV
@@ -241,6 +258,27 @@ def doctor() -> None:
     typer.echo(Cli.DATA_IN.format(path=settings.data_dir))
     llm_ok = settings.has_api_key if key_needed else bool(claude_cli)
     raise typer.Exit(code=0 if ok and llm_ok else 1)
+
+
+def _check_activities(settings: Settings) -> None:
+    """Doctor line for the activities document: ok with the last pass, not created yet, or how many meetings analyzed in the last
+    10 working days have no successful pass (failed or never attempted). Never fails the doctor."""
+    try:
+        status = build_container(settings, headless=True).activities_summary().execute()
+    except TeamsRecorderError as exc:
+        typer.echo(Cli.DOCTOR_ACTIVITIES_UNREADABLE.format(mark=Cli.WARNING, error=exc))
+        return
+    path = _relative(status.path, settings.project_dir)
+    count = len(status.not_curated)
+    if not status.exists:
+        mark, state = Cli.INFO, Cli.DOCTOR_ACTIVITIES_NONE
+    elif count:
+        mark, state = Cli.WARNING, (Cli.DOCTOR_ACTIVITIES_NOT_CURATED if count > 1 else Cli.DOCTOR_ACTIVITIES_NOT_CURATED_ONE).format(count=count)
+    elif status.last_pass is not None:
+        mark, state = Cli.OK, Cli.DOCTOR_ACTIVITIES_OK.format(when=_when(status.last_pass.ts))
+    else:
+        mark, state = Cli.OK, Cli.DOCTOR_ACTIVITIES_OK_NO_PASS
+    typer.echo(Cli.DOCTOR_ACTIVITIES.format(mark=mark, path=path, state=state))
 
 
 def _check_transcript_health(settings: Settings) -> None:
@@ -470,6 +508,7 @@ def analyze(
     typer.echo(Cli.PROVIDER.format(provider=settings.llm_provider, model=model))
     use_case = c.analyze_meeting()
     failures = 0
+    analyzed: list[str] = []
     for mid in targets:
         typer.echo(Cli.ANALYZING.format(meeting_id=mid), nl=False)
         try:
@@ -488,8 +527,227 @@ def analyze(
             typer.echo(Cli.ACTION_LINE.format(description=a.description, due=Cli.ACTION_DUE.format(due=a.due.isoformat()) if a.due else ""))
         typer.echo(Cli.FILE_PATH.format(path=c.repo.path(mid, ANALYSIS)))
         typer.echo(Cli.MINUTES_PATH.format(path=c.repo.path(mid, MINUTES)))
+        analyzed.append(mid)
+    if analyzed and settings.activities_enabled:   # a curation failure never changes the exit code: the analyses succeeded
+        _curate_passes(c, batches(analyzed))
     if failures:
         raise typer.Exit(code=1)
+
+
+def _meeting_label(repo: MeetingRepository, meeting_id: str) -> str:
+    """`Revisão de sprint (19/10)`: a meeting as the curation lines name it; its id when its metadata cannot be read."""
+    try:
+        meeting = repo.load_meta(meeting_id)
+    except TeamsRecorderError:
+        return meeting_id
+    return Cli.CURATING_MEETING.format(title=meeting.title or meeting_id, day=meeting.day)
+
+
+def _meeting_title(repo: MeetingRepository, meeting_id: str) -> str:
+    """The meeting's title for a line that names the pass; its id when its metadata cannot be read or it has no title."""
+    try:
+        return repo.load_meta(meeting_id).title or meeting_id
+    except TeamsRecorderError:
+        return meeting_id
+
+
+def _curate_passes(c: Container, passes: list[list[str]]) -> int:
+    """Runs the curator pass by pass (each of at most one batch), printing a line for the meetings a pass curated, one for
+    each that failed and one for each deferred (not attempted: an unfinished pass stopped the round). Waits for the curator when the daemon holds it. Returns how many meetings failed."""
+    use_case = c.curate_meetings()
+    failures = 0
+    for ids in passes:
+        try:
+            result = use_case.execute(ids, wait=True, on_wait=lambda: typer.echo(Cli.CURATE_WAITING))
+        except TeamsRecorderError as exc:   # the lock or the document could not be reached: nothing of this pass ran
+            result = PassResult((), (), tuple((meeting_id, str(exc)) for meeting_id in ids), None, 0)
+        if result.curated:
+            meetings = Cli.CURATING_SEPARATOR.join(_meeting_label(c.repo, meeting_id) for meeting_id in result.curated)
+            line = Cli.CURATING.format(meetings=meetings) + Cli.CURATED_OK.format(edits=result.edits)
+            typer.echo(line + (Cli.CURATED_SUMMARY.format(summary=result.summary) if result.summary else ""))
+        if result.unfinished is not None:
+            typer.echo(Cli.CURATION_UNFINISHED.format(reason=result.unfinished))
+        for meeting_id in result.deferred:
+            typer.echo(Cli.CURATION_DEFERRED.format(meeting=_meeting_label(c.repo, meeting_id)))
+        for meeting_id, reason in result.failed:
+            typer.echo(Cli.CURATING.format(meetings=_meeting_label(c.repo, meeting_id)) + Cli.CURATION_FAILED.format(reason=reason))
+        failures += len(result.failed)
+    return failures
+
+
+def _when(at: datetime) -> str:
+    return Cli.WHEN.format(weekday=Cli.WEEKDAYS_SHORT[at.weekday()], at=at)
+
+
+def _not_curated_line(item: NotCurated) -> str:
+    """`<id> (<title>): <why> → trec activities curate <id>`; the why is the stored error without its `Activity curation failed:` lead."""
+    lead = Err.CURATION_FAILED.format(reason="")
+    if item.reason is None:
+        reason = Cli.ACTIVITIES_NOT_ATTEMPTED
+    else:
+        reason = item.reason.removeprefix(lead).strip() or item.reason
+    title = Cli.ACTIVITIES_NOT_CURATED_TITLE.format(title=item.title) if item.title else ""
+    return Cli.ACTIVITIES_NOT_CURATED_LINE.format(meeting_id=item.meeting_id, title=title, reason=reason)
+
+
+def _open_document(path: Path, *, platform: str = sys.platform, startfile: Callable[[str], None] | None = None,
+                   run: Callable[..., object] = subprocess.run) -> None:
+    """Opens the document with the default application: `open` on macOS, `os.startfile` on Windows. The OS calls are
+    parameters so tests fake them."""
+    if platform == Platform.WINDOWS:
+        opener = startfile or getattr(os, Cli.STARTFILE)   # only Windows has it: looked up here, not imported
+        opener(str(path))
+    else:
+        run([Bin.OPEN, str(path)], check=True)
+
+
+@activities_app.callback(help=Cli.ACTIVITIES_HELP)
+def activities(
+    ctx: typer.Context,
+    open_document: bool = typer.Option(False, "--open", help=Cli.ACTIVITIES_OPEN_HELP),
+) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    settings = _settings()
+    c = build_container(settings, headless=True)
+    try:
+        status = c.activities_summary().execute()
+    except TeamsRecorderError as exc:
+        _fail(str(exc))
+    if not status.exists:
+        typer.echo(Cli.ACTIVITIES_NO_DOCUMENT)
+        return
+    typer.echo(Cli.ACTIVITIES_DOCUMENT.format(path=_relative(status.path, settings.project_dir)))
+    if status.updated is not None:
+        after = Cli.ACTIVITIES_AFTER.format(titles=Cli.CURATING_SEPARATOR.join(status.titles)) if status.titles else ""
+        typer.echo(Cli.ACTIVITIES_UPDATED.format(when=_when(status.updated), after=after))
+    if status.focus:
+        typer.echo(Cli.ACTIVITIES_FOCUS)
+        for line in status.focus:
+            typer.echo(Cli.ACTIVITIES_FOCUS_LINE.format(line=line))
+    labelled = ((ActivityDoc.HEADING_ACTIONS, Cli.ACTIVITIES_COUNT_ACTIONS), (ActivityDoc.HEADING_WAITING, Cli.ACTIVITIES_COUNT_WAITING),
+                (ActivityDoc.HEADING_AGENDA, Cli.ACTIVITIES_COUNT_AGENDA), (ActivityDoc.HEADING_CONTEXT, Cli.ACTIVITIES_COUNT_CONTEXT))
+    counts = [template.format(count=status.counts[heading]) for heading, template in labelled if heading in status.counts]
+    if counts:
+        typer.echo(Cli.ACTIVITIES_OPEN.format(counts=Cli.ACTIVITIES_COUNT_SEPARATOR.join(counts)))
+    if status.last_pass is not None:
+        summary = Cli.CURATED_SUMMARY.format(summary=status.last_pass.summary) if status.last_pass.summary else ""
+        typer.echo(Cli.ACTIVITIES_LAST_PASS.format(when=_when(status.last_pass.ts), summary=summary))
+    else:
+        typer.echo(Cli.ACTIVITIES_NO_PASS)
+    if status.not_curated:
+        typer.echo(Cli.ACTIVITIES_NOT_CURATED)
+        for item in reversed(status.not_curated):   # the most recent first
+            typer.echo(_not_curated_line(item))
+    if open_document:
+        try:
+            _open_document(status.path)
+        except (OSError, subprocess.SubprocessError) as exc:
+            _fail(Cli.ACTIVITIES_OPEN_FAILED.format(path=status.path, error=exc))
+
+
+def _state(repo: MeetingRepository, meeting_id: str) -> MeetingStatus:
+    """Where a meeting stands in the pipeline, an `error.txt` of a failed step set aside (as `_pending` does)."""
+    return derive_status(repo.files(meeting_id) - {ERROR})
+
+
+def _analyzed_days(repo: MeetingRepository, since: date) -> dict[str, date]:
+    """The analyzed meetings held on or after `since`, by id; a meeting whose metadata cannot be read is left out."""
+    found: dict[str, date] = {}
+    for meeting_id in repo.meeting_ids():
+        if _state(repo, meeting_id) is not MeetingStatus.ANALYZED:
+            continue
+        try:
+            day = repo.load_meta(meeting_id).day
+        except TeamsRecorderError:
+            continue
+        if day >= since:
+            found[meeting_id] = day
+    return found
+
+
+@activities_app.command("curate", help=Cli.CURATE_CMD_HELP)
+def activities_curate(
+    meeting_ids: list[str] = typer.Argument(None, help=Cli.CURATE_ARG_HELP),
+    since: str | None = typer.Option(None, "--since", help=Cli.CURATE_SINCE_HELP),
+    yes: bool = typer.Option(False, "--yes", help=Cli.CURATE_YES_HELP),
+) -> None:
+    settings = _settings()
+    ids = list(meeting_ids or [])
+    if ids and since is not None:
+        _fail(Cli.CURATE_ONE_TARGET)
+    if not ids and since is None:
+        _fail(Cli.CURATE_NEEDS_TARGET)
+    c = build_container(settings, headless=True)
+    if since is not None:
+        first = _day(since)
+        days = _analyzed_days(c.repo, first)
+        if not days:
+            typer.echo(Cli.CURATE_NOTHING_SINCE.format(since=first.isoformat()))
+            return
+    else:
+        for meeting_id in ids:
+            if not c.repo.exists(meeting_id):
+                _fail(Cli.MEETING_MISSING.format(meeting_id=meeting_id))
+            state = _state(c.repo, meeting_id)
+            if state is not MeetingStatus.ANALYZED:
+                typer.echo(Cli.CURATE_NOT_ANALYZED.format(meeting_id=meeting_id, state=state.value), err=True)
+                raise typer.Exit(code=1)
+        days = {meeting_id: c.repo.load_meta(meeting_id).day for meeting_id in ids}
+    _check_llm_prerequisites(settings)
+    passes = passes_by_day(days)
+    if since is not None and not yes:
+        step = Activities.ESTIMATE_STEP_MINUTES
+        minutes = -(-len(passes) * Activities.EST_SECONDS_PER_PASS // (60 * step)) * step   # rounded up to a multiple of `step`
+        question = Cli.CURATE_CONFIRM.format(meetings=len(days), passes=len(passes), via=Cli.CURATE_VIA[settings.llm_provider], minutes=minutes)
+        if not typer.confirm(question, default=False):
+            typer.echo(Cli.CURATE_DECLINED)
+            return
+    if _curate_passes(c, passes):
+        raise typer.Exit(code=1)
+
+
+def _undo_failure(message: str) -> NoReturn:
+    typer.echo(message, err=True)
+    raise typer.Exit(code=1)
+
+
+@activities_app.command("undo", help=Cli.UNDO_CMD_HELP)
+def activities_undo(yes: bool = typer.Option(False, "--yes", help=Cli.UNDO_YES_HELP)) -> None:
+    c = build_container(_settings(), headless=True)
+    use_case = c.undo_last_pass()
+    try:
+        preview = use_case.preview()
+    except TeamsRecorderError as exc:
+        _fail(str(exc))
+    if preview is None:
+        _undo_failure(Err.NOTHING_TO_UNDO)
+    record = preview.record
+    titles = Cli.CURATING_SEPARATOR.join(_meeting_title(c.repo, meeting_id) for meeting_id in record.meetings)
+    typer.echo(Cli.UNDO_LAST_PASS.format(
+        when=_when(record.ts), after=Cli.ACTIVITIES_AFTER.format(titles=titles) if titles else "",
+        summary=Cli.UNDO_SUMMARY.format(summary=record.summary) if record.summary else ""))
+    typer.echo(Cli.UNDO_DIFF_NOW)
+    typer.echo(Cli.UNDO_DIFF_BEFORE)
+    if preview.diff:
+        typer.echo(preview.diff)
+    if preview.edited_after:
+        typer.echo(Cli.UNDO_EDITED_AFTER_ONE if preview.edited_after == 1 else Cli.UNDO_EDITED_AFTER.format(count=preview.edited_after))
+    if not yes and not typer.confirm(Cli.UNDO_CONFIRM, default=False):
+        typer.echo(Cli.UNDO_DECLINED)
+        return
+    try:
+        result = use_case.execute(preview.version)
+    except CuratorBusy:
+        _undo_failure(Cli.UNDO_BUSY)
+    except (NothingToUndo, UndoStale) as exc:
+        _undo_failure(str(exc))
+    except TeamsRecorderError as exc:
+        _fail(str(exc))
+    typer.echo(Cli.UNDO_RESTORED.format(meeting_ids=" ".join(result.meetings),
+                                        that=Cli.UNDO_THAT_ONE if len(result.meetings) == 1 else Cli.UNDO_THOSE))
+    if result.archive_left_in_place:
+        typer.echo(Cli.UNDO_ARCHIVE_CHANGED)
 
 
 @app.command(help=Cli.MINUTES_CMD_HELP)

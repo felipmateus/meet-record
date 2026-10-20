@@ -1,16 +1,17 @@
 # Installs teams-recorder on this Windows PC, from a clone of the repository. Safe to run again:
 # every step checks what is already there and only does what is missing.
 #
-#   scripts\install.ps1 [-Name "Your name"] [-Provider claude-code|api] [-SkipModel] [-NoAgent] [-Yes] [-DryRun]
+#   scripts\install.ps1 [-Name "Your name"] [-Provider claude-code|api] [-NoActivities] [-SkipModel] [-NoAgent] [-Yes] [-DryRun]
 #
 # Steps: check Windows (10 2004+ / 11) and Teams, winget packages (Python 3.12, ffmpeg, .NET 8 SDK
 # when teams-tap.exe must be built), whisper.cpp into tools\whisper, the Python virtualenv,
-# teams-tap.exe, config.toml ([user] name, llm provider), .env (API provider only), the whisper
+# teams-tap.exe, config.toml ([user] name, llm provider, [activities] enabled), .env (API provider only), the whisper
 # model, trec doctor, the scheduled tasks (daemon at logon + 6 pm planner) and the microphone
 # privacy setting. Logging in to Claude Code is left to you (it needs your browser).
 param(
     [string]$Name = "",
     [ValidateSet("", "claude-code", "api")][string]$Provider = "",
+    [switch]$NoActivities,
     [switch]$SkipModel,
     [switch]$NoAgent,
     [switch]$Yes,
@@ -221,6 +222,8 @@ if (-not $Provider) { $Provider = $s["provider"] }
 if ($Provider -notin @("claude-code", "api")) { Die "provider must be claude-code or api" }
 if ($Provider -ne $s["provider"]) { Set-Config "llm" "provider" $Provider }
 Ok "LLM provider: $Provider"
+if ($NoActivities -and $s["activities_enabled"] -ne "false") { Set-Config "activities" "enabled" "false"; $s["activities_enabled"] = "false" }
+Ok ("activities curator: " + $(if ($s["activities_enabled"] -eq "false") { "off ([activities] enabled = false in config.toml)" } else { "on (updates data\activities\atividades.md after each analyzed meeting)" }))
 if ($Provider -eq "claude-code") {
     if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "Claude Code found; make sure you are logged in (run 'claude' once and use /login)" }
     else { Warn "Claude Code is not installed. Install it with: irm https://claude.ai/install.ps1 | iex, then run 'claude' and log in." }

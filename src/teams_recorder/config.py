@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from dotenv import load_dotenv
 
 from teams_recorder.constants import (
+    Activities,
     Audio,
     Confirm,
     Detector,
@@ -108,6 +109,12 @@ class Settings:
     verify_cli_model: str = Verify.DEFAULT_CLI_MODEL
     verify_effort: Effort = Verify.DEFAULT_EFFORT
     speakers_enabled: bool = Speakers.ENABLED   # [speakers]: read who speaks from the Teams window during each recording
+    activities_enabled: bool = Activities.ENABLED   # [activities]: automatic curation (the daemon's worker, `trec analyze`); the explicit commands always run
+    activities_model: str = Llm.DEFAULT_API_MODEL   # [activities] model, with provider = "api"; load_settings defaults it to [llm] model
+    activities_cli_model: str = Activities.DEFAULT_CLI_MODEL   # [activities] cli_model, with provider = "claude-code"
+    activities_effort: Effort = Activities.DEFAULT_EFFORT
+    activities_notify: bool = Activities.NOTIFY   # [activities] notify: `Activities updated` when a pass changed something of the user's
+    activities_keep_versions: int = Activities.KEEP_VERSIONS   # passes whose version files `trec activities undo` can restore
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -243,6 +250,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
     stories = raw.get("stories", {})
     verification = raw.get("verification", {})
     speakers = raw.get("speakers", {})
+    activities = raw.get("activities", {})
     backlog_md = stories.get("backlog_md", {})
 
     data_dir = resolve_data_dir(project_dir, paths.get("data_dir"), platform)
@@ -298,7 +306,24 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         verify_cli_model=str(verification.get("cli_model", Verify.DEFAULT_CLI_MODEL)),
         verify_effort=_parse_enum(Effort, verification.get("effort", Verify.DEFAULT_EFFORT), Err.INVALID_VERIFY_EFFORT),
         speakers_enabled=bool(speakers.get("enabled", Speakers.ENABLED)),
+        activities_enabled=bool(activities.get("enabled", Activities.ENABLED)),
+        activities_model=str(activities.get("model", llm.get("model", Llm.DEFAULT_API_MODEL))),
+        activities_cli_model=str(activities.get("cli_model", Activities.DEFAULT_CLI_MODEL)),
+        activities_effort=_parse_enum(Effort, activities.get("effort", Activities.DEFAULT_EFFORT), Err.INVALID_ACTIVITIES_EFFORT),
+        activities_notify=bool(activities.get("notify", Activities.NOTIFY)),
+        activities_keep_versions=_parse_keep_versions(activities.get("keep_versions", Activities.KEEP_VERSIONS)),
     )
+
+
+def _parse_keep_versions(value: object) -> int:
+    """A whole number of at least 1: [activities] keep_versions (undo needs the last pass's files)."""
+    try:
+        count = int(str(value))
+    except ValueError:
+        count = 0
+    if count < 1:
+        raise ValueError(Err.INVALID_KEEP_VERSIONS.format(value=value))
+    return count
 
 
 def _parse_share(value: object) -> float:

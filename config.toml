@@ -106,6 +106,20 @@ timeout_seconds = 30
 # still labelled from the microphone track.
 enabled = true
 
+[activities]
+# After each analyzed meeting, an agent updates data/activities/atividades.md: adds what is new,
+# suggests (💬) what was said as done, keeps everything you wrote. false = no automatic curation
+# (neither the daemon nor `trec analyze`); the `trec activities` commands still work.
+enabled = true
+# Models and effort of the curator (leave `model` out to use the [llm] model).
+model = "claude-opus-5-5"   # with provider = "api"
+cli_model = "opus"          # with provider = "claude-code"
+effort = "medium"
+# Send a notification when a pass changed something of yours.
+notify = true
+# Versions kept for `trec activities undo`.
+keep_versions = 50
+
 [planner]
 hour = 18
 retention_days = 30
