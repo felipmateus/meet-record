@@ -108,7 +108,10 @@ class Err:
     STEP_FAILED_CODE = "{what} failed (code {code}): {tail}"
     WHISPER_NO_JSON = "whisper-cli finished without producing the JSON output"
     WHISPER_BAD_JSON = "invalid whisper JSON: {error}"
+    WHISPER_NO_LANGUAGE = "whisper-cli printed no language for any of the {count} samples; output tail: {tail}"
+    CLIP_BAD_WAV = "the language sample {wav} is not a readable WAV: {error}"
     STEP_CONVERT_WAV = "conversion to 16 kHz WAV"
+    STEP_CUT_SAMPLE = "cutting a language sample"
     # LLM
     SCHEMA_MISMATCH = "output does not match the schema: {errors}"
     API_KEY_INVALID = "invalid or missing API key (ANTHROPIC_API_KEY in .env)"
@@ -168,6 +171,7 @@ class Err:
     BAD_PARTICIPANT_CHECKS = "participant_checks must be an object, not {value!r}"  # detail inside BAD_JSON
     FILE_UNREADABLE = "cannot read {path}: {error}"
     BAD_SPEAKERS = "the speakers summary must be an object, not {value!r}"   # detail inside BAD_JSON
+    BAD_LANGUAGE_DETECTION = "the language detection must be an object with a list of sample objects, not {value!r}"   # detail inside BAD_JSON
     BAD_TEXT = "expected text or null, not {value!r}"                       # detail inside BAD_JSON
     BAD_ENERGY = "energy levels must be a list of numbers per track (track {value!r})"   # detail inside BAD_JSON
     BAD_ENERGY_STEP = "the energy step must be a positive number of seconds, not {value!r}"   # detail inside BAD_JSON
@@ -189,6 +193,9 @@ class Err:
     INVALID_KEEP_VERSIONS = "invalid activities.keep_versions: {value!r}; use a whole number of at least 1"
     INVALID_DESTINATION = "invalid stories.destinations value: {value!r}; use one of {options}"
     INVALID_LOOP_SHARE = "invalid transcription.max_loop_share: {value!r}; use a fraction above 0 and up to 1 (e.g. 0.10)"
+    INVALID_LANGUAGE = 'invalid transcription.language: {value!r}; use "auto" or a language code such as "pt" or "en"'
+    INVALID_LANGUAGES = 'invalid transcription.languages: {value!r}; use a non-empty list of language codes such as ["pt", "en"]'
+    NOT_A_LANGUAGE_CODE = 'the transcription language must be a language code such as "pt", not {value!r}: whisper is never asked to detect'
     NO_DETECTOR = "daemon without a configured detector"
     # pipeline: content of error.txt (step: "transcription" / "analysis")
 
@@ -240,6 +247,7 @@ class Cli:
     MEETING_TITLE = " {title}"
     MEETING_SPEAKERS = "  · speakers {share:.0%}"
     MEETING_SPEAKERS_NONE = "  · speakers 0% ({reason})"
+    MEETING_LANGUAGE = "  · {language}"   # only when the transcript is not in Portuguese
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
     ACTIVITIES_STATUS = "Activities: {counts}{last}"
@@ -265,6 +273,8 @@ class Cli:
     VAD_MODEL_HINT = "  → {script} {model} (without it transcription runs without VAD)"
     TRANSCRIPTION_LINE = "[{mark}] transcription: whisper -mc {max_context}; a transcript is degraded above {share:.0%} of its segments in repetition loops"
     RETRY_LINE = "[{mark}] retry of a degraded transcript: {state}{hint}"
+    LANGUAGE_MODE_AUTO = "[{mark}] language: detected per meeting among {languages} (fallback {fallback})"
+    LANGUAGE_MODE_FIXED = "[{mark}] language: {language} for every meeting ([transcription] language)"
     RETRY_ON_VAD = "on (-mc 0 with VAD: {path})"
     RETRY_ON = "on (-mc 0 without VAD)"
     RETRY_OFF = "off ([transcription] retry_on_loop = false)"
@@ -340,6 +350,16 @@ class Cli:
     TRANSCRIPT_RATE_MISMATCH = ("  WARNING: the Teams track was recorded at the wrong sample rate ({share:.0%} of it is short silence padding): "
                                 "the other participants' speech is sped up and chopped, and their part of the transcript is unreliable.")
     NO_TEXT_IN = "; no text in {ranges}"
+    # `Language:` line of `trec transcribe`: how the transcript's language was chosen (docs/tasks/language-detection/_dx.md)
+    LANGUAGE_DETECTED = "  Language: {language} (heard in {votes} of {counted} counted samples; {taken} taken)"
+    LANGUAGE_NO_USABLE_SAMPLE = "  Language: {language} (fallback: no sample heard {allowed} clearly; {taken} taken)"
+    LANGUAGE_NO_MAJORITY = "  Language: {language} (fallback: no majority among {counted} counted samples: {tally})"
+    LANGUAGE_TOO_FEW_VOTES = "  Language: {language} (fallback: only one counted sample ({heard}); {needed} needed; {taken} taken)"
+    LANGUAGE_DETECTION_FAILED = "  Language: {language} (fallback: language detection failed; see the warning above)"
+    LANGUAGE_FIXED = "  Language: {language} (fixed by [transcription] language)"
+    LANGUAGE_TALLY_ITEM = "{language} {count}"
+    LANGUAGE_LIST_SEPARATOR = ", "
+    LANGUAGE_ALTERNATIVE = " or "   # joins the last two allowed languages in "no sample heard pt or en clearly"
     TEXT_PATH = "  Text: {path}"
     ANALYZE_HINT = "Analyze with `trec analyze`."
     API_KEY_MISSING = "ANTHROPIC_API_KEY missing from .env (or set llm.provider = \"claude-code\")"
@@ -543,6 +563,9 @@ class Log:
     PASS_FIRST, PASS_RETRY = "first", "retry"   # names used in TRANSCRIPT_RETRY_RESULT
     TRANSCRIPT_RETRY_FAILED = "retry of %s failed; keeping the first pass: %s"
     TRANSCRIPT_RETRY_SKIPPED = "no retry for %s: its Teams track was recorded at the wrong sample rate, which a second pass cannot repair"
+    LANGUAGE_DETECTED = "language of %s: %s (%d of %d counted samples; %d taken)"
+    LANGUAGE_FALLBACK = "language of %s: %s, the fallback (%s; %d of %d samples counted)"
+    LANGUAGE_DETECTION_FAILED = "language detection of %s failed; transcribing in %s: %s"
     VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
     VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
     VERIFY_SKIPPED = ("verification of %s skipped: its transcript cannot be trusted (degraded: %s, wrong sample rate: %s), so the "
@@ -588,6 +611,8 @@ class Prompt:
     MEETING_DURATION = "Duration: {minutes} min"
     ROSTER = "Participants seen in the meeting window: {names}"
     SPEAKER_LABELS = 'Speaker labels: the name after a timestamp is who said the line; "{label}" is the recording owner'
+    TRANSCRIPT_LANGUAGE = "Transcript language: {name}"   # header line, only when the transcript is not Portuguese
+    LANGUAGE_NAMES = {"pt": "Portuguese", "en": "English"}   # the header line naming a transcript's language; another code: the code itself
     TRANSCRIPT_HEADER = "\n\nTranscript (with timestamps):\n\n"
     WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
     # JSON Schema field descriptions (part of the contract with the model)
@@ -689,7 +714,7 @@ class Prompt:
         "4. Account for every ref: it appears in the `refs` of an edit or in `ignored`.\n"
         "5. Copy every target and anchor exactly from `<document>`, from its body only (never the box or the link block).\n"
         "6. Remove or change no checkbox line except with `archive`; every reorder is a `move`.\n"
-        "7. Write all content in Brazilian Portuguese."
+        "7. Write all content in Brazilian Portuguese, except quotes: a quote keeps the words said, in the language they were said in."
     )
     CURATE_REPAIR_TASK = (
         "The edits in `<failed_edits>` of your previous answer did not apply. `<document>` is the text as it stands now, "
@@ -722,6 +747,8 @@ class Minutes:
     LLM content that is in Portuguese (one of the Portuguese exceptions in AGENTS.md, English only)."""
 
     TITLE = "# Ata: {title}"
+    LANGUAGE_NAMES = {"en": "inglês"}   # the line naming a transcript's language; another code: the code itself, pt: no line
+    LANGUAGE = "🗣️ **Idioma:** {name}"
     DEGRADED = ("> ⚠️ **Transcrição degradada:** {loop:.0%} dos trechos são uma mesma frase repetida pelo reconhecimento de voz{gaps}. "
                 "Esta ata pode estar incompleta: ouça o áudio desses trechos antes de usá-la.")
     DEGRADED_GAPS = ", e não há texto em {ranges}"

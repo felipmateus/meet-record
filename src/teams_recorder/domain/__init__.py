@@ -51,6 +51,7 @@ from .activities import (
     RemovedItem, TaggedBlock, apply_ops, body_span, body_text, box_focus, box_stamp, calendar_strip, open_count, render_box, render_links, rescue_box_lines,
     replace_tag, section_counts, tagged_blocks, ticked_count, unified_diff, working_days_ago,
 )
+from .language import LanguageDetection, LanguageReason, LanguageRules, LanguageSample, choose_language, counted_tally, sample_offsets
 from .excerpts import clock_seconds, excerpt_window
 from .health import loop_flags, rate_mismatch, transcript_health
 from .speakers import (
