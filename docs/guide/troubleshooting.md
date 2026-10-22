@@ -40,6 +40,9 @@ Run `scripts/download-model.sh` or `brew install whisper-cpp`. `trec doctor` lis
 **A meeting's minutes say "Transcrição degradada", or `trec status` marks a degraded transcript.**
 whisper repeated one line for part of the meeting, and the retry with VAD did not repair it. The ranges listed have no text, so the minutes miss what was said there. Check that `trec doctor` shows the retry as on (it needs the VAD model: `scripts/download-model.sh silero-v5.1.2`). While `audio.m4a` still exists, `trec transcribe <id>` and then `trec analyze <id>` redo the transcript, the analysis and the minutes (they replace the previous files).
 
+**A meeting held in English came out as Portuguese text that was never said, or a Portuguese one came out in English.**
+The `Language:` line of `trec transcribe <id>` gives the outcome and `language_detection` in `data/recordings/<id>/transcript.json` lists what each sample heard. A fallback to `pt` ("no majority", "only one counted sample", "no sample heard pt or en clearly") means the samples did not agree, which happens with bad or mostly silent audio; "language detection failed" means whisper could not identify any sample, and the warning above the line (or in `data/log/daemon.log`) says why. Setting `[transcription] language = "en"` (or `"pt"`) fixes the language for every meeting. While `audio.m4a` still exists, `trec transcribe <id>` and then `trec analyze <id>` redo the transcript, the analysis and the minutes (they replace the previous files).
+
 **Analysis fails with an authentication error.**
 With `api`, check that `.env` has `ANTHROPIC_API_KEY` and permission 600. With `claude-code`, run `claude` once in a terminal and log in. The daemon needs a logged-in session too.
 

@@ -4,7 +4,7 @@
 
 ## 1. System overview
 
-teams-recorder is a personal macOS (and, untested so far, Windows) utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in Portuguese, extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and keeps one activities document that an agent updates after each meeting (it replaced a daily activity plan on 2026-10-20). User stories for a backlog are drafted on demand from the items the user tags in that document.
+teams-recorder is a personal macOS (and, untested so far, Windows) utility that automatically records a single user's Microsoft Teams meetings, transcribes the audio locally in the language of each meeting (Portuguese or English, detected per meeting), extracts a structured record from the transcript (summary, decisions, actions, deadlines, open questions) using a language model and keeps one activities document that an agent updates after each meeting (it replaced a daily activity plan on 2026-10-20). User stories for a backlog are drafted on demand from the items the user tags in that document.
 
 It runs in the background with no graphical interface: a daemon watches Teams and starts recording when a call begins; when the call ends, it processes everything on its own and reports through macOS notifications. A command line (`trec`) lets the user operate and inspect each step manually. Audio and transcripts never leave the Mac; only the transcript text is sent to the language model, through the API or through the locally installed Claude Code.
 
@@ -62,7 +62,7 @@ Two permissions are required and requested on the first recording: **Microphone*
 - macOS notifications: "Recording started", "Recording stopped", "Recording cancelled", "Transcription failed" / "Analysis failed", "Activities updated" / "Activity curation failed", "User story drafts failed", "User stories published" / "Publishing user stories failed".
 
 ### Language
-Analysis and activities-document content (summaries, actions, progress statements, the activities document, the story drafts) is produced in Brazilian Portuguese because the meetings are in Portuguese; CLI messages and notifications are also in Portuguese, and this document quotes them verbatim with an English gloss.
+Analysis and activities-document content (summaries, actions, progress statements, the activities document, the story drafts) is produced in Brazilian Portuguese (meetings are mostly in Portuguese, sometimes in English); literal quotes keep the language said; CLI messages and notifications are also in Portuguese, and this document quotes them verbatim with an English gloss.
 
 ### Cost and privacy
 - Transcription is 100 % local (whisper.cpp). Model `large-v3-turbo-q5_0`, 574 MB.

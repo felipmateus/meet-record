@@ -19,7 +19,7 @@ Note: `audio.m4a` may have been deleted by retention without changing `transcrib
 | `audio.m4a` | after `stop` | mono AAC 48 kHz mix |
 | `speakers.jsonl` | during recording (macOS, observer wired) | who spoke when, names seen, meeting subject; not part of the status |
 | `energy.json` | after `stop` | level of each raw track per 100 ms; not part of the status |
-| `transcript.json`, `transcript.txt` | after `transcribe` | segments (with `speaker` when known) / timestamped text, plus the labelling summary |
+| `transcript.json`, `transcript.txt` | after `transcribe` | segments (with `speaker` when known) / timestamped text, plus the language it was made in, how that language was chosen (`language_detection`, when detected) and the labelling summary |
 | `analysis.json` | after `analyze` | structured record |
 | `error.txt` | after a failure | `step: message` |
 | `curation_error.txt` | when the activities curator could not take this meeting | `Activity curation failed: <reason>`; cleared by a later successful pass; not part of the status (a meeting with only this file is still `analyzed`) |
@@ -70,6 +70,17 @@ The analysis gives every action a kind (older analyses have none); nothing route
 | `undo` | a restore made by `trec activities undo` (`undoes` names the pass it undid) |
 | `skipped_empty` | the batch had nothing to curate: no call, document unchanged |
 | `failed` | the pass failed: document unchanged (`error` holds the reason) |
+
+## Language detection reason (`LanguageReason`, in `transcript.json` › `language_detection`)
+| Value | Meaning | `Language:` line of `trec transcribe` |
+|---|---|---|
+| `majority` | more than half of the counted samples heard the language, and at least 2 of them (1 when the meeting has a single sample) | `en (heard in 12 of 12 counted samples; 12 taken)` |
+| `no-usable-sample` | no sample heard an allowed language with p ≥ 0.5; the fallback (the first allowed language) is used | `pt (fallback: no sample heard pt or en clearly; N taken)` |
+| `too-few-votes` | one sample counted in a meeting with more than one sample; fallback | `pt (fallback: only one counted sample (en); 2 needed; N taken)` |
+| `no-majority` | no language had more than half of the counted samples; fallback | `pt (fallback: no majority among N counted samples: pt 2, en 2)` |
+| `detection-failed` | the detector could not run, or whisper printed no answer; fallback, `samples` empty | `pt (fallback: language detection failed; see the warning above)` |
+
+A fixed `[transcription] language` stores no detection and prints `Language: pt (fixed by [transcription] language)`.
 
 ## Meeting type (`MeetingType`, in `analysis.json`)
 | Value | Meaning | Minutes label |

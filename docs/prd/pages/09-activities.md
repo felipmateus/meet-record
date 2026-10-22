@@ -11,7 +11,7 @@ It replaced the daily plan, which had no section for an open action that was nei
 The curator's inputs are the document, the new analyses, transcript excerpts, a calendar and the user's edits. It never read the old plans or `open_actions.json`, which stay on disk unread.
 
 ## The document (`atividades.md`)
-Content is Brazilian Portuguese, written by the model; markers and headings are the labels in `messages.ActivityDoc`.
+Content is Brazilian Portuguese, written by the model, except a literal quote (💬), which keeps the words said in the language they were said in (a meeting held in English is quoted in English); markers and headings are the labels in `messages.ActivityDoc`.
 
 | Block | Content |
 |---|---|

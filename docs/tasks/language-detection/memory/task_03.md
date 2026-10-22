@@ -1,0 +1,6 @@
+# task_03 memory
+
+- Status: implemented and verified (pytest 1283 passed / 10 skipped; mypy clean; tests/unit/test_pipeline.py unchanged and green).
+- Files: `application/use_cases/processing.py` (`TranscribeMeeting.language_detector/languages/language_rules` appended after `user_name` so positional callers keep working; `_language`; `_transcribe` and `_checked` take `language`, `_checked` sets `transcript.language`; `execute` sets `transcript.language_detection` before `_label`), `container.py` (`Container.language_detector`, `build_language_detector`, `transcribe_meeting()` wiring), `messages.py` (`Log.LANGUAGE_DETECTED/FALLBACK/DETECTION_FAILED`); tests `tests/unit/test_processing_use_cases.py` (UT-030..UT-039 plus fallback reasons), `tests/unit/test_container_platforms.py` (UT-039/040/044), `tests/integration/test_language_whispercpp.py` (IT-002 use-case half).
+- Decisions: `sample_offsets` runs inside the try around `detect`; `choose_language` runs outside it (pure). A detector failure logs the warning once and returns `LanguageDetection(self.language, DETECTION_FAILED)` with empty samples; no notification.
+- Not done (later tasks): CLI lines (task 5), prompts/analyzer header (task 4), docs (task 6).
