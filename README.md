@@ -4,7 +4,7 @@ Records your Microsoft Teams calls, transcribes them on your Mac and keeps one u
 
 A background daemon notices when a call starts, records Teams audio and your microphone, transcribes locally with whisper.cpp, and asks Claude for the decisions, actions and deadlines. After each meeting an agent updates a single document, `data/activities/atividades.md`, with everything still open for you. Tag an item `#história` and `trec stories` drafts a user story from it.
 
-Built for one person in several meetings a day. Meetings are in Brazilian Portuguese, so the minutes, the activities document and the stories are in Portuguese. Code, CLI and docs are in English. Runs on macOS; the Windows port is built but has not run on real hardware yet.
+Built for one person in several meetings a day. Meetings are mostly in Brazilian Portuguese and sometimes in English: each meeting's language is detected before it is transcribed, and the minutes, the activities document and the stories are always in Portuguese (a literal quote keeps the language it was said in). Code, CLI and docs are in English. Runs on macOS; the Windows port is built but has not run on real hardware yet.
 
 ## How it works
 

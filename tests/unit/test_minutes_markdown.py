@@ -94,3 +94,32 @@ def test_a_track_recorded_at_the_wrong_rate_puts_its_own_banner_under_the_title(
     both = MarkdownMinutesRenderer().render(_meeting(), _analysis(), TranscriptHealth(0.3, 5, 12, True, rate_mismatch=True, short_padding_share=0.5))
     assert both.index("Transcrição degradada") < both.index("taxa errada") < both.index(Minutes.NOT_VERIFIED)
     assert both.count(Minutes.NOT_VERIFIED) == 1
+
+
+# --- the language line (docs/tasks/language-detection/_tests.md UT-070 to UT-072) ---
+
+def test_ut070_an_english_transcript_puts_its_language_on_the_line_after_the_date():
+    lines = MarkdownMinutesRenderer("Felipe").render(_meeting(), _analysis(), language="en").splitlines()
+    date = next(i for i, line in enumerate(lines) if line.startswith("📅 **Data:**"))
+    assert lines[date + 1] == "🗣️ **Idioma:** inglês"
+    assert lines[date + 2].startswith("👥 **Participantes:**")
+
+
+def test_ut071_portuguese_and_no_language_render_the_minutes_as_before():
+    plain = MarkdownMinutesRenderer("Felipe").render(_meeting(), _analysis())
+    assert "Idioma" not in plain
+    assert MarkdownMinutesRenderer("Felipe").render(_meeting(), _analysis(), language="pt") == plain
+    assert MarkdownMinutesRenderer("Felipe").render(_meeting(), _analysis(), language=None) == plain
+
+
+def test_ut072_another_language_is_shown_as_its_code():
+    assert "🗣️ **Idioma:** es\n" in MarkdownMinutesRenderer().render(_meeting(), _analysis(), language="es")
+
+
+def test_the_language_line_comes_after_the_banners_and_only_adds_that_line():
+    from teams_recorder.domain import TranscriptHealth
+    health = TranscriptHealth(0.668, 28, 86, True, ((0, 14),))
+    plain = MarkdownMinutesRenderer().render(_meeting(), _analysis(), health).splitlines()
+    english = MarkdownMinutesRenderer().render(_meeting(), _analysis(), health, language="en").splitlines()
+    english.remove("🗣️ **Idioma:** inglês")
+    assert english == plain

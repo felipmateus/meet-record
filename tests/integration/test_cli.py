@@ -575,7 +575,7 @@ def test_status_puts_the_speakers_segment_before_the_health_markers(tmp_path: Pa
     assert "[transcribed] → next: analyze  · speakers 50%" + Cli.MEETING_DEGRADED.format(loop=0.668) in result.output
 
 
-def test_transcribe_prints_the_speakers_line_after_the_health_line(tmp_path: Path, monkeypatch):
+def test_transcribe_prints_the_speakers_line_after_the_language_line(tmp_path: Path, monkeypatch):
     from teams_recorder.domain import Segment, Transcript
     from tests.fakes import FakeTranscriber
     project = _project(tmp_path, monkeypatch)
@@ -589,8 +589,9 @@ def test_transcribe_prints_the_speakers_line_after_the_health_line(tmp_path: Pat
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     health = next(i for i, line in enumerate(lines) if line.startswith("  Health:"))
-    assert lines[health + 1] == "  Speakers: no labels (no observer data for this meeting)"   # no speakers.jsonl in this meeting
-    assert lines[health + 2].startswith("  Text: ")
+    assert lines[health + 1].startswith("  Language: ")   # the language line sits between the health block and the speakers line
+    assert lines[health + 2] == "  Speakers: no labels (no observer data for this meeting)"   # no speakers.jsonl in this meeting
+    assert lines[health + 3].startswith("  Text: ")
 
 
 def test_start_prints_the_observer_line(tmp_path: Path, monkeypatch):
@@ -625,3 +626,82 @@ def test_start_prints_the_observer_line(tmp_path: Path, monkeypatch):
     result = runner.invoke(app, ["start", "--pid", "1"])
     assert result.exit_code == 0 and "Speakers:" not in result.output
     runner.invoke(app, ["cancel"])
+
+
+# --- language detection (docs/tasks/language-detection/_tests.md E2E-001, E2E-002) ---------------------------------------------
+def _recorded_at(repo: FsMeetingRepository, when: datetime, minutes: float | None = None) -> Meeting:
+    from datetime import timedelta
+    m = Meeting.start(when)
+    if minutes is not None:
+        m.ended_at = m.started_at + timedelta(minutes=minutes)
+    repo.create(m)
+    return m
+
+
+def test_e2e001_an_english_meeting_is_transcribed_in_english_and_marked_in_status(tmp_path: Path, monkeypatch):
+    import json
+    import shutil
+    import subprocess
+
+    import pytest
+    from tests.integration.test_transcriber_whispercpp import ScriptedLanguageDetector, ScriptedTranscriber
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    project = _project(tmp_path, monkeypatch)
+    (project / "config.toml").write_text('[transcription]\nlanguage = "auto"\n')
+    repo = FsMeetingRepository(project / "data")
+    m = _recorded_at(repo, datetime(2026, 10, 23, 14, 0, 5), minutes=3)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=180", "-c:a", "aac",
+                    str(repo.path(m.id, AUDIO))], check=True)
+    model, detect_log, transcribe_log = project / "ggml-fake.bin", project / "detect.log", project / "transcribe.log"
+    model.write_bytes(b"\x00" * 16)
+    detector = ScriptedLanguageDetector(model, script=("--langs", "en:0.99,en:0.98,en:0.97", "--log", str(detect_log)))
+    transcriber = ScriptedTranscriber(model, script=("--log", str(transcribe_log)))
+    _with_container(monkeypatch, transcriber=transcriber, retry_transcriber=None, language_detector=detector)
+
+    transcribed = runner.invoke(app, ["transcribe", m.id])
+
+    assert transcribed.exit_code == 0, transcribed.output
+    assert "  Language: en (heard in 3 of 3 counted samples; 3 taken)\n" in transcribed.output
+    stored = json.loads(repo.path(m.id, "transcript.json").read_text(encoding="utf-8"))
+    assert stored["language"] == "en" and stored["language_detection"]["reason"] == "majority"
+    assert len(detect_log.read_text(encoding="utf-8").splitlines()) == 1   # one detection call: the scripted detector ran
+    (call,) = [json.loads(line) for line in transcribe_log.read_text(encoding="utf-8").splitlines()]
+    assert call[call.index("-l") + 1] == "en"   # whisper was asked for English
+
+    status = runner.invoke(app, ["status"])
+
+    assert status.exit_code == 0, status.output
+    line = next(line for line in status.output.splitlines() if line.startswith(f"  {m.id}"))
+    assert line.endswith("  · en")
+
+
+def _with_container(monkeypatch, **fields):
+    from dataclasses import replace
+    from teams_recorder.adapters.inbound import cli
+    build = cli.build_container
+    monkeypatch.setattr(cli, "build_container", lambda settings, **kw: replace(build(settings, **kw), **fields))
+
+
+def test_e2e002_each_meeting_gets_its_own_language_line_in_place_with_one_of_them_degraded(tmp_path: Path, monkeypatch):
+    from tests.fakes import FakeLanguageDetector, FakeTranscriber, looped_transcript, speech_transcript
+    project = _project(tmp_path, monkeypatch)
+    (project / "config.toml").write_text('[transcription]\nlanguage = "auto"\nretry_on_loop = false\n')
+    repo = FsMeetingRepository(project / "data")
+    a, b = _recorded_at(repo, datetime(2026, 10, 23, 9, 0, 0), minutes=20), _recorded_at(repo, datetime(2026, 10, 23, 10, 0, 0), minutes=20)
+    for m in (a, b):
+        repo.path(m.id, AUDIO).write_bytes(b"\x00")
+    detector = FakeLanguageDetector({repo.path(a.id, AUDIO): ["en"] * 3, repo.path(b.id, AUDIO): ["pt"] * 3})
+    transcriber = FakeTranscriber(speech_transcript(minutes=20), by_audio={repo.path(b.id, AUDIO): looped_transcript(minutes=20, loop_minutes=15)})
+    _with_container(monkeypatch, transcriber=transcriber, retry_transcriber=None, language_detector=detector)
+
+    result = runner.invoke(app, ["transcribe"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("  Language:") == 2
+    block_a, block_b = (result.output.split(f"Transcribing {m.id}")[1].split("Transcribing")[0].splitlines() for m in (a, b))
+    labels = lambda block: [line.split(":")[0].strip() for line in block if line.startswith("  ")]   # noqa: E731 - the indented lines of one meeting
+    assert labels(block_a) == ["Health", "Language", "Speakers", "Text"]
+    assert labels(block_b) == ["Health", "WARNING", "Language", "Speakers", "Text"]   # in place: after the degraded warning, before Speakers and Text
+    assert block_a[2].startswith("  Language: en (") and block_b[3].startswith("  Language: pt (")
+    assert repo.load_transcript(a.id).language == "en" and repo.load_transcript(b.id).language == "pt"

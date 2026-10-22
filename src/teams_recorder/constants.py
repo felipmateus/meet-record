@@ -201,6 +201,7 @@ class Audio:
     DEFAULT_WHISPER_THREADS = 0     # 0 = let whisper-cli decide
     DEFAULT_VAD_MODEL = "silero-v5.1.2"
     VAD_ARGS = ["-vt", "0.5", "-vsd", "300", "-vp", "150"]
+    MIN_LANGUAGE_CLIP_SECONDS = 1.0  # a language sample holding less audio than this (an offset past a truncated end) is not sent to whisper
     MIX_TIMEOUT_FACTOR = 2.0        # mixing may take up to 2x the meeting length (never less than Proc.FFMPEG_TIMEOUT)
     PARTIAL_INFIX = ".partial"      # mixing writes audio.partial.m4a and renames it only on success
     BIT_DEPTHS = (16, 32)           # raw WAV sample format: 16-bit integer or 32-bit float
@@ -226,8 +227,9 @@ class VerdictSupport(StrEnum):
 
 class Verify:
     """Claim verification (docs/tasks/prd-fidelity-guard, tasks 3.0 and 7.0). The patterns are data about meetings held in
-    Brazilian Portuguese, matched against normalized text (lower case, no accents); taken from the prototype
-    in scripts/fidelity_eval.py (SENSITIVE, the participant check), measured in evaluation §14.3."""
+    Brazilian Portuguese (SENSITIVE) or in Portuguese and English (ADDRESS), matched against normalized text (lower
+    case, no accents); taken from the prototype in scripts/fidelity_eval.py (SENSITIVE, the participant check),
+    measured in evaluation §14.3."""
 
     ENABLED = True                   # [verification] enabled: one extra call per analyzed meeting (PRD decision 11)
     DEFAULT_API_MODEL = "claude-sonnet-5-5"   # [verification] model, with provider = "api"
@@ -242,7 +244,7 @@ class Verify:
     )
     NAME_PARTICLES = ("da", "de", "do", "das", "dos", "dr", "dra", "e")   # not names: "Paula de Souza"
     ADDRESS = (   # someone addressed by name; {name} is a normalized, escaped name token
-        r"\b(bom dia|boa tarde|boa noite|obrigad[oa]|oi|ola),? (o |a )?{name}\b",
+        r"\b(bom dia|boa tarde|boa noite|obrigad[oa]|oi|ola|hi|hello|hey|thanks|thank you),? (o |a )?{name}\b",
         r"\b{name},",
     )
 
@@ -259,6 +261,9 @@ class Transcription:
     RETRY_ON_LOOP = True            # transcribe a degraded transcript once more with the anti-loop settings
     RETRY_VAD = True                # with Silero VAD on that retry (skips silence, where whisper hallucinates)
     RANGES_IN_NOTIFICATION = 3      # time ranges without text listed in a notification or a CLI line
+    AUTO = "auto"                   # [transcription] language: detect each meeting's language (docs/tasks/language-detection)
+    LANGUAGES = ("pt", "en")        # [transcription] languages: the languages detection may choose, the fallback first
+    LANGUAGE_CODE = r"^[a-z]{2,3}$"  # what a fixed language, or an entry of `languages`, must look like
 
 
 # --- output formats of external tools (parsing) -------------------------------------
@@ -285,6 +290,8 @@ class Parse:
     BACKLOG_UNSAFE = (r"^auto_commit:\s*true", r"^remote_operations:\s*true")
     DIALOG_BUTTON = "button returned:"   # osascript output: "button returned:Keep, gave up:false"
     DIALOG_GAVE_UP = "gave up:true"
+    WHISPER_PROCESSING = r"processing '(?:.*[\\/])?(c\d+\.wav)' \("    # whisper-cli -dl opens a file: `main: processing '<path>' (`; group 1 is its basename
+    WHISPER_LANGUAGE = r"auto-detected language: ([a-z]+) \(p = ([0-9.]+)\)"   # and answers it: `auto-detected language: en (p = 0.99)`
     ACTIVITY_OPEN = r"^\s*[-*+] \[ \] "            # an open checkbox line of the activities document
     ACTIVITY_TICKED = r"^\s*[-*+] \[[xX]\] "       # a ticked one
     ACTIVITY_LABEL = r"\]\[([^\]\s]+)\]"            # the label of a reference link: `[text][label]`
@@ -356,6 +363,7 @@ class Proc:
     MIC_STARTUP_GRACE = 1.5
     FFMPEG_TIMEOUT = 600.0          # mixing / probing one meeting
     WHISPER_TIMEOUT = 3 * 3600.0
+    LANGUAGE_DETECT_TIMEOUT = 300.0  # cutting the language samples and one whisper-cli -dl call over all of them
     IO_RETRIES = 12                 # file reads/writes blocked transiently by TCC
     IO_RETRY_DELAY = 0.5
     SPAWN_RETRIES = 12

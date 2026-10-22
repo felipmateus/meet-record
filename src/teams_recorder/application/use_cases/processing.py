@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from teams_recorder.application.ports import Clock, MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber
+from teams_recorder.application.ports import (
+    Clock, LanguageDetector, MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber,
+)
 from teams_recorder.application.use_cases.verification import VerifyAnalysis
 from teams_recorder.constants import Audio, Speakers, Transcription
 from teams_recorder.domain import (
-    Analysis, CaptureStats, RepositoryError, SpeakerReason, Transcript, TranscriptHealth, TranscriptionError, label_segments, rate_mismatch,
-    transcript_health, user_label,
+    Analysis, CaptureStats, LanguageDetection, LanguageReason, LanguageRules, RepositoryError, SpeakerReason, Transcript, TranscriptHealth,
+    TranscriptionError, choose_language, label_segments, rate_mismatch, sample_offsets, transcript_health, user_label,
 )
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Log, Minutes, Notify
@@ -40,6 +43,12 @@ class TranscribeMeeting:
     health and the user is notified, instead of the minutes silently resting on hallucinations. The
     counters are read before transcribing, and such a track gets no retry: VAD cannot repair it.
 
+    Before transcribing, the language is chosen when a `language_detector` is given ([transcription] language = "auto"): it
+    samples the audio at regular offsets, `domain/language.choose_language` votes among `languages`, and the first pass and the
+    retry both run in the winner. A meeting whose language cannot be decided, or whose detection fails for any reason, is
+    transcribed in `language` (the fallback) and the record says why; detection never fails the transcription. The record is
+    saved with the transcript. Without a detector, `language` is the fixed code and nothing is detected.
+
     Last, the segments are labelled with who said them (domain/speakers.py), from the observer's events and the
     tracks' energy the recording left in the folder. The labels are advisory: a failure to compute them saves the
     transcript as whisper made it. A meeting whose observer was wired but left no label, for a reason the user can
@@ -48,7 +57,7 @@ class TranscribeMeeting:
 
     repo: MeetingRepository
     transcriber: Transcriber
-    language: str = Audio.DEFAULT_LANGUAGE
+    language: str = Audio.DEFAULT_LANGUAGE   # whisper's language without a detector, the fallback with one: always a code, never "auto" (see __post_init__)
     max_loop_share: float = Transcription.MAX_LOOP_SHARE
     retry: Transcriber | None = None   # None: no second pass ([transcription] retry_on_loop off, or it would repeat the first)
     notifier: Notifier | None = None
@@ -56,6 +65,14 @@ class TranscribeMeeting:
     rate_check_min_seconds: float = Audio.RATE_CHECK_MIN_SECONDS
     clock: Clock | None = None   # the day of the daily notice (clock.now().date() at transcription); None: no notice
     user_name: str = ""          # [user] name: the label of the user's own lines when set
+    language_detector: LanguageDetector | None = None   # None: [transcription] language is a code, nothing is detected
+    languages: tuple[str, ...] = Transcription.LANGUAGES   # the languages detection may choose (the vote's allow-list); `language` is the fallback
+    language_rules: LanguageRules = LanguageRules()
+
+    def __post_init__(self) -> None:
+        """Whisper must never get `-l auto`: until a detector decides, the language is a code (the container passes the fallback)."""
+        if re.fullmatch(Transcription.LANGUAGE_CODE, self.language) is None:
+            raise ValueError(Err.NOT_A_LANGUAGE_CODE.format(value=self.language))
 
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
@@ -63,9 +80,13 @@ class TranscribeMeeting:
         duration = self.repo.load_meta(meeting_id).duration_seconds
         with self.repo.lock(meeting_id):
             mismatch = self._rate_mismatch(meeting_id)
-            transcript = self._transcribe(meeting_id, self.repo.path(meeting_id, AUDIO), duration, allow_retry=mismatch is None)
+            audio = self.repo.path(meeting_id, AUDIO)
+            detection = self._language(meeting_id, audio, duration)
+            language = self.language if detection is None else detection.language
+            transcript = self._transcribe(meeting_id, audio, duration, language, allow_retry=mismatch is None)
             if transcript.health is not None and mismatch is not None:
                 transcript.health = replace(transcript.health, rate_mismatch=True, short_padding_share=mismatch.short_padding_share)
+            transcript.language_detection = detection
             transcript = self._label(meeting_id, transcript, duration)
             self.repo.save_transcript(meeting_id, transcript)
         self._notify_no_labels(meeting_id, transcript)
@@ -77,6 +98,23 @@ class TranscribeMeeting:
         if health is not None and health.rate_mismatch and self.notifier is not None:
             self.notifier.notify(Notify.RATE_MISMATCH, Notify.RATE_MISMATCH_BODY.format(meeting_id=meeting_id, share=health.short_padding_share))
         return transcript
+
+    def _language(self, meeting_id: str, audio: Path, duration: float | None) -> LanguageDetection | None:
+        """How the meeting's language was chosen; None without a detector (the language is the fixed code). Advisory: any failure
+        of the detector gives `self.language` with the reason DETECTION_FAILED, never an error, a notification or an `error.txt`."""
+        if self.language_detector is None:
+            return None
+        try:
+            samples = self.language_detector.detect(audio, sample_offsets(duration, self.language_rules), self.language_rules.window_seconds)
+        except Exception as exc:  # noqa: BLE001 - detection is advisory: a missing tool, a timeout, a changed output format or a bug all mean the fallback
+            log.warning(Log.LANGUAGE_DETECTION_FAILED, meeting_id, self.language, exc)
+            return LanguageDetection(self.language, LanguageReason.DETECTION_FAILED)
+        detection = choose_language(samples, self.languages, self.language, self.language_rules)
+        if detection.detected:
+            log.info(Log.LANGUAGE_DETECTED, meeting_id, detection.language, detection.votes, detection.counted, len(detection.samples))
+        else:
+            log.info(Log.LANGUAGE_FALLBACK, meeting_id, detection.language, detection.reason.value, detection.counted, len(detection.samples))
+        return detection
 
     def _label(self, meeting_id: str, transcript: Transcript, duration: float | None) -> Transcript:
         """The transcript with its speaker labels; the transcript as it is when they cannot be computed."""
@@ -132,14 +170,15 @@ class TranscribeMeeting:
         log.warning(Log.RATE_MISMATCH, meeting_id, 100 * stats.short_padding_share, stats.short_padded_seconds, stats.written_seconds, rates)
         return stats
 
-    def _checked(self, transcriber: Transcriber, audio: Path, duration: float | None) -> tuple[Transcript, TranscriptHealth]:
-        transcript = transcriber.transcribe(audio, self.language)
+    def _checked(self, transcriber: Transcriber, audio: Path, duration: float | None, language: str) -> tuple[Transcript, TranscriptHealth]:
+        transcript = transcriber.transcribe(audio, language)
+        transcript.language = language   # whisper's own `language` only echoes the code it was forced to
         health = transcript.health = transcript_health(transcript, self.max_loop_share, duration)
         return transcript, health
 
-    def _transcribe(self, meeting_id: str, audio: Path, duration: float | None, allow_retry: bool) -> Transcript:
-        """`allow_retry=False` when the audio itself is known to be broken: a second pass cannot repair it."""
-        first, health = self._checked(self.transcriber, audio, duration)
+    def _transcribe(self, meeting_id: str, audio: Path, duration: float | None, language: str, allow_retry: bool) -> Transcript:
+        """`allow_retry=False` when the audio itself is known to be broken: a second pass cannot repair it. Both passes use `language`."""
+        first, health = self._checked(self.transcriber, audio, duration, language)
         if not health.degraded:
             return first
         log.warning(Log.TRANSCRIPT_DEGRADED, meeting_id, 100 * health.loop_share, health.covered_minutes, health.total_minutes)
@@ -150,7 +189,7 @@ class TranscribeMeeting:
             return first
         log.info(Log.TRANSCRIPT_RETRY, meeting_id)
         try:
-            second, retried = self._checked(self.retry, audio, duration)
+            second, retried = self._checked(self.retry, audio, duration, language)
         except Exception as exc:  # noqa: BLE001 - any failure: the first pass is degraded but still the best there is
             log.exception(Log.TRANSCRIPT_RETRY_FAILED, meeting_id, exc)
             return first
@@ -182,7 +221,7 @@ class AnalyzeMeeting:
                 meeting.title = analysis.title  # automatic recordings get a readable name
                 self.repo.save_meta(meeting)
             if self.minutes is not None:
-                self.repo.save_minutes(meeting_id, self.minutes.render(meeting, analysis, transcript.health))
+                self.repo.save_minutes(meeting_id, self.minutes.render(meeting, analysis, transcript.health, language=transcript.language))
         return analysis
 
 
@@ -196,7 +235,7 @@ class RenderMinutes:
     def execute(self, meeting_id: str) -> str:
         meeting = self.repo.load_meta(meeting_id)
         analysis = self.repo.load_analysis(meeting_id)
-        health = self.repo.load_transcript(meeting_id).health if TRANSCRIPT_JSON in self.repo.files(meeting_id) else None
-        markdown = self.minutes.render(meeting, analysis, health)
+        transcript = self.repo.load_transcript(meeting_id) if TRANSCRIPT_JSON in self.repo.files(meeting_id) else None
+        markdown = self.minutes.render(meeting, analysis, transcript.health if transcript else None, language=transcript.language if transcript else None)
         self.repo.save_minutes(meeting_id, markdown)
         return markdown

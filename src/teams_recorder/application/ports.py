@@ -5,6 +5,7 @@ including the fakes used in tests.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -13,8 +14,8 @@ from pathlib import Path
 from typing import NamedTuple, Protocol, runtime_checkable
 
 from teams_recorder.domain import (
-    Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, EnergyTimeline, Meeting, Op, OpFailure, PassRecord,
-    SpeakerLog, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
+    Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, EnergyTimeline, LanguageSample, Meeting, Op, OpFailure,
+    PassRecord, SpeakerLog, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
 )
 
 
@@ -101,6 +102,14 @@ class Transcriber(Protocol):
     def transcribe(self, audio: Path, language: str) -> Transcript: ...
 
 
+@runtime_checkable
+class LanguageDetector(Protocol):
+    def detect(self, audio: Path, offsets: Sequence[float], window_seconds: float) -> list[LanguageSample]:
+        """One sample per offset, in order. A sample whisper gave no answer for has language None.
+        Raises TranscriptionError when the detection could not run at all."""
+        ...
+
+
 class AnalysisContext(Protocol):
     meeting: Meeting
 
@@ -120,8 +129,9 @@ class ClaimVerifier(Protocol):
 
 @runtime_checkable
 class MinutesRenderer(Protocol):
-    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
-        """minutes.md; `health` is the transcript's, so a degraded transcript gets a warning banner."""
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None, *, language: str | None = None) -> str:
+        """minutes.md; `health` is the transcript's, so a degraded transcript gets a warning banner. `language` is the transcript's:
+        a language other than Portuguese gets a line after the date line; None (no transcript) and Portuguese get none."""
         ...
 
 

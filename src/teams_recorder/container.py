@@ -18,6 +18,7 @@ from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetect
 from teams_recorder.adapters.outbound.disk_space import DataDirDiskSpace
 from teams_recorder.adapters.outbound.energy_ffmpeg import FfmpegEnergyMeter
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
+from teams_recorder.adapters.outbound.language_whispercpp import WhisperCppLanguageDetector
 from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
 from teams_recorder.adapters.outbound.minutes_markdown import MarkdownMinutesRenderer
 from teams_recorder.adapters.outbound.llm_transport import ApiTransport, ClaudeCodeTransport, StructuredTransport
@@ -41,6 +42,7 @@ from teams_recorder.application.ports import (
     Clock,
     DiskSpace,
     EnergyMeter,
+    LanguageDetector,
     MeetingAnalyzer,
     MeetingRepository,
     MicCapture,
@@ -115,6 +117,7 @@ class Container:
     verifier: ClaimVerifier | None = None   # checks each analysis's claims against the transcript; None: [verification] off (code checks only)
     speakers: SpeakerObserver | None = None   # reads who speaks from the Teams window; None: Windows, or [speakers] enabled = false
     energy: EnergyMeter | None = None   # level of each raw track per 100 ms, for the user's own lines
+    language_detector: LanguageDetector | None = None   # decides each meeting's language; None: [transcription] language is a code ("detector" is the Teams call detector)
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
@@ -127,8 +130,10 @@ class Container:
         return CancelRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.speakers)
 
     def transcribe_meeting(self) -> TranscribeMeeting:
-        return TranscribeMeeting(self.repo, self.transcriber, self.settings.language, self.settings.max_loop_share,
-                                 self.retry_transcriber, self.notifier, clock=self.clock, user_name=self.settings.user_name)
+        # `language` is the fallback, never settings.language: in detection mode that is "auto", and whisper must never get it
+        return TranscribeMeeting(self.repo, self.transcriber, self.settings.fallback_language, self.settings.max_loop_share,
+                                 self.retry_transcriber, self.notifier, clock=self.clock, user_name=self.settings.user_name,
+                                 language_detector=self.language_detector, languages=self.settings.languages)
 
     def analyze_meeting(self) -> AnalyzeMeeting:
         # Without a verifier ([verification] off) the two code checks still run: they need no model call (PRD decision 11).
@@ -238,11 +243,23 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         disk=DataDirDiskSpace(settings.data_dir),
         speakers=platform.speakers,
         energy=FfmpegEnergyMeter(ffmpeg=ffmpeg),
+        language_detector=build_language_detector(settings),
     )
 
 
 def _uses_vad(model: Path | None) -> bool:
     return model is not None and model.exists()   # the transcriber leaves VAD out when its model is missing
+
+
+def build_language_detector(settings: Settings) -> WhisperCppLanguageDetector | None:
+    """Decides each meeting's language from samples of its audio, with the transcriber's model, whisper-cli, ffmpeg and threads.
+    None when [transcription] language is a code: nothing is detected."""
+    if not settings.detects_language:
+        return None
+    return WhisperCppLanguageDetector(
+        settings.whisper_model_path, whisper_cli=find_tool(Bin.WHISPER_CLI, settings.project_dir),
+        ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir), threads=settings.whisper_threads,
+    )
 
 
 def build_retry_transcriber(settings: Settings) -> WhisperCppTranscriber | None:

@@ -13,6 +13,7 @@ from teams_recorder.application.use_cases.activities import doc_format
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Files
 from teams_recorder.domain import OpKind, apply_ops, open_count, ticked_count
+from teams_recorder.messages import Prompt
 from tests.fixtures.curator_example import ANSWER, DOCUMENT, example_input
 
 
@@ -138,3 +139,17 @@ def test_the_worked_example_answer_accounts_for_every_ref_and_never_says_usuario
     assert "usuário" not in json.dumps(ANSWER, ensure_ascii=False)
     insert_heads = [op.target for op in out.ops if op.kind is OpKind.INSERT_AFTER and op.target.startswith("## ")]
     assert insert_heads == ["## Minhas ações", "## Aguardando outros", "## Contexto recente"]
+
+
+def test_the_prompt_and_the_task_let_a_quote_keep_the_language_it_was_said_in(prompt: str):
+    """Language detection UT-053 (curator half): the curator gets no header line, so the exception is unconditional."""
+    exception = "in the language they were said in"
+    assert "except quotes" in Prompt.CURATE_TASK and exception in Prompt.CURATE_TASK
+    assert Prompt.CURATE_TASK.splitlines()[-1].startswith("7. Write all content in Brazilian Portuguese, except quotes")
+    lines = prompt.splitlines()
+    assert "usually held in Brazilian Portuguese" in lines[0] and "held in Brazilian Portuguese. You" not in lines[0]
+    sentences = [line for line in lines if re.search(r"(Everything in the document is|all content) in Brazilian Portuguese", line)]
+    assert len(sentences) == 2   # the document rule (line 34) and the checklist (line 281)
+    assert all("except quotes" in line and "language" in line for line in sentences)
+    (format_line,) = [line for line in lines if line.startswith("- A 💬 sub-line")]   # line 43: the 💬 format
+    assert "keeps the language it was said in" in format_line and "<citação literal>" in format_line

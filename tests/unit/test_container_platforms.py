@@ -9,14 +9,19 @@ from teams_recorder.adapters.outbound.confirm_windows import MessageBoxRecording
 from teams_recorder.adapters.outbound.detector_pmset import PmsetCallDetector
 from teams_recorder.adapters.outbound.detector_windows import MicUsageCallDetector
 from teams_recorder.adapters.outbound.energy_ffmpeg import FfmpegEnergyMeter
+from teams_recorder.adapters.outbound.language_whispercpp import WhisperCppLanguageDetector
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
+from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
 from teams_recorder.config import load_settings
 from teams_recorder.constants import Files, Platform, Stories, StoryDestination
-from teams_recorder.container import build_container, build_retry_transcriber, build_story_publishers, teams_speakers_binary, teams_tap_binary
-from teams_recorder.domain.status import TAP_STATS
-from tests.fakes import FakeStoryPublisher
+from teams_recorder.container import (
+    build_container, build_language_detector, build_retry_transcriber, build_story_publishers, teams_speakers_binary, teams_tap_binary,
+)
+from teams_recorder.domain import LanguageReason, Meeting
+from teams_recorder.domain.status import AUDIO, TAP_STATS
+from tests.fakes import FakeLanguageDetector, FakeStoryPublisher, FakeTranscriber, InMemoryMeetingRepository, speech_transcript
 
 
 def test_windows_container(tmp_path: Path):
@@ -250,3 +255,45 @@ def test_ut108_pipeline_takes_the_after_analysis_hook(tmp_path: Path):
     assert c.pipeline(after_analysis=hook).after_analysis is hook
     assert c.pipeline(hook).after_analysis is hook
     assert c.pipeline().after_analysis is None
+
+
+def test_the_container_passes_the_fallback_language_never_auto(tmp_path: Path):
+    s = load_settings(tmp_path)   # the default: language = "auto", languages = ["pt", "en"]
+    assert s.language == "auto" and build_container(s).transcribe_meeting().language == "pt"
+    assert build_container(replace(s, languages=("en", "pt"))).transcribe_meeting().language == "en"
+    assert build_container(replace(s, language="en")).transcribe_meeting().language == "en"
+
+
+def test_ut039_ut040_a_fixed_language_builds_no_detector_and_auto_builds_the_whisper_one(tmp_path: Path):
+    auto = load_settings(tmp_path)   # language = "auto", languages = ["pt", "en"]
+    fixed = build_container(replace(auto, language="pt"))
+    assert fixed.language_detector is None and build_language_detector(replace(auto, language="pt")) is None
+    use = fixed.transcribe_meeting()
+    assert (use.language, use.language_detector) == ("pt", None)
+
+    c = build_container(auto)
+    detector = c.language_detector
+    transcriber = c.transcriber
+    assert isinstance(detector, WhisperCppLanguageDetector) and isinstance(transcriber, WhisperCppTranscriber)
+    assert (detector.model_path, detector.whisper_cli, detector.ffmpeg, detector.threads) == (
+        auto.whisper_model_path, transcriber.whisper_cli, transcriber.ffmpeg, transcriber.threads)
+    use = c.transcribe_meeting()
+    assert (use.language, use.languages, use.language_detector) == ("pt", ("pt", "en"), detector)
+    assert c.detector is not detector and not isinstance(c.detector, WhisperCppLanguageDetector)   # `detector` stays the Teams call detector
+    assert isinstance(build_container(replace(auto, languages=("en", "pt"))).language_detector, WhisperCppLanguageDetector)
+
+
+def test_ut044_a_detector_that_raises_never_makes_whisper_get_auto(tmp_path: Path):
+    c = build_container(load_settings(tmp_path))
+    repo, transcriber = InMemoryMeetingRepository(), FakeTranscriber(speech_transcript(minutes=10))
+    c = replace(c, repo=repo, transcriber=transcriber, retry_transcriber=None,
+                language_detector=FakeLanguageDetector(error=RuntimeError("detector blew up")))
+    meeting = Meeting.start(c.clock.now())
+    repo.seed(meeting, {AUDIO})
+
+    result = c.transcribe_meeting().execute(meeting.id)
+
+    assert [language for _, language in transcriber.calls] == ["pt"]
+    saved = repo.load_transcript(meeting.id)
+    assert saved is result and saved.language == "pt"
+    assert saved.language_detection is not None and saved.language_detection.reason is LanguageReason.DETECTION_FAILED

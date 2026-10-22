@@ -4,12 +4,14 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from datetime import datetime
 
 import pytest
 
+from teams_recorder.adapters.outbound.language_whispercpp import WhisperCppLanguageDetector
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
 from teams_recorder.application.use_cases import TranscribeMeeting
@@ -33,6 +35,20 @@ class ScriptedTranscriber(WhisperCppTranscriber):
 
     def whisper_command(self, wav: Path, language: str, out_prefix: Path) -> list[str]:
         cmd = super().whisper_command(wav, language, out_prefix)
+        cmd[0:1] = [sys.executable, str(FAKE_CLI)]
+        return cmd + self.script
+
+
+class ScriptedLanguageDetector(WhisperCppLanguageDetector):
+    """The real language adapter with fake_whisper_cli.py in place of whisper-cli; `script` are the stand-in's scenario flags
+    (`--langs en:0.99,-`, `--log FILE`) and `fail` adds `--fail`."""
+
+    def __init__(self, model_path: Path, fail: bool = False, script: tuple[str, ...] = (), **kwargs) -> None:
+        super().__init__(model_path, whisper_cli="fake", **kwargs)
+        self.script = [*script, *(["--fail"] if fail else [])]
+
+    def detect_command(self, wavs: Sequence[Path]) -> list[str]:
+        cmd = super().detect_command(wavs)
         cmd[0:1] = [sys.executable, str(FAKE_CLI)]
         return cmd + self.script
 

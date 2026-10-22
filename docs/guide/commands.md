@@ -9,7 +9,7 @@
 | `trec start [--pid N] [--title T]` | Starts a manual recording (Teams must be running, or pass `--pid`); prints a `Speakers:` line when the observer started |
 | `trec stop` | Stops the recording, mixes the tracks and writes `audio.m4a`. Works from any terminal |
 | `trec cancel` | Discards the recording in progress and deletes its files |
-| `trec transcribe [id]` | Transcribes one meeting, or all meetings in state `recorded`, and prints how many lines got a speaker label, or why none did |
+| `trec transcribe [id]` | Transcribes one meeting, or all meetings in state `recorded`, in the language it detects for each (a `Language:` line says which and why, or that `[transcription] language` fixed it), and prints how many lines got a speaker label, or why none did |
 | `trec analyze [id]` | Analyzes one meeting, or all meetings in state `transcribed`, writes `minutes.md`, then updates the activities document for the meetings it analyzed (skipped with `[activities] enabled = false`) |
 | `trec minutes [id] [--all]` | Re-renders `minutes.md` from existing analyses, with no model call |
 | `trec activities [--open]` | Where the activities document stands: path, last update, the focus, counts, the last pass and the meetings not curated yet with their retry command; `--open` also opens the file |

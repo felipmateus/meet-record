@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import tomllib
@@ -74,7 +75,7 @@ class Settings:
     start_after_positive_polls: int
     stop_after_negative_polls: int
     whisper_model: str
-    language: str
+    language: str   # "auto" (detect each meeting's language among `languages`) or a language code
     models_dir: Path
     whisper_threads: int
     vad: bool
@@ -97,6 +98,7 @@ class Settings:
     backlog_project_dir: Path | None = None   # Backlog.md project root ("." = this project)
     backlog_status: str = Stories.BACKLOG_STATUS
     backlog_labels: tuple[str, ...] = Stories.BACKLOG_LABELS
+    languages: tuple[str, ...] = Transcription.LANGUAGES   # [transcription] languages: what detection may choose, the fallback first
     whisper_max_context: int = Transcription.MAX_CONTEXT   # whisper -mc
     max_loop_share: float = Transcription.MAX_LOOP_SHARE
     retry_on_loop: bool = Transcription.RETRY_ON_LOOP
@@ -112,6 +114,15 @@ class Settings:
     activities_effort: Effort = Activities.DEFAULT_EFFORT
     activities_notify: bool = Activities.NOTIFY   # [activities] notify: `Activities updated` when a pass changed something of the user's
     activities_keep_versions: int = Activities.KEEP_VERSIONS   # passes whose version files `trec activities undo` can restore
+
+    @property
+    def detects_language(self) -> bool:
+        return self.language == Transcription.AUTO
+
+    @property
+    def fallback_language(self) -> str:
+        """The language a meeting is transcribed in when none is detected: the first of `languages` when detecting, else `language`."""
+        return self.languages[0] if self.detects_language else self.language
 
     @property
     def raw_bytes_per_hour(self) -> int:
@@ -269,7 +280,8 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         start_after_positive_polls=int(detector.get("start_after_positive_polls", Detector.START_AFTER)),
         stop_after_negative_polls=int(detector.get("stop_after_negative_polls", Detector.STOP_AFTER)),
         whisper_model=str(transcription.get("whisper_model", Audio.DEFAULT_WHISPER_MODEL)),
-        language=str(transcription.get("language", Audio.DEFAULT_LANGUAGE)),
+        language=_parse_language(transcription.get("language", Transcription.AUTO)),
+        languages=_parse_languages(transcription.get("languages", list(Transcription.LANGUAGES))),
         models_dir=Path(transcription["models_dir"]).expanduser() if transcription.get("models_dir") else data_dir / Files.MODELS_DIR,
         whisper_threads=int(transcription.get("threads", Audio.DEFAULT_WHISPER_THREADS)),
         vad=bool(transcription.get("vad", False)),
@@ -308,6 +320,25 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         activities_notify=bool(activities.get("notify", Activities.NOTIFY)),
         activities_keep_versions=_parse_keep_versions(activities.get("keep_versions", Activities.KEEP_VERSIONS)),
     )
+
+
+def _is_language_code(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(Transcription.LANGUAGE_CODE, value) is not None
+
+
+def _parse_language(value: object) -> str:
+    """"auto" or a lowercase language code of 2 or 3 letters: [transcription] language."""
+    if value != Transcription.AUTO and not _is_language_code(value):
+        raise ValueError(Err.INVALID_LANGUAGE.format(value=value))
+    return str(value)
+
+
+def _parse_languages(value: object) -> tuple[str, ...]:
+    """A non-empty list of language codes, duplicates dropped, the first occurrence keeping its place: [transcription] languages."""
+    codes = _as_list(value)
+    if not codes or not all(_is_language_code(code) for code in codes):
+        raise ValueError(Err.INVALID_LANGUAGES.format(value=value))
+    return tuple(dict.fromkeys(str(code) for code in codes))
 
 
 def _parse_keep_versions(value: object) -> int:

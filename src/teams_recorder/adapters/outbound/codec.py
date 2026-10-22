@@ -23,6 +23,9 @@ from teams_recorder.domain import (
     Decision,
     EnergyTimeline,
     LabelSummary,
+    LanguageDetection,
+    LanguageReason,
+    LanguageSample,
     Meeting,
     MeetingType,
     PassKind,
@@ -129,9 +132,33 @@ def _speakers_to_dict(t: Transcript, labels: LabelSummary) -> dict[str, Any]:
             "reason": labels.reason}
 
 
+def _language_detection_to_dict(d: LanguageDetection) -> dict[str, Any]:
+    return {"language": d.language, "reason": d.reason.value, "counted": d.counted, "votes": d.votes,
+            "samples": [{"at": s.at, "language": s.language, "p": s.probability} for s in d.samples]}
+
+
+def _language_detection_from_dict(d: Any) -> LanguageDetection:
+    """Checks the object and each sample before reading them: a damaged record is a TypeError or ValueError, which the
+    repository reports against the file, never an AttributeError."""
+    samples = d.get("samples") if isinstance(d, dict) else None
+    if not isinstance(samples, list) or not all(isinstance(s, dict) for s in samples):
+        raise TypeError(Err.BAD_LANGUAGE_DETECTION.format(value=d))
+    return LanguageDetection(
+        language=str(d["language"]),
+        reason=LanguageReason(d["reason"]),
+        counted=int(d.get("counted", 0)),
+        votes=int(d.get("votes", 0)),
+        samples=tuple(LanguageSample(float(s["at"]), _optional_text(s.get("language")), float(s.get("p", 0.0))) for s in samples),
+    )
+
+
 def transcript_to_dict(t: Transcript) -> dict[str, Any]:
     out = {"language": t.language, "health": health_to_dict(t.health) if t.health else None, "segments": [_segment_to_dict(s) for s in t.segments]}
-    return {**out, "speakers": _speakers_to_dict(t, t.labels)} if t.labels is not None else out
+    if t.labels is not None:
+        out["speakers"] = _speakers_to_dict(t, t.labels)
+    if t.language_detection is not None:   # a fixed language, and every transcript made before detection, has no such key
+        out["language_detection"] = _language_detection_to_dict(t.language_detection)
+    return out
 
 
 def transcript_from_dict(d: dict[str, Any]) -> Transcript:
@@ -139,6 +166,7 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
     speakers = d.get("speakers")
     if speakers is not None and not isinstance(speakers, dict):
         raise TypeError(Err.BAD_SPEAKERS.format(value=speakers))
+    detection = d.get("language_detection")
     return Transcript(
         language=d.get("language", Audio.DEFAULT_LANGUAGE),
         segments=[Segment(float(s["start"]), float(s["end"]), s["text"], _optional_text(s.get("speaker"))) for s in d.get("segments", [])],
@@ -146,6 +174,7 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
         roster=tuple(str(n) for n in speakers.get("roster", [])) if speakers else (),
         user_label=_optional_text(speakers.get("user_label")) if speakers else None,
         labels=LabelSummary(int(speakers["labelled"]), int(speakers["eligible"]), _optional_text(speakers.get("reason"))) if speakers else None,
+        language_detection=_language_detection_from_dict(detection) if detection is not None else None,
     )
 
 

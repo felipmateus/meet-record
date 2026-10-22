@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from teams_recorder.adapters.outbound.fs_retry import retry_io
-from teams_recorder.constants import Llm
+from teams_recorder.constants import Audio, Llm
 from teams_recorder.domain import Action, ActionKind, Analysis, AnalysisError, Deadline, Decision, Meeting, MeetingType, Priority, StatusChange, StatusUpdate, Topic, Transcript
 from teams_recorder.messages import Err, Prompt
 
@@ -132,6 +132,12 @@ def to_domain(out: AnalysisOut, meeting: Meeting) -> Analysis:
     )
 
 
+def language_line(code: str) -> str:
+    """The header line naming a transcript's language (the model reads it; Portuguese transcripts get no line): the
+    name from `Prompt.LANGUAGE_NAMES`, or the code itself when it has none."""
+    return Prompt.TRANSCRIPT_LANGUAGE.format(name=Prompt.LANGUAGE_NAMES.get(code, code))
+
+
 def build_user_message(transcript: Transcript, meeting: Meeting, user_name: str = "") -> str:
     header = [Prompt.USER_NAME.format(name=user_name)] if user_name else []
     header += [
@@ -142,6 +148,8 @@ def build_user_message(transcript: Transcript, meeting: Meeting, user_name: str 
         header.append(Prompt.MEETING_TITLE.format(title=meeting.title))
     if meeting.duration_seconds:
         header.append(Prompt.MEETING_DURATION.format(minutes=int(meeting.duration_seconds // 60)))
+    if transcript.language != Audio.DEFAULT_LANGUAGE:
+        header.append(language_line(transcript.language))
     if transcript.roster:
         header.append(Prompt.ROSTER.format(names=", ".join(transcript.roster)))
     if transcript.user_label:

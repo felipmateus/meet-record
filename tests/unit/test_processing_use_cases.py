@@ -1,12 +1,23 @@
 import logging
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
 from teams_recorder.application.use_cases import AnalyzeMeeting, RenderMinutes, TranscribeMeeting, gaps_text
-from teams_recorder.domain import CaptureStats, MeetingStatus, RepositoryError, Transcript, TranscriptHealth, TranscriptionError, derive_status
-from teams_recorder.domain.status import AUDIO, LOCK
+from teams_recorder.domain import (
+    CaptureStats, LanguageReason, MeetingStatus, RepositoryError, Segment, Transcript, TranscriptHealth, TranscriptionError, derive_status, sample_offsets,
+)
+from teams_recorder.domain.status import AUDIO, ERROR, LOCK, TRANSCRIPT_JSON
 from teams_recorder.messages import Log, Notify
-from tests.fakes import FakeAnalyzer, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript
+from tests.fakes import (
+    FakeAnalyzer, FakeLanguageDetector, FakeMinutesRenderer, FakeNotifier, FakeTranscriber, looped_transcript, speech_transcript,
+)
+
+
+def test_ut045_transcribe_refuses_auto_as_the_language(repo):
+    with pytest.raises(ValueError, match="auto"):
+        TranscribeMeeting(repo, FakeTranscriber(), language="auto")
 
 
 def test_transcribe_requires_audio(repo, meeting):
@@ -182,6 +193,39 @@ def test_render_minutes_without_a_transcript_has_no_health(repo, meeting):
     assert renderer.healths == [None]
 
 
+def test_ut073_both_use_cases_pass_the_transcript_language_to_the_renderer(repo, meeting):
+    english = Transcript([Segment(0.0, 2.0, "Hello, everyone.")], "en")
+    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=english)
+    renderer = FakeMinutesRenderer()
+
+    AnalyzeMeeting(repo, FakeAnalyzer(), renderer).execute(meeting.id)
+    RenderMinutes(repo, renderer).execute(meeting.id)
+
+    assert renderer.languages == ["en", "en"]
+
+
+def test_ut073_a_transcript_without_a_detection_record_renders_as_portuguese(repo, meeting):
+    repo.seed(meeting, {AUDIO, TRANSCRIPT_JSON}, transcript=FakeTranscriber().transcript,
+              analysis=FakeAnalyzer().analyze(FakeTranscriber().transcript, meeting))
+    renderer = FakeMinutesRenderer()
+    RenderMinutes(repo, renderer).execute(meeting.id)
+    assert renderer.languages == ["pt"]
+
+
+def test_ut073_a_meeting_without_a_transcript_renders_with_no_language(repo, meeting):
+    repo.seed(meeting, {AUDIO}, analysis=FakeAnalyzer().analyze(FakeTranscriber().transcript, meeting))
+    renderer = FakeMinutesRenderer()
+    RenderMinutes(repo, renderer).execute(meeting.id)
+    assert renderer.languages == [None]
+
+
+def test_the_fake_transcriber_gives_the_transcript_of_the_audio_it_is_asked_for():
+    other = looped_transcript()
+    fake = FakeTranscriber(by_audio={Path("/b/audio.m4a"): other})
+    assert fake.transcribe(Path("/b/audio.m4a"), "pt") is other
+    assert fake.transcribe(Path("/a/audio.m4a"), "pt") is fake.transcript
+
+
 def test_any_retry_failure_keeps_the_first_pass(repo, meeting):
     # e.g. a KeyError from whisper's JSON or an OSError reading it: not translated, still not worth losing the first pass
     notifier = FakeNotifier()
@@ -300,3 +344,153 @@ def test_unreadable_capture_counters_still_allow_the_retry(repo, meeting):
     retry = FakeTranscriber(speech_transcript())
     result = TranscribeMeeting(broken, FakeTranscriber(looped_transcript()), "pt", retry=retry).execute(meeting.id)
     assert len(retry.calls) == 1 and result.health is not None and not result.health.rate_mismatch
+
+
+# --- the language of the meeting (docs/tasks/language-detection) ---------------------------------
+
+def _detecting(repo, meeting, detector, transcriber=None, **kwargs):
+    """`TranscribeMeeting` in detection mode, as the container builds it: `language` is the fallback, `languages` the allow-list."""
+    repo.seed(meeting, {AUDIO})
+    transcriber = transcriber or FakeTranscriber(speech_transcript(minutes=10))
+    use = TranscribeMeeting(repo, transcriber, "pt", language_detector=detector, **kwargs)
+    return use, transcriber
+
+
+def test_ut030_the_detected_language_reaches_the_transcriber_and_the_saved_transcript(repo, meeting, caplog):
+    caplog.set_level(logging.INFO)
+    meeting.ended_at = meeting.started_at + timedelta(minutes=10)   # 3 samples
+    detector = FakeLanguageDetector(["en"])
+    use, transcriber = _detecting(repo, meeting, detector)
+
+    result = use.execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), "en")]
+    saved = repo.load_transcript(meeting.id)
+    assert saved is result and saved.language == "en"
+    assert saved.language_detection is not None and saved.language_detection.language == "en"
+    assert saved.language_detection.reason is LanguageReason.MAJORITY and saved.language_detection.votes == saved.language_detection.counted == 3
+    assert len(saved.language_detection.samples) == 3
+    assert Log.LANGUAGE_DETECTED % (meeting.id, "en", 3, 3, 3) in caplog.text
+
+
+def test_ut031_the_detector_gets_the_offsets_of_the_meeting_and_a_30_second_window(repo, meeting):
+    meeting.ended_at = meeting.started_at + timedelta(minutes=37)
+    detector = FakeLanguageDetector(["pt"])
+    use, _ = _detecting(repo, meeting, detector)
+
+    use.execute(meeting.id)
+
+    assert detector.calls == [(repo.path(meeting.id, AUDIO), tuple(sample_offsets(37 * 60.0)), 30.0)]
+    assert len(detector.calls[0][1]) == 8
+
+
+def test_ut032_the_first_pass_and_the_retry_use_the_same_language(repo, meeting):
+    first, retry = FakeTranscriber(looped_transcript()), FakeTranscriber(speech_transcript())
+    use, _ = _detecting(repo, meeting, FakeLanguageDetector(["en"]), first, retry=retry)
+
+    result = use.execute(meeting.id)
+
+    assert first.calls == retry.calls == [(repo.path(meeting.id, AUDIO), "en")]
+    assert result.language == "en" and result.health is not None and result.health.retried
+    assert result.language_detection is not None and result.language_detection.language == "en"
+
+
+@pytest.mark.parametrize("error", [TranscriptionError("whisper-cli timed out"), RuntimeError("a bug in the detector")], ids=["ut033", "ut034"])
+def test_ut033_ut034_a_detector_that_raises_falls_back_without_an_error_or_a_notification(repo, meeting, caplog, error):
+    caplog.set_level(logging.INFO)
+    notifier = FakeNotifier()
+    use, transcriber = _detecting(repo, meeting, FakeLanguageDetector(["en"], error=error), notifier=notifier)
+
+    result = use.execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), "pt")]
+    assert result.language == "pt" and result.language_detection is not None
+    assert result.language_detection.reason is LanguageReason.DETECTION_FAILED and result.language_detection.samples == ()
+    assert (result.language_detection.language, result.language_detection.counted, result.language_detection.votes) == ("pt", 0, 0)
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and r.msg == Log.LANGUAGE_DETECTION_FAILED]
+    assert len(warnings) == 1 and warnings[0].getMessage() == Log.LANGUAGE_DETECTION_FAILED % (meeting.id, "pt", error)
+    assert notifier.messages == [] and ERROR not in repo.files(meeting.id) and LOCK not in repo.files(meeting.id)
+    assert repo.load_transcript(meeting.id) is result
+
+
+def test_ut035_a_meeting_of_unknown_length_is_sampled_once_at_its_start(repo, meeting):
+    assert meeting.duration_seconds is None
+    detector = FakeLanguageDetector(["pt"])
+    use, _ = _detecting(repo, meeting, detector)
+
+    result = use.execute(meeting.id)
+
+    assert detector.calls[0][1] == (0.0,)
+    assert result.language_detection is not None and result.language_detection.reason is LanguageReason.MAJORITY   # one sample: one vote is enough
+
+
+def test_ut036_a_rate_mismatch_does_not_stop_the_detection(repo, meeting):
+    repo.seed(meeting, {AUDIO}, capture_stats=_BROKEN_TAP)
+    detector, transcriber = FakeLanguageDetector(["en"]), FakeTranscriber(speech_transcript(minutes=12))
+
+    result = TranscribeMeeting(repo, transcriber, "pt", language_detector=detector).execute(meeting.id)
+
+    assert len(detector.calls) == 1 and transcriber.calls == [(repo.path(meeting.id, AUDIO), "en")]
+    assert result.health is not None and result.health.rate_mismatch
+    assert result.language_detection is not None and result.language_detection.language == "en"
+
+
+def test_ut037_a_transcription_failure_after_detection_saves_nothing(repo, meeting):
+    use, _ = _detecting(repo, meeting, FakeLanguageDetector(["en"]), FakeTranscriber(fail_cleanly=True))
+
+    with pytest.raises(TranscriptionError):
+        use.execute(meeting.id)
+
+    assert TRANSCRIPT_JSON not in repo.files(meeting.id) and LOCK not in repo.files(meeting.id)
+
+
+def test_ut038_a_portuguese_meeting_is_transcribed_in_portuguese_and_the_record_is_saved(repo, meeting):
+    use, transcriber = _detecting(repo, meeting, FakeLanguageDetector(["pt"]))
+
+    result = use.execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), "pt")] and result.language == "pt"
+    assert result.language_detection is not None and result.language_detection.reason is LanguageReason.MAJORITY
+    assert repo.load_transcript(meeting.id).language_detection == result.language_detection
+
+
+def test_ut039_a_fixed_language_detects_nothing_and_keeps_no_record(repo, meeting):
+    repo.seed(meeting, {AUDIO})
+    transcriber = FakeTranscriber(speech_transcript(minutes=10))
+
+    result = TranscribeMeeting(repo, transcriber, "en").execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), "en")]
+    assert result.language == "en" and result.language_detection is None
+
+
+@pytest.mark.parametrize("answers, languages, fallback, reason", [
+    (["is"], ("pt", "en"), "pt", LanguageReason.NO_USABLE_SAMPLE),           # not an allowed language
+    (["en", "en", "pt", "pt"], ("pt", "en"), "pt", LanguageReason.NO_MAJORITY),
+    (["en", None, None], ("pt", "en"), "pt", LanguageReason.TOO_FEW_VOTES),
+    (["is"], ("en", "pt"), "en", LanguageReason.NO_USABLE_SAMPLE),           # the fallback is the use case's `language`
+])
+def test_an_undecided_meeting_is_transcribed_in_the_fallback_with_the_reason_logged(repo, meeting, caplog, answers, languages, fallback, reason):
+    caplog.set_level(logging.INFO)
+    meeting.ended_at = meeting.started_at + timedelta(minutes=20)   # 4 samples
+    repo.seed(meeting, {AUDIO})
+    transcriber = FakeTranscriber(speech_transcript(minutes=10))
+    use = TranscribeMeeting(repo, transcriber, fallback, language_detector=FakeLanguageDetector(answers), languages=languages)
+
+    result = use.execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), fallback)]
+    detection = result.language_detection
+    assert detection is not None and (detection.language, detection.reason, detection.votes) == (fallback, reason, 0)
+    assert Log.LANGUAGE_FALLBACK % (meeting.id, fallback, reason.value, detection.counted, 4) in caplog.text
+
+
+def test_a_detection_that_picks_the_second_allowed_language_is_the_winner_even_when_the_fallback_is_first(repo, meeting):
+    meeting.ended_at = meeting.started_at + timedelta(minutes=10)
+    repo.seed(meeting, {AUDIO})
+    transcriber = FakeTranscriber(speech_transcript(minutes=10))
+    use = TranscribeMeeting(repo, transcriber, "en", language_detector=FakeLanguageDetector(["pt"]), languages=("en", "pt"))
+
+    result = use.execute(meeting.id)
+
+    assert transcriber.calls == [(repo.path(meeting.id, AUDIO), "pt")] and result.language == "pt"

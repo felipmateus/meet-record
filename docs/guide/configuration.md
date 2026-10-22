@@ -20,7 +20,8 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `start_after_positive_polls` | `1` | Readings needed to start recording |
 | | `stop_after_negative_polls` | `5` | Readings without a call needed to stop |
 | `[transcription]` | `whisper_model` | `"large-v3-turbo-q5_0"` | ggml model name |
-| | `language` | `"pt"` | Transcription language |
+| | `language` | `"auto"` | `"auto"` detects each meeting's language before transcribing it: 30-second samples spread over the audio (one per 5 minutes, 3 to 12) go through whisper's language identification, a sample counts when it heard one of `languages` with probability 0.5 or more, and the language more than half of the counted samples heard (at least 2) wins; otherwise, or if detection fails, the first of `languages`. Costs about 2 s per sample (up to about 25 s a meeting on an M1). A code (`"pt"`, `"en"`) fixes the language for every meeting and skips the detection |
+| | `languages` | `["pt", "en"]` | The languages detection may choose; the first is the fallback. Checked even when `language` is a code |
 | | `models_dir` | `""` | Empty means `<data_dir>/models` |
 | | `threads` | `0` | `0` means automatic |
 | | `vad`, `vad_model` | `false`, `"silero-v5.1.2"` | Voice activity detection on every pass |
@@ -69,7 +70,7 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | `prompts/stories_system.md` | Story drafting (your guide is appended to it) |
 | `prompts/user_story_guide.md` | Your story-writing rules; edit freely |
 
-The prompts are written in English and ask the model for Brazilian Portuguese output.
+The prompts are written in English and ask the model for Brazilian Portuguese output, whatever language the meeting was held in; a literal quote keeps the words said, in the language they were said in. When a transcript is not in Portuguese, the analyzer and the verifier are told its language.
 
 ## Data, privacy and retention
 

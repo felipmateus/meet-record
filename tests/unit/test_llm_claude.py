@@ -198,3 +198,50 @@ def test_the_schema_descriptions_repeat_the_owner_and_participant_rules():
         assert description.format(self_owner=Llm.OWNER_SELF, unknown=Llm.OWNER_UNKNOWN) in schema
     assert "exactly the listed participants" in schema and "lines labelled with the owner's label" in schema   # UT-055
     assert "not people only talked about" in Prompt.FIELD_PARTICIPANTS and "only when the transcript makes it evident" in Prompt.FIELD_DEADLINE_WHO
+
+
+# --- the transcript's language (docs/tasks/language-detection, UT-050, UT-051) -----------------------------------
+def test_a_portuguese_transcript_gives_the_message_it_always_had_and_an_english_one_names_its_language(meeting, transcript):
+    """UT-050: no line for `pt` (byte-for-byte today's message, also for an old transcript), `English` for `en`, in the header."""
+    today = build_user_message(transcript, meeting)
+    assert transcript.language == "pt" and Prompt.TRANSCRIPT_LANGUAGE.split("{")[0] not in today
+    assert build_user_message(Transcript(segments=transcript.segments, language="pt"), meeting) == today
+
+    english = Transcript(segments=transcript.segments, language="en")
+    msg = build_user_message(english, meeting)
+    line = Prompt.TRANSCRIPT_LANGUAGE.format(name="English")
+    assert line == "Transcript language: English"
+    header, body = msg.split(Prompt.TRANSCRIPT_HEADER)
+    assert header.splitlines()[-1] == line and body == transcript.as_timestamped_text()
+    assert msg == today.replace(Prompt.TRANSCRIPT_HEADER, "\n" + line + Prompt.TRANSCRIPT_HEADER)   # nothing else changed
+
+
+def test_the_language_line_comes_after_the_title_and_the_roster_and_before_the_transcript(meeting):
+    labelled = Transcript(segments=[Segment(0, 3, "Ana: hi")], language="en", roster=["Ana", "Felipe"], user_label="Felipe")
+    header = build_user_message(labelled, meeting, user_name="Felipe").split(Prompt.TRANSCRIPT_HEADER)[0].splitlines()
+    assert header.index("Transcript language: English") > header.index("Title: Planejamento")
+    assert header[-1].startswith("Speaker labels")   # the language line is a fact about the transcript, not about its labels
+    assert header.count("Transcript language: English") == 1
+
+
+def test_another_language_is_named_by_its_code(meeting, transcript):
+    """UT-051 (boundary): a language with no name in `Prompt.LANGUAGE_NAMES` prints its code."""
+    msg = build_user_message(Transcript(segments=transcript.segments, language="es"), meeting)
+    assert Prompt.TRANSCRIPT_LANGUAGE.format(name="es") in msg and "Transcript language: es" in msg
+
+
+def test_the_analyzer_sends_the_language_line_to_the_transport(meeting):
+    english = Transcript(segments=[Segment(0, 9, "Hi John, please send the report by Wednesday and update the board before the review on Friday afternoon, and tell Mary about it.")], language="en")
+    transport = FakeTransport()
+    ClaudeAnalyzer(transport, system_prompt="SYS").analyze(english, meeting)
+    assert "Transcript language: English" in transport.calls[0]["user"]
+
+
+def test_the_analysis_prompt_keeps_portuguese_output_and_literal_evidence():
+    """UT-053 (analyzer half): the output stays Brazilian Portuguese; `evidence` keeps the transcript's language."""
+    shipped = " ".join(load_settings().prompts_dir.joinpath(Files.ANALYZE_PROMPT).read_text().split())
+    assert "held in Brazilian Portuguese and return" not in shipped   # not every meeting is in Portuguese
+    assert "usually held in Brazilian Portuguese" in shipped
+    assert "`Transcript language:` line" in shipped
+    assert "in Brazilian Portuguese; the output stays Brazilian Portuguese whatever the language of the meeting" in shipped
+    assert "`evidence`, the literal quote: it keeps the transcript's words, in the language they were said in, and is never translated" in shipped

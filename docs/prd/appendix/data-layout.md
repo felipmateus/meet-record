@@ -50,10 +50,13 @@ The level of each raw track per 100 ms (dBFS, `-120.0` is digital silence), meas
 
 ## `transcript.json`
 ```json
-{"language": "pt", "segments": [{"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal.", "speaker": "Lucas Huguenin Gurgel de Moura"}],
+{"language": "pt",
+ "language_detection": {"language": "pt", "reason": "majority", "counted": 3, "votes": 3,
+                        "samples": [{"at": 134.7, "language": "pt", "p": 0.999}, {"at": 404.1, "language": "pt", "p": 0.998}, {"at": 673.4, "language": null, "p": 0.0}]},
+ "segments": [{"start": 0.0, "end": 3.2, "text": "Bom dia, pessoal.", "speaker": "Lucas Huguenin Gurgel de Moura"}],
  "speakers": {"roster": ["Felipe Mateus de Carvalho", "Lucas Huguenin Gurgel de Moura"], "user_label": "Felipe", "labelled": 167, "eligible": 214, "reason": null}}
 ```
-`speaker` appears on labelled segments only; `speakers` is absent on transcripts made before the feature and present, with a `reason`, when nothing was labelled. `transcript.txt`: `[hh:mm:ss] text` per segment, `[hh:mm:ss] Name: text` for a labelled one.
+`language` is the language the transcript was made in. `language_detection` appears when the language was detected (`[transcription] language = "auto"`), and is absent with a fixed language and on transcripts made before 2026-10-21: `reason` is one of `majority`, `no-usable-sample`, `too-few-votes`, `no-majority`, `detection-failed`; `counted` is the samples that heard an allowed language with p ≥ 0.5; `votes` the counted samples that heard `language` (0 unless the reason is `majority`); each sample has its offset in seconds, whisper's answer (`null` for none) and the probability (`p`); `samples` is empty for `detection-failed`. `speaker` appears on labelled segments only; `speakers` is absent on transcripts made before the feature and present, with a `reason`, when nothing was labelled. `transcript.txt`: `[hh:mm:ss] text` per segment, `[hh:mm:ss] Name: text` for a labelled one.
 
 ## `minutes.md`
 Human-readable minutes rendered from `analysis.json` (see the analysis page). Not part of the meeting status.
@@ -76,7 +79,7 @@ Plain text, one line: `Activity curation failed: <reason>` (for example `Activit
 `status_updates` (progress reported on earlier work) is absent in analyses saved before the curator and loads as empty; each action may also carry `for_whom`. Claim verification adds a `verification` to a status update like to any claim.
 
 ## `activities/atividades.md`
-Markdown in Brazilian Portuguese: a box (update time and focus) between two marker comments, `## Minhas ações`, `## Aguardando outros`, `## Agenda e prazos`, `## Contexto recente`, and a generated link block between two marker comments. The box's closing marker is `<!-- curador:fim <version> -->`, where `<version>` is the stamp (`YYYYMMDD-HHMMSS`) of the pass that wrote the file. See the [activities page](../pages/09-activities.md).
+Markdown in Brazilian Portuguese (a 💬 quote keeps the language it was said in): a box (update time and focus) between two marker comments, `## Minhas ações`, `## Aguardando outros`, `## Agenda e prazos`, `## Contexto recente`, and a generated link block between two marker comments. The box's closing marker is `<!-- curador:fim <version> -->`, where `<version>` is the stamp (`YYYYMMDD-HHMMSS`) of the pass that wrote the file. See the [activities page](../pages/09-activities.md).
 
 ## `activities/arquivo/YYYY-MM.md`
 Append-only, one file per month of the pass that archived. One entry per item, newest last: a heading `### dd/mm/aaaa — <reason>`, the item's lines, and the link definitions it needs (targets one level further up: `../../recordings/<id>/minutes.md`). Undo truncates it only while it still has the size that pass left.

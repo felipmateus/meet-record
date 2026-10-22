@@ -7,6 +7,8 @@ from datetime import date, datetime
 from enum import StrEnum
 from uuid import uuid4
 
+from .language import LanguageDetection
+
 MEETING_ID_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
 
@@ -140,6 +142,7 @@ class Transcript:
     roster: tuple[str, ...] = ()            # names seen in the Teams meeting window, in order of first appearance
     user_label: str | None = None           # the label the recording owner's lines carry, when labelling ran
     labels: LabelSummary | None = None      # None: labelling never ran (transcripts made before speaker attribution)
+    language_detection: LanguageDetection | None = None   # how `language` was chosen; None: a fixed language, or made before detection existed
 
     @property
     def text(self) -> str:
