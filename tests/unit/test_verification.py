@@ -120,3 +120,14 @@ def test_a_labelled_speaker_or_a_roster_name_is_heard_even_when_never_said_in_th
     assert not _heard("Marcos", labelled)                           # neither said nor seen
     assert not _heard("de", labelled)                               # particles do not count
     assert not _heard("Lucas", Transcript(segments))                # without the roster it is just a name nobody said
+
+
+def test_a_participant_greeted_once_in_english_is_confirmed():
+    """Language detection UT-054: without labels or a roster, the name appears once, after an English greeting."""
+    for line in ("Hi John.", "hello John", "Hey, John", "Thanks John", "thank you, John"):
+        assert _heard("John Carter", _transcript("Let us start.", line, "Now the budget.")), line
+    assert _heard("John Carter", Transcript([Segment(0, 2, "Hey,"), Segment(2, 5, "John how are you?")]))   # split across segments
+    assert not _heard("John Carter", _transcript("Let us start.", "Then John said no.", "Now the budget."))   # mentioned once, no greeting
+    assert not _heard("John Carter", _transcript("Let us start.", "Oh hi there, Mary.", "John left already."))
+    assert not _heard("John Carter", _transcript("This is a hint about John."))                          # "hi" only as a whole word
+    assert any("thank you" in pattern for pattern in Verify.ADDRESS)

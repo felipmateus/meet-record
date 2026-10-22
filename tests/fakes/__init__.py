@@ -1,11 +1,12 @@
 """One fake per port. All in memory, no hardware, no network."""
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, TypeAlias
 
 from teams_recorder.application.ports import ActiveRecording, CallState, CaptureHandle, VersionFiles
 from teams_recorder.domain import (
@@ -20,6 +21,7 @@ from teams_recorder.domain import (
     CuratorOutput,
     Decision,
     EnergyTimeline,
+    LanguageSample,
     Meeting,
     MeetingNotFound,
     Op,
@@ -40,6 +42,8 @@ from teams_recorder.domain import (
     Verification,
 )
 from teams_recorder.domain.status import ANALYSIS, CURATION_ERROR, ERROR, LOCK, META, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
+
+Answer: TypeAlias = str | tuple[str, float] | None   # what FakeLanguageDetector answers for one offset
 
 
 class FakeClock:
@@ -174,10 +178,12 @@ class FakeMixer:
 
 
 class FakeTranscriber:
-    """Returns `transcript`; `fail` raises a bug-like error, `fail_cleanly` a TranscriptionError."""
+    """Returns `transcript`, or `by_audio[audio]` for the audio paths it holds; `fail` raises a bug-like error, `fail_cleanly` a TranscriptionError."""
 
-    def __init__(self, transcript: Transcript | None = None, fail: bool = False, fail_cleanly: bool = False) -> None:
+    def __init__(self, transcript: Transcript | None = None, fail: bool = False, fail_cleanly: bool = False,
+                 by_audio: dict[Path, Transcript] | None = None) -> None:
         self.transcript = transcript or Transcript(segments=[Segment(0.0, 2.5, "Olá, bom dia a todos.")])
+        self.by_audio = by_audio or {}
         self.fail = fail
         self.fail_cleanly = fail_cleanly
         self.calls: list[tuple[Path, str]] = []
@@ -188,7 +194,32 @@ class FakeTranscriber:
             raise RuntimeError("whisper blew up")
         if self.fail_cleanly:
             raise TranscriptionError("whisper-cli timed out")
-        return self.transcript
+        return self.by_audio.get(audio, self.transcript)
+
+
+class FakeLanguageDetector:
+    """Returns one scripted answer per offset and records its calls; `error` makes `detect` raise it.
+
+    `script` is a list of answers, or a mapping from audio path to such a list when meetings must differ. An answer is a
+    language code (probability 0.99), a `(code, probability)` pair, or None (no answer). A list shorter than the offsets
+    repeats its last answer, so `["en"]` answers `en` on every offset."""
+
+    def __init__(self, script: Sequence[Answer] | Mapping[Path, Sequence[Answer]] = ("pt",), error: Exception | None = None) -> None:
+        self.script = script
+        self.error = error
+        self.calls: list[tuple[Path, tuple[float, ...], float]] = []
+
+    def detect(self, audio: Path, offsets: Sequence[float], window_seconds: float) -> list[LanguageSample]:
+        self.calls.append((audio, tuple(offsets), window_seconds))
+        if self.error is not None:
+            raise self.error
+        answers = self.script[audio] if isinstance(self.script, Mapping) else self.script
+        samples = []
+        for i, offset in enumerate(offsets):
+            answer = answers[min(i, len(answers) - 1)] if answers else None
+            language, probability = (answer, 0.99) if isinstance(answer, str) else answer or (None, 0.0)
+            samples.append(LanguageSample(at=offset, language=language, probability=probability))
+        return samples
 
 
 def looped_transcript(minutes: int = 20, loop_minutes: int = 15, line: str = "A CIDADE NO BRASIL") -> Transcript:
@@ -433,10 +464,12 @@ class FakeMinutesRenderer:
     def __init__(self) -> None:
         self.calls: list[tuple[Meeting, Analysis]] = []
         self.healths: list[TranscriptHealth | None] = []
+        self.languages: list[str | None] = []
 
-    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None, *, language: str | None = None) -> str:
         self.calls.append((meeting, analysis))
         self.healths.append(health)
+        self.languages.append(language)
         return f"# Minutes {meeting.id}\n{analysis.summary}\n"
 
 

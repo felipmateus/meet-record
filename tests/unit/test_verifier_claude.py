@@ -152,7 +152,8 @@ def test_the_shipped_prompt_is_the_measured_prototype_prompt():
     # The evaluation's numbers (§14.3) came from scripts/fidelity_eval.py VERIFY_SYSTEM. The product's prompt may
     # differ only where it must: the user's name comes in the message, the reason is written in Portuguese, and
     # the transcript may carry speaker labels and the roster (speaker attribution; the numbers predate the sentence),
-    # and it holds one paragraph for the `status_update` kind (activities curator), which the prototype never checked.
+    # and it holds one paragraph for the `status_update` kind (activities curator), which the prototype never checked,
+    # and one for the transcript's language (language detection), which the prototype never saw.
     import ast
     script = Path(__file__).resolve().parents[2] / "scripts" / "fidelity_eval.py"
     tree = ast.parse(script.read_text(encoding="utf-8"))
@@ -160,8 +161,11 @@ def test_the_shipped_prompt_is_the_measured_prototype_prompt():
                     and getattr(n.targets[0], "id", None) == "VERIFY_SYSTEM")
     shipped = load_prompt(load_settings().prompts_dir / Files.VERIFY_PROMPT)
     paragraph = [line for line in shipped.splitlines() if line.startswith("A claim of kind `status_update`")]
-    assert len(paragraph) == 1   # the one addition to the measured prompt
+    assert len(paragraph) == 1   # an addition to the measured prompt
     shipped = shipped.replace(paragraph[0] + "\n", "")
+    language = [line for line in shipped.splitlines() if line.startswith("When the message has a `Transcript language:` line")]
+    assert len(language) == 1    # the other one
+    shipped = shipped.replace(language[0] + "\n", "")
     expected = (measured
                 .replace("The user who records the meetings is Felipe.",
                          "The message starts with the name of the user who records the meetings, when known, and the meeting date.")
@@ -200,3 +204,40 @@ def test_labelled_lines_and_the_roster_reach_the_verifier():
 
     verifier.verify(MEETING, ANALYSIS, TRANSCRIPT)
     assert "Participants seen" not in transport.calls[1]["user"]   # no roster, no line: the message is what it was
+
+
+# --- the transcript's language (docs/tasks/language-detection, UT-052, UT-053) ---------------------------------------
+def _user_message(transcript: Transcript) -> str:
+    verifier = ClaudeClaimVerifier(FakeTransport(VerifyOut(verdicts=[])), system_prompt="SYS", user_name="Felipe")
+    return verifier.user_message(MEETING, claims_of(ANALYSIS, "Felipe"), transcript)
+
+
+def test_the_verifier_message_names_an_english_transcript_and_says_nothing_for_a_portuguese_one():
+    """UT-052: the same line as the analyzer's for `en`, none for `pt` (the message is what it was)."""
+    english = Transcript(TRANSCRIPT.segments, language="en")
+    line = Prompt.TRANSCRIPT_LANGUAGE.format(name="English")
+    msg = _user_message(english)
+    assert line == "Transcript language: English"
+    assert msg.split(Prompt.VERIFY_TRANSCRIPT)[0].splitlines()[-1] == line   # in the header, before the transcript
+    pt = _user_message(TRANSCRIPT)
+    assert Transcript(TRANSCRIPT.segments).language == "pt" and "Transcript language" not in pt
+    assert pt == _user_message(Transcript(TRANSCRIPT.segments, language="pt"))
+    assert msg == pt.replace(Prompt.VERIFY_TRANSCRIPT, "\n" + line + Prompt.VERIFY_TRANSCRIPT, 1)   # nothing else changed
+    assert Prompt.TRANSCRIPT_LANGUAGE.format(name="es") in _user_message(Transcript(TRANSCRIPT.segments, language="es"))
+
+
+def test_the_language_line_reaches_the_transport_and_follows_the_roster_rule():
+    transport = FakeTransport(VerifyOut(verdicts=[]))
+    english = Transcript(TRANSCRIPT.segments, language="en", roster=("Felipe", "Ana"))
+    ClaudeClaimVerifier(transport, system_prompt="SYS", user_name="Felipe").verify(MEETING, ANALYSIS, english)
+    head = transport.calls[0]["user"].split("\n\n## Transcript")[0].splitlines()
+    assert head[:2] == ["User (recording owner): Felipe", "Meeting date: 2026-10-12 (Monday)"]
+    assert "Transcript language: English" in head and "Participants seen in the meeting window: Felipe, Ana" in head
+
+
+def test_the_verifier_prompt_keeps_quotes_in_the_language_they_were_said_in():
+    """UT-053 (verifier half): reasons stay Brazilian Portuguese; a quote is compared as it was said."""
+    shipped = " ".join(load_prompt(load_settings().prompts_dir / Files.VERIFY_PROMPT).split())
+    assert "When the message has a `Transcript language:` line, the transcript is in that language (without it, Portuguese)" in shipped
+    assert "The quotes of the claims keep the language they were said in: compare them with the transcript as they are, never translated" in shipped
+    assert "Your `reason` stays in Brazilian Portuguese whatever the language of the transcript" in shipped

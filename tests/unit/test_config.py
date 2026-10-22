@@ -29,7 +29,7 @@ def test_load_settings_reads_toml_and_env(tmp_path: Path, monkeypatch):
 def test_load_settings_defaults_without_files(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     s = load_settings(tmp_path)
-    assert s.language == "pt" and s.retention_days == Audio.RETENTION_DAYS == 30
+    assert s.language == "auto" and s.retention_days == Audio.RETENTION_DAYS == 30
     assert not s.has_api_key
 
 
@@ -377,3 +377,55 @@ def test_config_tool_prints_the_activities_switch_and_writes_booleans_and_number
     assert s.activities_enabled is False and s.activities_keep_versions == 20 and s.user_name == "Ana"
     tool.get()
     assert "activities_enabled=false" in capsys.readouterr().out.splitlines()
+
+
+# language detection settings (docs/tasks/language-detection/_tests.md UT-020 to UT-026)
+def test_ut020_language_defaults_to_auto_with_portuguese_and_english(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.language == "auto" and s.languages == ("pt", "en") and s.detects_language is True and s.fallback_language == "pt"
+
+
+def test_ut021_a_fixed_language_turns_detection_off_and_is_its_own_fallback(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguage = "en"\n')
+    s = load_settings(tmp_path)
+    assert s.detects_language is False and s.fallback_language == "en" and s.languages == ("pt", "en")
+
+
+def test_ut022_the_fallback_is_the_first_of_languages(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguages = ["en", "pt"]\n')
+    assert load_settings(tmp_path).fallback_language == "en"
+
+
+@pytest.mark.parametrize("value", ["pt-BR", "Portuguese", ""])
+def test_ut023_an_invalid_language_stops_the_load_with_the_key_and_the_value(tmp_path: Path, value: str):
+    (tmp_path / "config.toml").write_text(f'[transcription]\nlanguage = "{value}"\n')
+    with pytest.raises(ValueError) as error:
+        load_settings(tmp_path)
+    assert str(error.value) == Err.INVALID_LANGUAGE.format(value=value)
+
+
+@pytest.mark.parametrize("written", ["[]", '["auto"]', '["PT"]', "[1]"])
+def test_ut024_an_invalid_languages_list_stops_the_load(tmp_path: Path, written: str):
+    (tmp_path / "config.toml").write_text(f"[transcription]\nlanguages = {written}\n")
+    with pytest.raises(ValueError) as error:
+        load_settings(tmp_path)
+    assert str(error.value) == Err.INVALID_LANGUAGES.format(value=eval(written))   # the value as written
+
+
+def test_ut025_a_single_string_is_a_list_of_one_and_duplicates_keep_their_first_place(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguages = "en"\n')
+    assert load_settings(tmp_path).languages == ("en",)
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguages = ["pt", "en", "pt"]\n')
+    assert load_settings(tmp_path).languages == ("pt", "en")
+
+
+def test_ut025a_languages_is_validated_when_language_is_a_code_too(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguage = "pt"\nlanguages = []\n')
+    with pytest.raises(ValueError) as error:
+        load_settings(tmp_path)
+    assert str(error.value) == Err.INVALID_LANGUAGES.format(value=[])
+
+
+def test_ut026_the_repository_config_detects_between_portuguese_and_english():
+    s = load_settings(Path(__file__).resolve().parents[2])
+    assert s.language == "auto" and s.languages == ("pt", "en")
