@@ -39,7 +39,14 @@ stop_after_negative_polls = 5
 # whisper.cpp ggml model. "large-v3-turbo-q5_0" (574 MB) has quality close to the full
 # large-v3-turbo (1.6 GB). Download it with scripts/download-model.sh.
 whisper_model = "large-v3-turbo-q5_0"
-language = "pt"
+# Spoken language of the meetings. "auto" detects it per meeting before transcribing: 30-second
+# samples spread over the audio (one per 5 minutes, 3 to 12) go through whisper's language
+# identification; a sample counts when it heard one of `languages` with probability 0.5 or more,
+# and the language more than half of the counted samples heard (at least 2) is used. Otherwise,
+# or if detection fails, the first of `languages`. A code ("pt", "en") fixes the language for
+# every meeting and skips the detection (the behavior before 2026-10-21).
+language = "auto"
+languages = ["pt", "en"]
 # Models folder; empty = <data_dir>/models
 models_dir = ""
 # whisper threads; 0 = automatic (performance cores)

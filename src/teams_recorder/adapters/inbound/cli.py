@@ -30,7 +30,8 @@ from teams_recorder.container import (
     Container, build_container, build_retry_transcriber, build_speaker_observer, build_story_publishers, teams_speakers_binary, teams_tap_binary,
 )
 from teams_recorder.domain import (
-    CuratorBusy, LabelSummary, MeetingStatus, NothingToUndo, SkippedAction, SpeakerReason, TeamsRecorderError, Transcript, UndoStale, derive_status, next_step, unconfirmed, verifications,
+    CuratorBusy, LabelSummary, LanguageReason, LanguageRules, MeetingStatus, NothingToUndo, SkippedAction, SpeakerReason, TeamsRecorderError, Transcript, UndoStale,
+    counted_tally, derive_status, next_step, unconfirmed, verifications,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import ActivityDoc, Cli, Err, Notify, Step
@@ -112,6 +113,7 @@ def status() -> None:
             unconfirmed_claims += flagged
             unconfirmed_meetings += 1
             marker += Cli.MEETING_UNCONFIRMED.format(count=flagged)
+        marker += _language_segment(transcript)
         typer.echo(Cli.MEETING_LINE.format(
             meeting_id=m.id,
             title=Cli.MEETING_TITLE.format(title=m.title) if m.title else "",
@@ -190,6 +192,40 @@ def _speakers_line(transcript: Transcript) -> str | None:
         names = Cli.SPEAKER_NAMES_SEPARATOR.join(transcript.speakers)
         return Cli.SPEAKERS_LABELLED.format(share=labels.share or 0.0, eligible=labels.eligible, names=names)
     return Cli.SPEAKERS_NO_LABELS.format(reason=_no_labels_text(labels.reason))
+
+
+def _language_segment(transcript: Transcript | None) -> str:
+    """The `trec status` language marker of a meeting line: the code of a transcript that is not in Portuguese, else nothing
+    (Portuguese, and meetings without a readable transcript)."""
+    if transcript is None or transcript.language == Audio.DEFAULT_LANGUAGE:
+        return ""
+    return Cli.MEETING_LANGUAGE.format(language=transcript.language)
+
+
+def _language_line(transcript: Transcript, allowed: tuple[str, ...]) -> str:
+    """The `Language:` line of `trec transcribe`: the language and how it was chosen. `allowed` is `[transcription] languages`."""
+    detection = transcript.language_detection
+    language = transcript.language
+    if detection is None:
+        return Cli.LANGUAGE_FIXED.format(language=language)
+    taken = len(detection.samples)
+    match detection.reason:
+        case LanguageReason.MAJORITY:
+            return Cli.LANGUAGE_DETECTED.format(language=language, votes=detection.votes, counted=detection.counted, taken=taken)
+        case LanguageReason.NO_USABLE_SAMPLE:
+            head, last = allowed[:-1], allowed[-1]
+            names = (Cli.LANGUAGE_LIST_SEPARATOR.join(head) + Cli.LANGUAGE_ALTERNATIVE + last) if head else last
+            return Cli.LANGUAGE_NO_USABLE_SAMPLE.format(language=language, allowed=names, taken=taken)
+        case LanguageReason.TOO_FEW_VOTES:
+            tally = counted_tally(detection, allowed)
+            heard = next((code for code, count in tally.items() if count), "")
+            return Cli.LANGUAGE_TOO_FEW_VOTES.format(language=language, heard=heard, needed=LanguageRules().min_votes, taken=taken)
+        case LanguageReason.NO_MAJORITY:
+            tally = counted_tally(detection, allowed)
+            items = Cli.LANGUAGE_LIST_SEPARATOR.join(Cli.LANGUAGE_TALLY_ITEM.format(language=code, count=count) for code, count in tally.items())
+            return Cli.LANGUAGE_NO_MAJORITY.format(language=language, counted=detection.counted, tally=items)
+        case LanguageReason.DETECTION_FAILED:
+            return Cli.LANGUAGE_DETECTION_FAILED.format(language=language)
 
 
 def _unconfirmed_count(repo: MeetingRepository, meeting_id: str) -> int:
@@ -291,6 +327,10 @@ def _check_transcript_health(settings: Settings) -> None:
         state = Cli.RETRY_ON_VAD.format(path=retry.vad_model_path) if retry.vad_model_path else Cli.RETRY_ON
         mark = Cli.WARNING if hint else Cli.OK
     typer.echo(Cli.RETRY_LINE.format(mark=mark, state=state, hint=hint))
+    if settings.detects_language:
+        typer.echo(Cli.LANGUAGE_MODE_AUTO.format(mark=Cli.INFO, languages=Cli.LANGUAGE_LIST_SEPARATOR.join(settings.languages), fallback=settings.fallback_language))
+    else:
+        typer.echo(Cli.LANGUAGE_MODE_FIXED.format(mark=Cli.INFO, language=settings.language))
 
 
 def _last_labels(repo: MeetingRepository) -> tuple[str, LabelSummary] | None:
@@ -432,7 +472,8 @@ def stop() -> None:
 def transcribe(
     meeting_id: str | None = typer.Argument(None, help=Cli.TRANSCRIBE_ARG_HELP),
 ) -> None:
-    c = build_container(_settings(), headless=True)
+    settings = _settings()
+    c = build_container(settings, headless=True)
     if meeting_id:
         if not c.repo.exists(meeting_id):
             _fail(Cli.MEETING_MISSING.format(meeting_id=meeting_id))
@@ -463,6 +504,7 @@ def transcribe(
                 typer.echo(Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""))
             if health.rate_mismatch:
                 typer.echo(Cli.TRANSCRIPT_RATE_MISMATCH.format(share=health.short_padding_share))
+        typer.echo(_language_line(transcript, settings.languages))
         speakers_line = _speakers_line(transcript)
         if speakers_line is not None:
             typer.echo(speakers_line)
