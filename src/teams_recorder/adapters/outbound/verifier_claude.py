@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from teams_recorder.adapters.outbound.llm_schema import load_prompt
+from teams_recorder.adapters.outbound.llm_schema import language_line, load_prompt
 from teams_recorder.adapters.outbound.llm_transport import StructuredTransport
-from teams_recorder.constants import Llm, VerdictSupport, Verify
+from teams_recorder.constants import Audio, Llm, VerdictSupport, Verify
 from teams_recorder.domain import (
     Analysis,
     AnalysisError,
@@ -137,6 +137,8 @@ class ClaudeClaimVerifier:
         header = [Prompt.MEETING_DATE.format(date=meeting.started_at.date().isoformat(), weekday=Prompt.WEEKDAYS[meeting.started_at.weekday()])]
         if self.user_name:
             header.insert(0, Prompt.USER_NAME.format(name=self.user_name))
+        if transcript.language != Audio.DEFAULT_LANGUAGE:
+            header.append(language_line(transcript.language))
         if transcript.roster:
             header.append(Prompt.ROSTER.format(names=", ".join(transcript.roster)))
         return ("\n".join(header) + (Prompt.VERIFY_EXCERPTS if excerpt else Prompt.VERIFY_TRANSCRIPT) + text

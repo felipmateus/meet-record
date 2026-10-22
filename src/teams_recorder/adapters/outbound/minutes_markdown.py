@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from teams_recorder.constants import Llm
+from teams_recorder.constants import Audio, Llm
 from teams_recorder.domain import Action, Analysis, Meeting, StatusChange, StatusUpdate, TranscriptHealth, Verification, unconfirmed, unconfirmed_reason, verifications
 from teams_recorder.messages import Minutes
 
@@ -81,7 +81,7 @@ class MarkdownMinutesRenderer:
             evidence=" ".join(u.evidence.split()), at=Minutes.STATUS_AT.format(at=u.at) if u.at else "", mark=_status_mark(u.verification),
         )
 
-    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None) -> str:
+    def render(self, meeting: Meeting, analysis: Analysis, health: TranscriptHealth | None = None, *, language: str | None = None) -> str:
         out: list[str] = [Minutes.TITLE.format(title=analysis.title or meeting.title or meeting.id), ""]
         if health is not None and health.degraded:
             gaps = Minutes.DEGRADED_GAPS.format(ranges=", ".join(health.uncovered_ranges())) if health.uncovered else ""
@@ -99,6 +99,8 @@ class MarkdownMinutesRenderer:
                                            minutes=int((meeting.duration_seconds or 0) // 60) or Minutes.UNDER_A_MINUTE))
         else:
             out.append(Minutes.DATE_NO_END.format(date=_br(start.date()), start=start.strftime("%H:%M")))
+        if language is not None and language != Audio.DEFAULT_LANGUAGE:
+            out.append(Minutes.LANGUAGE.format(name=Minutes.LANGUAGE_NAMES.get(language, language)))
         names = [name + _mark(analysis.participant_checks.get(name)) for name in analysis.participants]
         out.append(Minutes.PARTICIPANTS.format(names=", ".join(names) or Minutes.NO_PARTICIPANTS))
         out.append(Minutes.TYPE.format(label=Minutes.TYPE_LABELS.get(analysis.meeting_type.value, analysis.meeting_type.value)))
