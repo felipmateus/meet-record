@@ -8,6 +8,14 @@ Counting repeats over the whole meeting instead would also count natural fillers
 they reached 9.8% of the segments of a healthy real meeting, against 0% with the window
 (docs/tasks/prd-fidelity-guard, task 1.0).
 
+The window alone still counts natural short replies: eight "Okay." within 30 segments of an English meeting,
+never more than two in a row, were 10.4% of its segments and made the transcript degraded (2026-10-22). So a
+line of at most `SHORT_LINE_WORDS` words (counted on the comparison key; a key with no words, "...", is short)
+is in a loop only when the window rule flags it and it sits in a run of at least `SHORT_LINE_RUN` consecutive
+segments that are all short and all flagged. The texts of the run may differ, so "Obrigado." / "Tchau." alternating
+back to back is still a loop; "e aí" six times with three in a row flags those three. Longer lines keep the window rule alone
+(docs/tasks/speech-check, task 5).
+
 A track recorded at the wrong sample rate is broken before whisper sees it: when the output device ran at
 16 kHz (a Bluetooth headset in a call) and teams-tap wrote its buffers as 48 kHz, the writer fell behind the
 clock by 2/3 of every second and padded it with silence 0.2 s at a time, so the Teams speech came out 3x fast
@@ -18,11 +26,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from itertools import groupby
 
 from .models import CaptureStats, Segment, Transcript, TranscriptHealth, is_speech  # noqa: F401 - is_speech re-exported
 
 LOOP_REPEATS = 5   # copies of the same text that make a loop...
 LOOP_WINDOW = 30   # ...within this many consecutive segments
+SHORT_LINE_WORDS = 2   # a line of at most this many words is "short" ("Okay.", "e aí")...
+SHORT_LINE_RUN = 3     # ...and counts as a loop only in a run of this many consecutive short lines the window rule flags
 
 _WORD = re.compile(r"\w+")
 
@@ -38,17 +49,34 @@ def _key(text: str) -> str:
     return " ".join(words) or text.strip()
 
 
+def _is_short(key: str) -> bool:
+    """Whether a comparison key has at most `SHORT_LINE_WORDS` words; a key with no words ("...", "♪") is short."""
+    return len(_WORD.findall(key)) <= SHORT_LINE_WORDS
+
+
 def loop_flags(segments: list[Segment], repeats: int = LOOP_REPEATS, window: int = LOOP_WINDOW) -> list[bool]:
-    """For each segment, whether it belongs to a loop: `repeats` copies of its text within `window` consecutive segments."""
+    """For each segment, whether it belongs to a loop: `repeats` copies of its text within `window` consecutive segments.
+
+    A short line (`SHORT_LINE_WORDS` words or fewer) must also sit in a run of `SHORT_LINE_RUN` or more consecutive
+    segments that are all short and all flagged by that rule; the texts of the run may differ.
+    """
+    keys = [_key(segment.text) for segment in segments]
     positions: dict[str, list[int]] = defaultdict(list)
-    for i, segment in enumerate(segments):
-        positions[_key(segment.text)].append(i)
+    for i, key in enumerate(keys):
+        positions[key].append(i)
     flags = [False] * len(segments)
     for found in positions.values():
         for j in range(len(found) - repeats + 1):
             if found[j + repeats - 1] - found[j] < window:
                 for i in found[j:j + repeats]:
                     flags[i] = True
+    short_flagged = [flag and _is_short(key) for flag, key in zip(flags, keys)]   # a run is made of these, nothing else
+    start = 0
+    for in_run, group in groupby(short_flagged):
+        size = len(list(group))
+        if in_run and size < SHORT_LINE_RUN:
+            flags[start:start + size] = [False] * size
+        start += size
     return flags
 
 

@@ -18,7 +18,7 @@ class LanguageRules:
     min_samples: int = 3
     max_samples: int = 12
     min_probability: float = 0.5     # a sample under this does not count
-    min_votes: int = 2               # the winner needs this many counted samples (1 when the meeting has one sample)
+    min_votes: int = 2               # the winner needs this many counted samples (1 when only one sample was planned)
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class LanguageSample:
 class LanguageReason(StrEnum):
     MAJORITY = "majority"                    # more than half of the counted samples, and at least min_votes
     NO_USABLE_SAMPLE = "no-usable-sample"    # no sample heard an allowed language confidently
-    TOO_FEW_VOTES = "too-few-votes"          # one sample counted, in a meeting with more than one sample
+    TOO_FEW_VOTES = "too-few-votes"          # one sample counted, in a meeting with more than one sample planned
     NO_MAJORITY = "no-majority"
     DETECTION_FAILED = "detection-failed"    # the detector raised (it could not run, or whisper printed no answer); the samples are empty
 
@@ -75,16 +75,20 @@ def _counts(samples: Sequence[LanguageSample], allowed: Sequence[str], rules: La
 
 
 def choose_language(samples: Sequence[LanguageSample], allowed: Sequence[str], fallback: str,
-                    rules: LanguageRules = LanguageRules()) -> LanguageDetection:
+                    rules: LanguageRules = LanguageRules(), planned: int | None = None) -> LanguageDetection:
     """The meeting's language from its samples: the allowed language that more than half of the counted samples heard, and
-    at least `min_votes` of them (1 when the meeting has a single sample). Otherwise `fallback`, with the reason why."""
+    at least `min_votes` of them (1 when a single sample was planned). Otherwise `fallback`, with the reason why.
+
+    `planned` is how many samples the meeting was planned with, which can exceed `len(samples)` when some were not sent (the
+    speech check drops the ones without speech): a lone sample decides only in a meeting planned with one, so one survivor of
+    several cannot decide a long meeting alone. None means every planned sample is in `samples`."""
     kept = tuple(samples)
     tally = _counts(kept, allowed, rules)
     counted = sum(tally.values())
     if counted == 0:
         return LanguageDetection(fallback, LanguageReason.NO_USABLE_SAMPLE, 0, 0, kept)
     winner, votes = max(tally.items(), key=lambda item: item[1])   # ties go to the first allowed language; none can pass the majority below
-    needed = 1 if len(kept) == 1 else rules.min_votes
+    needed = 1 if (len(kept) if planned is None else planned) == 1 else rules.min_votes
     if votes * 2 > counted and votes >= needed:
         return LanguageDetection(winner, LanguageReason.MAJORITY, counted, votes, kept)
     reason = LanguageReason.TOO_FEW_VOTES if counted == 1 else LanguageReason.NO_MAJORITY
