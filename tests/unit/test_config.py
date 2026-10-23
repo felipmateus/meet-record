@@ -356,12 +356,18 @@ def test_the_repository_config_documents_the_activities_section_with_the_default
     assert s.activities_model == s.llm_model
 
 
-def test_config_tool_prints_the_activities_switch_and_writes_booleans_and_numbers(tmp_path: Path, monkeypatch, capsys):
+def _config_tool():
+    """scripts/config_tool.py, the installers' helper, as a module (it is not part of the package)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("config_tool", Path(__file__).resolve().parents[2] / "scripts" / "config_tool.py")
     assert spec is not None and spec.loader is not None
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
+    return tool
+
+
+def test_config_tool_prints_the_activities_switch_and_writes_booleans_and_numbers(tmp_path: Path, monkeypatch, capsys):
+    tool = _config_tool()
     (tmp_path / "config.toml").write_text('[user]\nname = "Felipe"\n[activities]\nenabled = true\nkeep_versions = 50\nmodel = "x"\n')
     monkeypatch.setattr(tool, "PROJECT", tmp_path)
 
@@ -377,6 +383,27 @@ def test_config_tool_prints_the_activities_switch_and_writes_booleans_and_number
     assert s.activities_enabled is False and s.activities_keep_versions == 20 and s.user_name == "Ana"
     tool.get()
     assert "activities_enabled=false" in capsys.readouterr().out.splitlines()
+
+
+@pytest.mark.parametrize("vad, retry_vad, speech_check, needs_model", [
+    (False, False, True, True),    # the speech check alone: the installers download the Silero model (US-008.AC-3)
+    (False, False, False, False),  # nothing uses it: no download
+    (True, False, False, True),    # VAD on every pass
+    (False, True, False, True),    # VAD on the retry of a degraded transcript
+])
+def test_ut026_config_tool_vad_path_is_the_silero_model_when_anything_uses_it(
+        tmp_path: Path, monkeypatch, capsys, vad: bool, retry_vad: bool, speech_check: bool, needs_model: bool):
+    """docs/tasks/speech-check/_tests.md UT-026: install.sh and install.ps1 download `vad_path` when it is not empty."""
+    tool = _config_tool()
+    (tmp_path / "config.toml").write_text(
+        f"[transcription]\nvad = {str(vad).lower()}\nretry_vad = {str(retry_vad).lower()}\nspeech_check = {str(speech_check).lower()}\n")
+    monkeypatch.setattr(tool, "PROJECT", tmp_path)
+
+    tool.get()
+
+    printed = dict(line.split("=", 1) for line in capsys.readouterr().out.splitlines())
+    expected = load_settings(tmp_path).models_dir / "ggml-silero-v5.1.2.bin"
+    assert printed["vad_path"] == (str(expected) if needs_model else "")
 
 
 # language detection settings (docs/tasks/language-detection/_tests.md UT-020 to UT-026)
@@ -429,3 +456,36 @@ def test_ut025a_languages_is_validated_when_language_is_a_code_too(tmp_path: Pat
 def test_ut026_the_repository_config_detects_between_portuguese_and_english():
     s = load_settings(Path(__file__).resolve().parents[2])
     assert s.language == "auto" and s.languages == ("pt", "en")
+
+
+# speech check setting (docs/tasks/speech-check/_tests.md UT-025)
+def test_ut025_speech_check_is_on_by_default_and_uses_the_vad_model(tmp_path: Path):
+    s = load_settings(tmp_path)
+    assert s.speech_check is True
+    assert s.speech_model_path == s.models_dir / "ggml-silero-v5.1.2.bin"
+    assert s.vad is False and s.vad_model_path is None   # the first pass keeps its own switch: the check does not turn VAD on there
+
+
+def test_ut025_a_config_without_the_key_means_on(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nlanguage = "pt"\n')
+    s = load_settings(tmp_path)
+    assert s.speech_check is True and s.speech_model_path is not None
+
+
+def test_ut025_speech_check_false_leaves_no_model_path(tmp_path: Path):
+    (tmp_path / "config.toml").write_text("[transcription]\nspeech_check = false\n")
+    s = load_settings(tmp_path)
+    assert s.speech_check is False and s.speech_model_path is None
+
+
+def test_ut025_the_speech_model_follows_vad_model_and_models_dir(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(f'[transcription]\nvad_model = "silero-v6"\nmodels_dir = "{tmp_path / "models"}"\n')
+    s = load_settings(tmp_path)
+    assert s.speech_model_path == tmp_path / "models" / "ggml-silero-v6.bin"
+
+
+def test_ut025_the_repository_config_turns_the_speech_check_on_with_its_comment():
+    root = Path(__file__).resolve().parents[2]
+    assert load_settings(root).speech_check is True
+    text = (root / "config.toml").read_text()
+    assert "speech_check = true" in text and "under 2 s of speech" in text

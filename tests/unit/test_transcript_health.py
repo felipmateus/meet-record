@@ -34,8 +34,8 @@ def test_a_loop_is_five_copies_within_thirty_segments_ignoring_case_and_punctuat
     filler = [f"frase {i}" for i in range(26)]
     spread = ["Ok.", *filler, "Ok.", "OK", "ok", "Ok"]   # 5 copies over 31 segments
     assert not any(loop_flags(_segments(*spread)))
-    within = ["Ok.", *filler[:-1], "Ok.", "OK", "ok", "Ok"]   # the same 5 copies over 30 segments are a loop
-    assert [i for i, looped in enumerate(loop_flags(_segments(*within))) if looped] == [0, 26, 27, 28, 29]
+    within = ["Ok.", *filler[:-1], "Ok.", "OK", "ok", "Ok"]   # the same 5 copies over 30 segments: the 4 back to back are a loop
+    assert [i for i, looped in enumerate(loop_flags(_segments(*within))) if looped] == [26, 27, 28, 29]   # UT-018: the lone "Ok." at 0 is a short line outside a run
 
 
 def test_loops_cycling_through_up_to_seven_lines_are_caught():
@@ -64,6 +64,80 @@ def test_non_speech_markers_do_not_cover_a_minute():
 def test_two_lines_alternating_are_a_loop_too():
     flags = loop_flags(_segments(*["Obrigado.", "Tchau, tchau."] * 5))
     assert all(flags)
+
+
+# --- short lines: docs/tasks/speech-check/_tests.md UT-010 to UT-018 ------------------------------------------------------
+# A line of at most 2 words ("Okay.", "e aí", "...") is in a loop only when the window rule flags it AND it sits in a run
+# of 3 or more consecutive segments that are all short and all flagged. Lines of 3 or more words keep the window rule alone.
+
+def _flagged(*texts: str) -> list[int]:
+    return [i for i, looped in enumerate(loop_flags(_segments(*texts))) if looped]
+
+
+def _lines(total: int, at: dict[int, str]) -> list[str]:
+    """`total` segments: the text in `at` at its index, a different 3+ word line everywhere else."""
+    return [at.get(i) or f"frase distinta {i} da reunião" for i in range(total)]
+
+
+def _vans_retry() -> Transcript:
+    """The English vans meeting's retry: 77 segments, "Okay." 8 times within 27 segments and never 3 in a row (pairs at most)."""
+    return Transcript(_segments(*_lines(77, {i: "Okay." for i in (3, 4, 9, 14, 15, 20, 24, 27)})))
+
+
+def test_short_replies_spread_through_a_conversation_are_not_a_loop():
+    """UT-010: eight "Okay." within 30 segments pass the window rule, but no 3 stand in a row."""
+    assert not any(loop_flags(_vans_retry().segments))
+
+
+def test_the_vans_retry_is_no_longer_degraded():
+    """UT-016: the same transcript is 8 of 77 segments (10.4%) under the window rule alone, above the 10% limit."""
+    health = transcript_health(_vans_retry(), max_loop_share=0.10)
+    assert health.loop_share == 0.0 and not health.degraded
+
+
+def test_a_short_line_is_flagged_only_in_its_run_of_three_back_to_back():
+    """UT-011: "e aí" six times within 30 segments: the three in a row are a loop, the three spread are not."""
+    texts = _lines(24, {i: "e aí" for i in (2, 7, 12, 13, 14, 19)})
+    assert _flagged(*texts) == [12, 13, 14]
+
+
+def test_three_short_copies_back_to_back_are_not_enough_for_the_window_rule():
+    """UT-012: a run of 3 is not a loop without the 5 copies the window rule needs."""
+    assert _flagged(*_lines(20, {i: "e aí" for i in (8, 9, 10)})) == []
+
+
+def test_lines_of_three_words_keep_the_window_rule_alone():
+    """UT-013: "eu estou aberto" five times within 30 segments, never back to back, is a loop as before."""
+    positions = (1, 6, 11, 16, 21)
+    assert _flagged(*_lines(26, {i: "eu estou aberto" for i in positions})) == list(positions)
+
+
+def test_a_line_without_words_counts_as_short():
+    """UT-014: "..." has no words, so it needs the run like any short line."""
+    assert _flagged(*_lines(40, {i: "..." for i in (2, 6, 10, 14, 18, 22)})) == []
+    assert _flagged(*_lines(12, {i: "..." for i in range(3, 8)})) == [3, 4, 5, 6, 7]
+
+
+def test_copies_in_different_case_are_one_short_line_for_the_run_too():
+    """UT-015: "Ok.", "OK" and "ok" are one key. Eight spread in pairs at most are no loop; three in a row among five copies are."""
+    spread = {i: ("Ok." if i % 2 else "OK") for i in (2, 3, 8, 9, 14, 15, 20, 21)}
+    assert _flagged(*_lines(30, spread)) == []
+    assert _flagged(*_lines(20, {1: "Ok", 4: "Ok.", 5: "OK", 6: "ok", 12: "Ok"})) == [4, 5, 6]
+
+
+def test_short_lines_that_differ_are_a_loop_when_they_alternate_back_to_back():
+    """UT-017: the existing `test_two_lines_alternating_are_a_loop_too` (Obrigado. / Tchau, tchau. x5) keeps passing unchanged.
+    "Okay." / "Yeah." six times each back to back are flagged too; the same lines each followed by a different line are not."""
+    alternating = ["Okay.", "Yeah."] * 6
+    assert _flagged(*alternating) == list(range(12))
+    separated = [text for k, line in enumerate(alternating) for text in (line, f"frase distinta {k}")]
+    assert _flagged(*separated) == []   # the window rule flags all 12 copies, but no two of them are next to each other
+
+
+def test_a_long_line_between_short_ones_ends_the_run():
+    """Not a UT: the run is of short lines only. A flagged line of 3 words stays flagged (today's rule) but does not join the run."""
+    texts = ["Okay."] * 2 + ["eu estou aberto"] * 5 + ["Okay."] * 3   # 5 copies of "Okay." within the window, split 2 + 3 by the long loop
+    assert _flagged(*texts) == [2, 3, 4, 5, 6, 7, 8, 9]   # the long loop and the run of 3; the first two "Okay." are a run of 2
 
 
 def test_threshold_is_exclusive_and_configurable():

@@ -701,7 +701,176 @@ def test_e2e002_each_meeting_gets_its_own_language_line_in_place_with_one_of_the
     assert result.output.count("  Language:") == 2
     block_a, block_b = (result.output.split(f"Transcribing {m.id}")[1].split("Transcribing")[0].splitlines() for m in (a, b))
     labels = lambda block: [line.split(":")[0].strip() for line in block if line.startswith("  ")]   # noqa: E731 - the indented lines of one meeting
-    assert labels(block_a) == ["Health", "Language", "Speakers", "Text"]
-    assert labels(block_b) == ["Health", "WARNING", "Language", "Speakers", "Text"]   # in place: after the degraded warning, before Speakers and Text
-    assert block_a[2].startswith("  Language: en (") and block_b[3].startswith("  Language: pt (")
+    # the speech check cannot run here (no VAD model in the temporary project), so each block opens with its `Speech: not checked` line
+    assert labels(block_a) == ["Speech", "Health", "Language", "Speakers", "Text"]
+    assert labels(block_b) == ["Speech", "Health", "WARNING", "Language", "Speakers", "Text"]   # in place: after the degraded warning, before Speakers and Text
+    assert block_a[3].startswith("  Language: en (") and block_b[4].startswith("  Language: pt (")
     assert repo.load_transcript(a.id).language == "en" and repo.load_transcript(b.id).language == "pt"
+
+
+# --- speech check (docs/tasks/speech-check/_tests.md E2E-001, E2E-002) -------------------------------------------------------
+SILENT_SECONDS = 70   # long enough to notify (60 s), and with a `meta.json` duration of the same length the language samples are planned at 10 s and 30 s
+
+
+def _silent_recording(repo: FsMeetingRepository) -> Meeting:
+    """A meeting recorded on 2026-10-17 with a 70 s silent audio.m4a and the same duration in meta.json."""
+    import shutil
+    import subprocess
+
+    import pytest
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    meeting = _recorded_at(repo, datetime(2026, 10, 17, 10, 15, 32), minutes=SILENT_SECONDS / 60)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono", "-t", str(SILENT_SECONDS),
+                    "-c:a", "aac", str(repo.path(meeting.id, AUDIO))], check=True)
+    return meeting
+
+
+def _argv(log: Path) -> list[list[str]]:
+    """What reached a scripted whisper, one argv per call, with the random temporary folders (`trec-whisper-…`, `trec-lang-…`) replaced by placeholders."""
+    import json
+    import re
+    return [[re.sub(r"trec-(whisper|lang)-\w+", r"trec-\1-TMP", arg) for arg in json.loads(line)] for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def _container_builder(monkeypatch):
+    """`use(**fields)`: the next `trec` runs build the container as configured with `fields` replaced. Each call starts again from the real builder,
+    so a field one step sets does not stay set in the next (`_with_container` stacks them)."""
+    from dataclasses import replace
+    from teams_recorder.adapters.inbound import cli
+    build = cli.build_container
+    return lambda **fields: monkeypatch.setattr(cli, "build_container", lambda settings, **kw: replace(build(settings, **kw), **fields))
+
+
+def test_speech_e2e001_a_recording_with_no_speech_is_not_transcribed_shows_in_status_gets_the_empty_analysis_and_can_be_forced_through(
+        tmp_path: Path, monkeypatch, caplog):
+    import json
+    import logging
+
+    from teams_recorder.adapters.outbound.llm_claude import ClaudeAnalyzer
+    from teams_recorder.domain.status import ANALYSIS
+    from tests.integration.test_speech_whispercpp import ScriptedSpeechDetector
+    from tests.integration.test_transcriber_whispercpp import ScriptedTranscriber
+    from tests.unit.test_llm_claude import SAMPLE_OUT, FakeTransport
+    caplog.set_level(logging.INFO)
+    project = _project(tmp_path, monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")   # `trec analyze` asks for a key; the transport below never uses it
+    monkeypatch.delenv("TREC_LLM_PROVIDER", raising=False)
+    config = project / "config.toml"
+    config.write_text('[transcription]\nlanguage = "pt"\n[verification]\nenabled = false\n[activities]\nenabled = false\n')   # nothing else may call Claude
+    repo = FsMeetingRepository(project / "data")
+    m = _silent_recording(repo)
+    model, whisper_log = project / "ggml-fake.bin", project / "whisper.log"
+    model.write_bytes(b"\x00" * 16)
+    whisper_log.write_text("")
+    transport = FakeTransport()   # counts the calls; `min_words=1` because the scripted whisper's text is shorter than the analyzer's 20-word floor
+    scripted = dict(transcriber=ScriptedTranscriber(model, script=("--log", str(whisper_log))), retry_transcriber=None,
+                    analyzer=ClaudeAnalyzer(transport, system_prompt="SYS", min_words=1))
+    use = _container_builder(monkeypatch)
+    use(**scripted, speech_detector=ScriptedSpeechDetector(model, script=("--none",)))
+
+    # 1. `trec transcribe <id>` prints the no-speech block of _dx.md and exits 0
+    transcribed = runner.invoke(app, ["transcribe", m.id])
+
+    assert transcribed.exit_code == 0, transcribed.output
+    assert transcribed.output.splitlines() == [
+        f"Transcribing {m.id}… ok (0 segments, 0.0 min)",
+        "  Speech: none (0.0 s of speech in 1.2 min); whisper did not run",
+        Cli.TRANSCRIPT_NO_SPEECH.format(meeting_id=m.id),
+        f"  Text: {repo.path(m.id, 'transcript.txt')}",
+        Cli.ANALYZE_HINT,
+    ]
+    assert f"run `trec transcribe {m.id}` and `trec analyze {m.id}`" in transcribed.output
+    stored = json.loads(repo.path(m.id, "transcript.json").read_text(encoding="utf-8"))
+    assert stored["segments"] == [] and stored["speech"]["found"] is False
+    assert all(stored.get(key) is None for key in ("health", "language_detection", "labels"))   # whisper did not run (`health` is a null, as in every transcript without one)
+    # 2. whisper never ran
+    assert whisper_log.read_text(encoding="utf-8") == ""
+    # 3. the headless notifier logged the notification (a CLI run has no desktop one)
+    body = Notify.NO_SPEECH_BODY.format(meeting_id=m.id, minutes=SILENT_SECONDS / 60)
+    assert f"[{Notify.NO_SPEECH}] {body}" in caplog.messages and f"{m.id}: no speech in 1 min of audio" in body
+    # 4. status marks the meeting and counts it
+    status = runner.invoke(app, ["status"])
+
+    assert status.exit_code == 0, status.output
+    assert f"  {m.id}  [transcribed] → next: analyze  · no speech" in status.output.splitlines()
+    assert "Recordings without speech: 1" in status.output.splitlines()
+    # 5. `trec analyze <id>` writes the local empty analysis and makes no Claude call
+    analyzed = runner.invoke(app, ["analyze", m.id])
+
+    assert analyzed.exit_code == 0, analyzed.output
+    assert Cli.SUMMARY.format(summary=Err.EMPTY_TRANSCRIPT) in analyzed.output.splitlines()
+    assert repo.path(m.id, ANALYSIS).exists() and repo.load_analysis(m.id).summary == Err.EMPTY_TRANSCRIPT
+    assert transport.calls == []
+    # 6. recovery: with the check off the same recording is transcribed (the container now builds no speech detector, as configured)
+    config.write_text(config.read_text().replace('language = "pt"\n', 'language = "pt"\nspeech_check = false\n'))
+    use(**scripted)
+
+    forced = runner.invoke(app, ["transcribe", m.id])
+
+    assert forced.exit_code == 0, forced.output
+    assert forced.output.splitlines()[1] == "  Speech: not checked ([transcription] speech_check = false)"
+    transcript = repo.load_transcript(m.id)
+    assert transcript.segments and transcript.speech is None
+    assert "speech" not in json.loads(repo.path(m.id, "transcript.json").read_text(encoding="utf-8"))
+    assert len(_argv(whisper_log)) == 1   # whisper ran this time
+    # 7. without an id `trec analyze` skips the analyzed meeting; with the id it analyzes the new transcript
+    skipped = runner.invoke(app, ["analyze"])
+
+    assert skipped.exit_code == 0, skipped.output
+    assert Cli.NO_PENDING_ANALYSIS in skipped.output and transport.calls == []
+    reanalyzed = runner.invoke(app, ["analyze", m.id])
+
+    assert reanalyzed.exit_code == 0, reanalyzed.output
+    assert len(transport.calls) == 1
+    summary = repo.load_analysis(m.id).summary
+    assert summary == SAMPLE_OUT.summary and summary != Err.EMPTY_TRANSCRIPT
+
+
+def test_speech_e2e002_a_recording_with_speech_runs_whisper_with_the_same_arguments_as_with_the_check_off(tmp_path: Path, monkeypatch):
+    import json
+
+    from tests.integration.test_speech_whispercpp import ScriptedSpeechDetector
+    from tests.integration.test_transcriber_whispercpp import ScriptedLanguageDetector, ScriptedTranscriber
+    project = _project(tmp_path, monkeypatch)
+    config = project / "config.toml"
+    config.write_text('[transcription]\nlanguage = "auto"\nretry_on_loop = false\n')   # auto mode: the language samples are planned from the 70 s duration
+    repo = FsMeetingRepository(project / "data")
+    m = _silent_recording(repo)   # the audio does not matter: the scripted VAD says what it holds
+    model = project / "ggml-fake.bin"
+    model.write_bytes(b"\x00" * 16)
+    vad_log, detect_log, whisper_log = project / "vad.log", project / "detect.log", project / "whisper.log"
+    scripted = dict(transcriber=ScriptedTranscriber(model, script=("--log", str(whisper_log))), retry_transcriber=None,
+                    language_detector=ScriptedLanguageDetector(model, script=("--langs", "pt:0.99,pt:0.99", "--log", str(detect_log))))
+    use = _container_builder(monkeypatch)
+    use(**scripted, speech_detector=ScriptedSpeechDetector(model, script=("--segments", "0:6000", "--log", str(vad_log))))   # 60 s of speech in 70 s
+
+    checked = runner.invoke(app, ["transcribe", m.id])
+
+    assert checked.exit_code == 0, checked.output
+    lines = checked.output.splitlines()
+    assert lines[1] == "  Speech: 1.0 of 1.2 min (86%)" and lines[2].startswith("  Health: ")   # right after ` ok (…)`, before Health
+    assert [line.split(":")[0].strip() for line in lines[1:6]] == ["Speech", "Health", "Language", "Speakers", "Text"]
+    assert len(_argv(vad_log)) == 1   # the check ran
+    transcript = repo.load_transcript(m.id)
+    assert transcript.speech is not None and transcript.speech.found and transcript.segments
+    assert transcript.language_detection is not None and [s.at for s in transcript.language_detection.samples] == [10.0, 30.0]   # the filter dropped none
+    status = runner.invoke(app, ["status"])
+
+    assert status.exit_code == 0, status.output
+    assert "no speech" not in status.output and "Recordings without speech" not in status.output
+    assert f"  {m.id}  [transcribed] → next: analyze" in status.output.splitlines()
+    with_check = (_argv(detect_log), _argv(whisper_log))
+    detect_log.unlink()
+    whisper_log.unlink()
+    config.write_text('[transcription]\nlanguage = "auto"\nretry_on_loop = false\nspeech_check = false\n')
+    use(**scripted)
+
+    unchecked = runner.invoke(app, ["transcribe", m.id])
+
+    assert unchecked.exit_code == 0, unchecked.output
+    assert unchecked.output.splitlines()[1] == "  Speech: not checked ([transcription] speech_check = false)"
+    assert json.loads(repo.path(m.id, "transcript.json").read_text(encoding="utf-8")).get("speech") is None
+    assert len(with_check[0]) == len(with_check[1]) == 1   # one language detection, one transcription
+    assert (_argv(detect_log), _argv(whisper_log)) == with_check
+    assert len(_argv(vad_log)) == 1   # and the check did not run again
