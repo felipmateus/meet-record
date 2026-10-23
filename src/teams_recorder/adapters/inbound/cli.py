@@ -30,8 +30,8 @@ from teams_recorder.container import (
     Container, build_container, build_retry_transcriber, build_speaker_observer, build_story_publishers, teams_speakers_binary, teams_tap_binary,
 )
 from teams_recorder.domain import (
-    CuratorBusy, LabelSummary, LanguageReason, LanguageRules, MeetingStatus, NothingToUndo, SkippedAction, SpeakerReason, TeamsRecorderError, Transcript, UndoStale,
-    counted_tally, derive_status, next_step, unconfirmed, verifications,
+    CuratorBusy, LabelSummary, LanguageReason, LanguageRules, MeetingStatus, NothingToUndo, SkippedAction, SpeakerReason, SpeechRules, TeamsRecorderError,
+    Transcript, UndoStale, counted_tally, derive_status, next_step, unconfirmed, verifications,
 )
 from teams_recorder.domain.status import ANALYSIS, AUDIO, ERROR, MINUTES, TRANSCRIPT_JSON, TRANSCRIPT_TXT
 from teams_recorder.messages import ActivityDoc, Cli, Err, Notify, Step
@@ -88,7 +88,7 @@ def status() -> None:
     typer.echo(Cli.DATA_DIR.format(path=settings.data_dir))
     typer.echo(Cli.API_KEY.format(state=Cli.CONFIGURED if settings.has_api_key else Cli.MISSING))
     typer.echo(Cli.MEETINGS.format(count=len(meeting_ids)))
-    degraded = rate_mismatched = unconfirmed_claims = unconfirmed_meetings = 0
+    degraded = rate_mismatched = without_speech = unconfirmed_claims = unconfirmed_meetings = 0
     for meeting_id in meeting_ids:
         try:
             m = c.repo.load_meta(meeting_id)
@@ -114,6 +114,9 @@ def status() -> None:
             unconfirmed_meetings += 1
             marker += Cli.MEETING_UNCONFIRMED.format(count=flagged)
         marker += _language_segment(transcript)
+        if _without_speech(transcript):
+            without_speech += 1
+            marker += Cli.MEETING_NO_SPEECH
         typer.echo(Cli.MEETING_LINE.format(
             meeting_id=m.id,
             title=Cli.MEETING_TITLE.format(title=m.title) if m.title else "",
@@ -124,6 +127,8 @@ def status() -> None:
     typer.echo(Cli.DEGRADED_TRANSCRIPTS.format(count=degraded))
     if rate_mismatched:   # only meetings recorded since 2026-10-14 can be flagged, so the line stays out until one is
         typer.echo(Cli.RATE_MISMATCH_TRANSCRIPTS.format(count=rate_mismatched))
+    if without_speech:   # recordings the speech check found empty; the line stays out while there is none
+        typer.echo(Cli.NO_SPEECH_RECORDINGS.format(count=without_speech))
     typer.echo(Cli.UNCONFIRMED_CLAIMS.format(claims=unconfirmed_claims, meetings=unconfirmed_meetings))
     try:
         active = c.repo.load_active()
@@ -194,12 +199,30 @@ def _speakers_line(transcript: Transcript) -> str | None:
     return Cli.SPEAKERS_NO_LABELS.format(reason=_no_labels_text(labels.reason))
 
 
+def _without_speech(transcript: Transcript | None) -> bool:
+    """Whether the speech check found no speech in this transcript's recording (whisper did not run). A transcript with no record,
+    made with the check off, after a failed check or before the feature, is not one."""
+    return transcript is not None and transcript.speech is not None and not transcript.speech.found
+
+
 def _language_segment(transcript: Transcript | None) -> str:
     """The `trec status` language marker of a meeting line: the code of a transcript that is not in Portuguese, else nothing
-    (Portuguese, and meetings without a readable transcript)."""
-    if transcript is None or transcript.language == Audio.DEFAULT_LANGUAGE:
+    (Portuguese, meetings without a readable transcript, and recordings with no speech: their language is only the fallback)."""
+    if transcript is None or transcript.language == Audio.DEFAULT_LANGUAGE or _without_speech(transcript):
         return ""
     return Cli.MEETING_LANGUAGE.format(language=transcript.language)
+
+
+def _speech_line(transcript: Transcript, check_on: bool) -> str:
+    """The `Speech:` line of `trec transcribe`: what the check before whisper found. `check_on` is `[transcription] speech_check`;
+    with it on, a transcript with no record is one whose check failed (its warning is above the line)."""
+    speech = transcript.speech
+    if speech is None:
+        return Cli.SPEECH_FAILED if check_on else Cli.SPEECH_OFF
+    if not speech.found:
+        return Cli.SPEECH_NONE.format(seconds=speech.speech_seconds, minutes=speech.audio_seconds / 60)
+    share = min(1.0, speech.speech_seconds / speech.audio_seconds) if speech.audio_seconds > 0 else 0.0   # VAD segments may end a little past the audio
+    return Cli.SPEECH_FOUND.format(speech=speech.speech_seconds / 60, audio=speech.audio_seconds / 60, share=share)
 
 
 def _language_line(transcript: Transcript, allowed: tuple[str, ...]) -> str:
@@ -327,10 +350,28 @@ def _check_transcript_health(settings: Settings) -> None:
         state = Cli.RETRY_ON_VAD.format(path=retry.vad_model_path) if retry.vad_model_path else Cli.RETRY_ON
         mark = Cli.WARNING if hint else Cli.OK
     typer.echo(Cli.RETRY_LINE.format(mark=mark, state=state, hint=hint))
+    _check_speech(settings)
     if settings.detects_language:
         typer.echo(Cli.LANGUAGE_MODE_AUTO.format(mark=Cli.INFO, languages=Cli.LANGUAGE_LIST_SEPARATOR.join(settings.languages), fallback=settings.fallback_language))
     else:
         typer.echo(Cli.LANGUAGE_MODE_FIXED.format(mark=Cli.INFO, language=settings.language))
+
+
+def _check_speech(settings: Settings) -> None:
+    """Doctor line for the speech check: off, its tool missing, its VAD model missing, or ready. Never fails the doctor: without the
+    tool or the model every recording is transcribed without the check."""
+    model = settings.speech_model_path
+    if model is None:
+        typer.echo(Cli.SPEECH_CHECK_LINE.format(mark=Cli.INFO, state=Cli.SPEECH_CHECK_OFF))
+        return
+    tool = _tool_path(Bin.WHISPER_VAD, settings.project_dir)
+    if tool is None:
+        typer.echo(Cli.SPEECH_CHECK_LINE.format(mark=Cli.WARNING, state=Cli.SPEECH_CHECK_NO_TOOL.format(tool=Bin.WHISPER_VAD)))
+    elif not model.exists():
+        script = Files.DOWNLOAD_MODEL_SCRIPT_WINDOWS if settings.platform is Platform.WINDOWS else Files.DOWNLOAD_MODEL_SCRIPT
+        typer.echo(Cli.SPEECH_CHECK_LINE.format(mark=Cli.WARNING, state=Cli.SPEECH_CHECK_NO_MODEL.format(path=model, script=script, model=settings.vad_model)))
+    else:
+        typer.echo(Cli.SPEECH_CHECK_LINE.format(mark=Cli.OK, state=Cli.SPEECH_CHECK_ON.format(tool=tool, seconds=SpeechRules().min_speech_seconds)))
 
 
 def _last_labels(repo: MeetingRepository) -> tuple[str, LabelSummary] | None:
@@ -496,6 +537,10 @@ def transcribe(
             continue
         c.repo.clear_failed(mid)
         typer.echo(Cli.TRANSCRIBED_OK.format(segments=len(transcript.segments), minutes=transcript.duration_seconds / 60))
+        typer.echo(_speech_line(transcript, settings.speech_check))
+        silent = _without_speech(transcript)   # whisper did not run: no health, language or speakers
+        if silent:
+            typer.echo(Cli.TRANSCRIPT_NO_SPEECH.format(meeting_id=mid))
         health = transcript.health
         if health is not None:
             typer.echo(Cli.TRANSCRIPT_HEALTH.format(loop=health.loop_share, covered=health.covered_minutes, total=health.total_minutes,
@@ -504,10 +549,11 @@ def transcribe(
                 typer.echo(Cli.TRANSCRIPT_DEGRADED.format(gaps=Cli.NO_TEXT_IN.format(ranges=gaps_text(health)) if health.uncovered else ""))
             if health.rate_mismatch:
                 typer.echo(Cli.TRANSCRIPT_RATE_MISMATCH.format(share=health.short_padding_share))
-        typer.echo(_language_line(transcript, settings.languages))
-        speakers_line = _speakers_line(transcript)
-        if speakers_line is not None:
-            typer.echo(speakers_line)
+        if not silent:
+            typer.echo(_language_line(transcript, settings.languages))
+            speakers_line = _speakers_line(transcript)
+            if speakers_line is not None:
+                typer.echo(speakers_line)
         typer.echo(Cli.TEXT_PATH.format(path=c.repo.path(mid, TRANSCRIPT_TXT)))
     if failures:
         raise typer.Exit(code=1)

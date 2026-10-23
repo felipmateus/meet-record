@@ -51,6 +51,11 @@ languages = ["pt", "en"]
 models_dir = ""
 # whisper threads; 0 = automatic (performance cores)
 threads = 0
+# Before transcribing, check that someone speaks: Silero VAD (the `vad_model` below) runs over the
+# whole recording, and one with under 2 s of speech is not sent to whisper. Its transcript is saved
+# empty and marked "no speech", a warning is logged, and a recording of 1 minute or more notifies.
+# Set to false to transcribe every recording as before, for example to force one through.
+speech_check = true
 # Voice activity detection (Silero) before whisper. Off by default: in a test with short
 # phrases (2026-10-05) it cut off speech segments and made the text worse; the noise
 # reduction in the mix (audio.denoise) is what improved the transcription. To experiment:

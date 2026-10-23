@@ -103,6 +103,7 @@ class Settings:
     max_loop_share: float = Transcription.MAX_LOOP_SHARE
     retry_on_loop: bool = Transcription.RETRY_ON_LOOP
     retry_vad: bool = Transcription.RETRY_VAD
+    speech_check: bool = Transcription.SPEECH_CHECK   # [transcription] speech_check: a recording with no speech is not transcribed
     verify_enabled: bool = Verify.ENABLED   # [verification]: check each analysis's claims against the transcript
     verify_model: str = Verify.DEFAULT_API_MODEL
     verify_cli_model: str = Verify.DEFAULT_CLI_MODEL
@@ -144,6 +145,11 @@ class Settings:
     def retry_vad_model_path(self) -> Path | None:
         """The VAD model the retry of a degraded transcript uses; None when the retry runs without VAD (or does not run)."""
         return (self.models_dir / ggml_model_file(self.vad_model)) if self.retry_on_loop and self.retry_vad else None
+
+    @property
+    def speech_model_path(self) -> Path | None:
+        """The VAD model the speech check uses (`vad_model`, as the retry does); None when the check is off."""
+        return (self.models_dir / ggml_model_file(self.vad_model)) if self.speech_check else None
 
     @property
     def prompts_dir(self) -> Path:
@@ -308,6 +314,7 @@ def load_settings(project_dir: Path | None = None, platform: Platform | None = N
         max_loop_share=_parse_share(transcription.get("max_loop_share", Transcription.MAX_LOOP_SHARE)),
         retry_on_loop=bool(transcription.get("retry_on_loop", Transcription.RETRY_ON_LOOP)),
         retry_vad=bool(transcription.get("retry_vad", Transcription.RETRY_VAD)),
+        speech_check=bool(transcription.get("speech_check", Transcription.SPEECH_CHECK)),
         verify_enabled=bool(verification.get("enabled", Verify.ENABLED)),
         verify_model=str(verification.get("model", Verify.DEFAULT_API_MODEL)),
         verify_cli_model=str(verification.get("cli_model", Verify.DEFAULT_CLI_MODEL)),
