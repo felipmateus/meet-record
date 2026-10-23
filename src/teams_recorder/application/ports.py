@@ -15,7 +15,7 @@ from typing import NamedTuple, Protocol, runtime_checkable
 
 from teams_recorder.domain import (
     Analysis, CaptureStats, ClaimRef, CuratorInput, CuratorOutput, EnergyTimeline, LanguageSample, Meeting, Op, OpFailure,
-    PassRecord, SpeakerLog, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
+    PassRecord, SpeakerLog, SpeechActivity, StoryDrafts, TaggedBlock, Transcript, TranscriptHealth, UserStory, Verification,
 )
 
 
@@ -107,6 +107,14 @@ class LanguageDetector(Protocol):
     def detect(self, audio: Path, offsets: Sequence[float], window_seconds: float) -> list[LanguageSample]:
         """One sample per offset, in order. A sample whisper gave no answer for has language None.
         Raises TranscriptionError when the detection could not run at all."""
+        ...
+
+
+@runtime_checkable
+class SpeechDetector(Protocol):
+    def activity(self, audio: Path) -> SpeechActivity:
+        """The speech segments of the whole audio, and the audio's length.
+        Raises TranscriptionError when the check could not run."""
         ...
 
 
