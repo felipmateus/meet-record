@@ -28,6 +28,7 @@ from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.publisher_backlogmd import BacklogMdPublisher
 from teams_recorder.adapters.outbound.repository_fs import FsMeetingRepository
 from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
+from teams_recorder.adapters.outbound.speech_whispercpp import WhisperCppSpeechDetector
 from teams_recorder.adapters.outbound.stories_claude import ClaudeStoryWriter
 from teams_recorder.adapters.outbound.stories_markdown import MarkdownStoryRenderer
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
@@ -51,6 +52,7 @@ from teams_recorder.application.ports import (
     ProcessAudioCapture,
     RecordingConfirmation,
     SpeakerObserver,
+    SpeechDetector,
     StoryPublisher,
     StoryRenderer,
     StoryWriter,
@@ -118,6 +120,7 @@ class Container:
     speakers: SpeakerObserver | None = None   # reads who speaks from the Teams window; None: Windows, or [speakers] enabled = false
     energy: EnergyMeter | None = None   # level of each raw track per 100 ms, for the user's own lines
     language_detector: LanguageDetector | None = None   # decides each meeting's language; None: [transcription] language is a code ("detector" is the Teams call detector)
+    speech_detector: SpeechDetector | None = None   # measures the speech of a recording before it is transcribed; None: [transcription] speech_check = false
 
     def start_recording(self) -> StartRecording:
         return StartRecording(self.repo, self.process_capture, self.mic_capture, self.notifier, self.clock, self.settings.mic_device, self.disk,
@@ -133,7 +136,7 @@ class Container:
         # `language` is the fallback, never settings.language: in detection mode that is "auto", and whisper must never get it
         return TranscribeMeeting(self.repo, self.transcriber, self.settings.fallback_language, self.settings.max_loop_share,
                                  self.retry_transcriber, self.notifier, clock=self.clock, user_name=self.settings.user_name,
-                                 language_detector=self.language_detector, languages=self.settings.languages)
+                                 language_detector=self.language_detector, languages=self.settings.languages, speech_detector=self.speech_detector)
 
     def analyze_meeting(self) -> AnalyzeMeeting:
         # Without a verifier ([verification] off) the two code checks still run: they need no model call (PRD decision 11).
@@ -244,6 +247,7 @@ def build_container(settings: Settings, *, headless: bool = False) -> Container:
         speakers=platform.speakers,
         energy=FfmpegEnergyMeter(ffmpeg=ffmpeg),
         language_detector=build_language_detector(settings),
+        speech_detector=build_speech_detector(settings),
     )
 
 
@@ -259,6 +263,19 @@ def build_language_detector(settings: Settings) -> WhisperCppLanguageDetector | 
     return WhisperCppLanguageDetector(
         settings.whisper_model_path, whisper_cli=find_tool(Bin.WHISPER_CLI, settings.project_dir),
         ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir), threads=settings.whisper_threads,
+    )
+
+
+def build_speech_detector(settings: Settings) -> WhisperCppSpeechDetector | None:
+    """Measures the speech of a recording before it is transcribed: Silero VAD (`settings.speech_model_path`, the `vad_model` the retry
+    uses) run by whisper.cpp's `whisper-vad-speech-segments`, with ffmpeg and the transcriber's threads. None when
+    [transcription] speech_check is false: nothing is checked."""
+    model = settings.speech_model_path
+    if model is None:
+        return None
+    return WhisperCppSpeechDetector(
+        model, vad_tool=find_tool(Bin.WHISPER_VAD, settings.project_dir), ffmpeg=find_tool(Bin.FFMPEG, settings.project_dir),
+        threads=settings.whisper_threads,
     )
 
 

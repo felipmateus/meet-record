@@ -36,6 +36,7 @@ from teams_recorder.domain import (
     SkippedAction,
     SpeakerEvent,
     SpeakerLog,
+    SpeechCheck,
     SILENCE_DB,
     StatusChange,
     StatusUpdate,
@@ -152,12 +153,32 @@ def _language_detection_from_dict(d: Any) -> LanguageDetection:
     )
 
 
+def _speech_to_dict(s: SpeechCheck) -> dict[str, Any]:
+    return {"found": s.found, "speech_seconds": s.speech_seconds, "audio_seconds": s.audio_seconds, "segments": s.segments}
+
+
+def _speech_from_dict(d: Any) -> SpeechCheck:
+    """Checks the type of the object and of every field, and coerces none of them (unlike `_language_detection_from_dict`): a
+    `found` of "false" or a `segments` of 2.7 is a damaged record, not a value to guess at. Each failure is a TypeError, which
+    the repository reports against the file."""
+    if not isinstance(d, dict):
+        raise TypeError(Err.BAD_SPEECH.format(value=d))
+    found, segments = d.get("found"), d.get("segments")
+    speech_seconds, audio_seconds = _finite(d.get("speech_seconds")), _finite(d.get("audio_seconds"))
+    if (not isinstance(found, bool) or isinstance(segments, bool) or not isinstance(segments, int)
+            or speech_seconds is None or audio_seconds is None):
+        raise TypeError(Err.BAD_SPEECH.format(value=d))
+    return SpeechCheck(found, speech_seconds, audio_seconds, segments)
+
+
 def transcript_to_dict(t: Transcript) -> dict[str, Any]:
     out = {"language": t.language, "health": health_to_dict(t.health) if t.health else None, "segments": [_segment_to_dict(s) for s in t.segments]}
     if t.labels is not None:
         out["speakers"] = _speakers_to_dict(t, t.labels)
     if t.language_detection is not None:   # a fixed language, and every transcript made before detection, has no such key
         out["language_detection"] = _language_detection_to_dict(t.language_detection)
+    if t.speech is not None:               # check off, check failed, and every transcript made before the check, has no such key
+        out["speech"] = _speech_to_dict(t.speech)
     return out
 
 
@@ -167,6 +188,7 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
     if speakers is not None and not isinstance(speakers, dict):
         raise TypeError(Err.BAD_SPEAKERS.format(value=speakers))
     detection = d.get("language_detection")
+    speech = d.get("speech")
     return Transcript(
         language=d.get("language", Audio.DEFAULT_LANGUAGE),
         segments=[Segment(float(s["start"]), float(s["end"]), s["text"], _optional_text(s.get("speaker"))) for s in d.get("segments", [])],
@@ -175,6 +197,7 @@ def transcript_from_dict(d: dict[str, Any]) -> Transcript:
         user_label=_optional_text(speakers.get("user_label")) if speakers else None,
         labels=LabelSummary(int(speakers["labelled"]), int(speakers["eligible"]), _optional_text(speakers.get("reason"))) if speakers else None,
         language_detection=_language_detection_from_dict(detection) if detection is not None else None,
+        speech=_speech_from_dict(speech) if speech is not None else None,
     )
 
 

@@ -7,13 +7,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from teams_recorder.application.ports import (
-    Clock, LanguageDetector, MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, Transcriber,
+    Clock, LanguageDetector, MeetingAnalyzer, MeetingRepository, MinutesRenderer, Notifier, SpeechDetector, Transcriber,
 )
 from teams_recorder.application.use_cases.verification import VerifyAnalysis
 from teams_recorder.constants import Audio, Speakers, Transcription
 from teams_recorder.domain import (
-    Analysis, CaptureStats, LanguageDetection, LanguageReason, LanguageRules, RepositoryError, SpeakerReason, Transcript, TranscriptHealth,
-    TranscriptionError, choose_language, label_segments, rate_mismatch, sample_offsets, transcript_health, user_label,
+    Analysis, CaptureStats, LanguageDetection, LanguageReason, LanguageRules, RepositoryError, SpeakerReason, SpeechActivity, SpeechCheck,
+    SpeechRules, Transcript, TranscriptHealth, TranscriptionError, check_speech, choose_language, label_segments, rate_mismatch,
+    sample_offsets, samples_with_speech, transcript_health, user_label,
 )
 from teams_recorder.domain.status import AUDIO, MIC_TRACK, TAP_TRACK, TRANSCRIPT_JSON
 from teams_recorder.messages import Err, Log, Minutes, Notify
@@ -43,11 +44,20 @@ class TranscribeMeeting:
     health and the user is notified, instead of the minutes silently resting on hallucinations. The
     counters are read before transcribing, and such a track gets no retry: VAD cannot repair it.
 
+    Before the language and whisper, a `speech_detector` measures how much speech the recording holds (docs/tasks/speech-check).
+    Under `speech_rules.min_speech_seconds` there is none: whisper, the language detection, the retry and the speaker labelling do
+    not run, the transcript is saved empty with the measurement, a warning is logged, and a recording of `notify_min_audio_seconds`
+    or more notifies. The check is advisory: with no detector, or when it fails for any reason, the meeting is transcribed exactly
+    as before, with one warning, no `error.txt` and no notification.
+
     Before transcribing, the language is chosen when a `language_detector` is given ([transcription] language = "auto"): it
     samples the audio at regular offsets, `domain/language.choose_language` votes among `languages`, and the first pass and the
     retry both run in the winner. A meeting whose language cannot be decided, or whose detection fails for any reason, is
     transcribed in `language` (the fallback) and the record says why; detection never fails the transcription. The record is
-    saved with the transcript. Without a detector, `language` is the fixed code and nothing is detected.
+    saved with the transcript. Without a detector, `language` is the fixed code and nothing is detected. When the speech check
+    ran, the samples whose window holds no speech are not sent (the record lists only those sent), a sample that is the only
+    one left of several planned cannot decide the language, and a meeting with no recorded length is planned over the audio
+    length the check measured.
 
     Last, the segments are labelled with who said them (domain/speakers.py), from the observer's events and the
     tracks' energy the recording left in the folder. The labels are advisory: a failure to compute them saves the
@@ -68,6 +78,8 @@ class TranscribeMeeting:
     language_detector: LanguageDetector | None = None   # None: [transcription] language is a code, nothing is detected
     languages: tuple[str, ...] = Transcription.LANGUAGES   # the languages detection may choose (the vote's allow-list); `language` is the fallback
     language_rules: LanguageRules = LanguageRules()
+    speech_detector: SpeechDetector | None = None   # None: [transcription] speech_check = false, nothing is checked
+    speech_rules: SpeechRules = SpeechRules()
 
     def __post_init__(self) -> None:
         """Whisper must never get `-l auto`: until a detector decides, the language is a code (the container passes the fallback)."""
@@ -77,18 +89,32 @@ class TranscribeMeeting:
     def execute(self, meeting_id: str) -> Transcript:
         if AUDIO not in self.repo.files(meeting_id):
             raise TranscriptionError(Err.NO_AUDIO_FILE.format(meeting_id=meeting_id, filename=AUDIO))
-        duration = self.repo.load_meta(meeting_id).duration_seconds
+        recorded = self.repo.load_meta(meeting_id).duration_seconds
+        silent: SpeechCheck | None = None   # the verdict of a recording with no speech
         with self.repo.lock(meeting_id):
             mismatch = self._rate_mismatch(meeting_id)
             audio = self.repo.path(meeting_id, AUDIO)
-            detection = self._language(meeting_id, audio, duration)
-            language = self.language if detection is None else detection.language
-            transcript = self._transcribe(meeting_id, audio, duration, language, allow_retry=mismatch is None)
-            if transcript.health is not None and mismatch is not None:
-                transcript.health = replace(transcript.health, rate_mismatch=True, short_padding_share=mismatch.short_padding_share)
-            transcript.language_detection = detection
-            transcript = self._label(meeting_id, transcript, duration)
+            activity = self._speech(meeting_id, audio)
+            check = check_speech(activity, self.speech_rules) if activity is not None else None
+            if check is not None and not check.found:
+                silent = check
+                transcript = self._no_speech(meeting_id, check)
+            else:
+                if check is not None:
+                    log.info(Log.SPEECH_FOUND, meeting_id, check.speech_seconds / 60, check.audio_seconds / 60, check.segments)
+                duration = recorded or (activity.audio_seconds if activity is not None else None)   # a meeting without a length is as long as the audio
+                detection = self._language(meeting_id, audio, duration, activity)
+                language = self.language if detection is None else detection.language
+                transcript = self._transcribe(meeting_id, audio, duration, language, allow_retry=mismatch is None)
+                if transcript.health is not None and mismatch is not None:
+                    transcript.health = replace(transcript.health, rate_mismatch=True, short_padding_share=mismatch.short_padding_share)
+                transcript.language_detection = detection
+                transcript = self._label(meeting_id, transcript, duration)
+                transcript.speech = check
             self.repo.save_transcript(meeting_id, transcript)
+        if silent is not None:
+            self._notify_no_speech(meeting_id, silent)
+            return transcript
         self._notify_no_labels(meeting_id, transcript)
         health = transcript.health
         if health is not None and health.degraded and self.notifier is not None:
@@ -99,17 +125,54 @@ class TranscribeMeeting:
             self.notifier.notify(Notify.RATE_MISMATCH, Notify.RATE_MISMATCH_BODY.format(meeting_id=meeting_id, share=health.short_padding_share))
         return transcript
 
-    def _language(self, meeting_id: str, audio: Path, duration: float | None) -> LanguageDetection | None:
-        """How the meeting's language was chosen; None without a detector (the language is the fixed code). Advisory: any failure
-        of the detector gives `self.language` with the reason DETECTION_FAILED, never an error, a notification or an `error.txt`."""
-        if self.language_detector is None:
+    def _speech(self, meeting_id: str, audio: Path) -> SpeechActivity | None:
+        """What VAD found in the whole audio; None without a detector, and when the check fails. Advisory: a failure is one warning
+        (Log.SPEECH_CHECK_FAILED), never an error, a notification or an `error.txt`, and the meeting is transcribed as without the check."""
+        if self.speech_detector is None:
             return None
         try:
-            samples = self.language_detector.detect(audio, sample_offsets(duration, self.language_rules), self.language_rules.window_seconds)
+            return self.speech_detector.activity(audio)
+        except Exception as exc:  # noqa: BLE001 - the check is advisory: a missing tool or model, a timeout, a changed output format or a bug all mean no check
+            log.warning(Log.SPEECH_CHECK_FAILED, meeting_id, exc)
+            return None
+
+    def _no_speech(self, meeting_id: str, check: SpeechCheck) -> Transcript:
+        """The transcript of a recording with no speech: no segments, the fallback language and the measurement. Whisper did not run,
+        so it has no health, no language detection and no labels. Logs Log.NO_SPEECH; `execute` saves it like any transcript."""
+        log.warning(Log.NO_SPEECH, meeting_id, check.speech_seconds, check.audio_seconds / 60, self.speech_rules.min_speech_seconds)
+        return Transcript(segments=[], language=self.language, speech=check)
+
+    def _notify_no_speech(self, meeting_id: str, check: SpeechCheck) -> None:
+        """The notification of a recording with no speech, when its audio is long enough to have been a meeting; one per transcription,
+        with no daily de-duplication. Called outside the lock with the transcript saved: a failure to notify is only logged, so the step
+        that saved it never turns into a failed one (`Pipeline.process` would write an `error.txt` for it)."""
+        if self.notifier is None or check.audio_seconds < self.speech_rules.notify_min_audio_seconds:
+            return
+        try:
+            self.notifier.notify(Notify.NO_SPEECH, Notify.NO_SPEECH_BODY.format(meeting_id=meeting_id, minutes=check.audio_seconds / 60))
+        except Exception as exc:  # noqa: BLE001 - the transcript is saved already: whatever a notifier raises must not fail the transcription
+            log.warning(Log.NO_SPEECH_NOTIFY_FAILED, meeting_id, exc)
+
+    def _language(self, meeting_id: str, audio: Path, duration: float | None, activity: SpeechActivity | None) -> LanguageDetection | None:
+        """How the meeting's language was chosen; None without a detector (the language is the fixed code). Advisory: any failure
+        of the detector gives `self.language` with the reason DETECTION_FAILED, never an error, a notification or an `error.txt`.
+
+        With the speech check's `activity`, only the planned samples whose window holds speech are cut and sent (the dropped count
+        is logged), and the vote is told how many were planned, so one survivor of several cannot decide alone. With no activity
+        (the check is off or failed) every planned sample is sent, as before the check existed. When no planned sample holds
+        speech the detector is not called and the answer is the fallback, `no-usable-sample`."""
+        if self.language_detector is None:
+            return None
+        planned = sample_offsets(duration, self.language_rules)
+        offsets = planned if activity is None else samples_with_speech(planned, activity, self.language_rules.window_seconds, self.speech_rules)
+        if len(offsets) < len(planned):
+            log.info(Log.LANGUAGE_SAMPLES_WITHOUT_SPEECH, meeting_id, len(planned) - len(offsets), len(planned))
+        try:
+            samples = self.language_detector.detect(audio, offsets, self.language_rules.window_seconds) if offsets else []
         except Exception as exc:  # noqa: BLE001 - detection is advisory: a missing tool, a timeout, a changed output format or a bug all mean the fallback
             log.warning(Log.LANGUAGE_DETECTION_FAILED, meeting_id, self.language, exc)
             return LanguageDetection(self.language, LanguageReason.DETECTION_FAILED)
-        detection = choose_language(samples, self.languages, self.language, self.language_rules)
+        detection = choose_language(samples, self.languages, self.language, self.language_rules, planned=len(planned))
         if detection.detected:
             log.info(Log.LANGUAGE_DETECTED, meeting_id, detection.language, detection.votes, detection.counted, len(detection.samples))
         else:

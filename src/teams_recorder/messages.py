@@ -41,6 +41,8 @@ class Notify:
     RATE_MISMATCH = "Teams audio recorded at the wrong rate"
     RATE_MISMATCH_BODY = ("Meeting {meeting_id}: {share:.0%} of the Teams track is silence padding, so the other participants' speech "
                           "is garbled and their part of the transcript is unreliable.")
+    NO_SPEECH = "No speech in a recording"
+    NO_SPEECH_BODY = "Meeting {meeting_id}: no speech in {minutes:.0f} min of audio, so it was not transcribed. If it was a meeting, check the capture with `trec doctor`."
     NO_SPEAKER_LABELS = "Speaker labels unavailable"
     NO_SPEAKER_LABELS_BODY = "Meeting {meeting_id}: {reason}"
     # The body per notifying reason (domain.SpeakerReason values); no-match and no-observer never notify.
@@ -110,6 +112,8 @@ class Err:
     WHISPER_BAD_JSON = "invalid whisper JSON: {error}"
     WHISPER_NO_LANGUAGE = "whisper-cli printed no language for any of the {count} samples; output tail: {tail}"
     CLIP_BAD_WAV = "the language sample {wav} is not a readable WAV: {error}"
+    VAD_BAD_OUTPUT = "whisper-vad-speech-segments printed no readable segment list; output tail: {tail}"
+    SPEECH_BAD_WAV = "the converted audio {wav} is not a readable WAV: {error}"
     STEP_CONVERT_WAV = "conversion to 16 kHz WAV"
     STEP_CUT_SAMPLE = "cutting a language sample"
     # LLM
@@ -172,6 +176,7 @@ class Err:
     FILE_UNREADABLE = "cannot read {path}: {error}"
     BAD_SPEAKERS = "the speakers summary must be an object, not {value!r}"   # detail inside BAD_JSON
     BAD_LANGUAGE_DETECTION = "the language detection must be an object with a list of sample objects, not {value!r}"   # detail inside BAD_JSON
+    BAD_SPEECH = "the speech record must be an object with a boolean found, a whole number of segments and finite numbers of seconds, not {value!r}"   # detail inside BAD_JSON
     BAD_TEXT = "expected text or null, not {value!r}"                       # detail inside BAD_JSON
     BAD_ENERGY = "energy levels must be a list of numbers per track (track {value!r})"   # detail inside BAD_JSON
     BAD_ENERGY_STEP = "the energy step must be a positive number of seconds, not {value!r}"   # detail inside BAD_JSON
@@ -248,6 +253,8 @@ class Cli:
     MEETING_SPEAKERS = "  · speakers {share:.0%}"
     MEETING_SPEAKERS_NONE = "  · speakers 0% ({reason})"
     MEETING_LANGUAGE = "  · {language}"   # only when the transcript is not in Portuguese
+    MEETING_NO_SPEECH = "  · no speech"   # the transcript of a recording in which the speech check found no speech (docs/tasks/speech-check)
+    NO_SPEECH_RECORDINGS = "Recordings without speech: {count}"
     NEXT_STEP = " → next: {step}"
     RECORDING_IN_PROGRESS = "Recording in progress: {meeting_id} (recorder PIDs {tap_pid}, {mic_pid})"
     ACTIVITIES_STATUS = "Activities: {counts}{last}"
@@ -273,6 +280,11 @@ class Cli:
     VAD_MODEL_HINT = "  → {script} {model} (without it transcription runs without VAD)"
     TRANSCRIPTION_LINE = "[{mark}] transcription: whisper -mc {max_context}; a transcript is degraded above {share:.0%} of its segments in repetition loops"
     RETRY_LINE = "[{mark}] retry of a degraded transcript: {state}{hint}"
+    SPEECH_CHECK_LINE = "[{mark}] speech check: {state}"
+    SPEECH_CHECK_ON = "on ({tool}); a recording with under {seconds:g} s of speech is not transcribed"
+    SPEECH_CHECK_NO_TOOL = "{tool} not found; recordings are transcribed without the check"
+    SPEECH_CHECK_NO_MODEL = "VAD model missing: {path}  → {script} {model} (until then recordings are transcribed without the check)"
+    SPEECH_CHECK_OFF = "off ([transcription] speech_check = false)"
     LANGUAGE_MODE_AUTO = "[{mark}] language: detected per meeting among {languages} (fallback {fallback})"
     LANGUAGE_MODE_FIXED = "[{mark}] language: {language} for every meeting ([transcription] language)"
     RETRY_ON_VAD = "on (-mc 0 with VAD: {path})"
@@ -344,6 +356,13 @@ class Cli:
         "no-match": "speaker events found but no line matched them",
         "no-observer": "no observer data for this meeting",
     }
+    # `Speech:` line of `trec transcribe` (docs/tasks/speech-check/_dx.md): what the check before whisper found
+    SPEECH_FOUND = "  Speech: {speech:.1f} of {audio:.1f} min ({share:.0%})"
+    SPEECH_NONE = "  Speech: none ({seconds:.1f} s of speech in {minutes:.1f} min); whisper did not run"
+    SPEECH_OFF = "  Speech: not checked ([transcription] speech_check = false)"
+    SPEECH_FAILED = "  Speech: not checked (the speech check failed; see the warning above)"
+    TRANSCRIPT_NO_SPEECH = ("  WARNING: the transcript is empty. If this was a meeting, check the capture with `trec doctor`. To transcribe it anyway, "
+                            "set [transcription] speech_check = false, run `trec transcribe {meeting_id}` and `trec analyze {meeting_id}`, then set it back to true.")
     TRANSCRIPT_HEALTH = "  Health: {loop:.0%} of segments in repetition loops, text in {covered} of {total} min{retried}"
     RETRIED = " (after a second pass with the anti-loop settings)"
     TRANSCRIPT_DEGRADED = "  WARNING: degraded transcript{gaps}. The analysis still runs on it and the minutes will say so."
@@ -566,6 +585,11 @@ class Log:
     LANGUAGE_DETECTED = "language of %s: %s (%d of %d counted samples; %d taken)"
     LANGUAGE_FALLBACK = "language of %s: %s, the fallback (%s; %d of %d samples counted)"
     LANGUAGE_DETECTION_FAILED = "language detection of %s failed; transcribing in %s: %s"
+    SPEECH_FOUND = "speech in %s: %.1f of %.1f min (%d segments)"
+    NO_SPEECH = "no speech in %s: %.1f s of speech in %.1f min of audio (under %.1f s); whisper skipped, transcript empty"
+    SPEECH_CHECK_FAILED = "speech check of %s failed; transcribing without it: %s"
+    NO_SPEECH_NOTIFY_FAILED = "no-speech notification for %s failed: %s"
+    LANGUAGE_SAMPLES_WITHOUT_SPEECH = "language samples of %s: %d of %d without speech, not sent"
     VERIFY_FAILED = "verification of %s failed; its claims stay unverified (the code checks still apply): %s"
     VERIFIED = "verification of %s: %d claims confirmed, %d unconfirmed"
     VERIFY_SKIPPED = ("verification of %s skipped: its transcript cannot be trusted (degraded: %s, wrong sample rate: %s), so the "

@@ -13,11 +13,13 @@ from teams_recorder.adapters.outbound.language_whispercpp import WhisperCppLangu
 from teams_recorder.adapters.outbound.notifier_macos import LogNotifier, MacOSNotifier
 from teams_recorder.adapters.outbound.notifier_windows import ToastNotifier
 from teams_recorder.adapters.outbound.speakers_ax import AxSpeakerObserver
+from teams_recorder.adapters.outbound.speech_whispercpp import WhisperCppSpeechDetector
 from teams_recorder.adapters.outbound.transcriber_whispercpp import WhisperCppTranscriber
-from teams_recorder.config import load_settings
-from teams_recorder.constants import Files, Platform, Stories, StoryDestination
+from teams_recorder.config import find_tool, load_settings
+from teams_recorder.constants import Bin, Files, Platform, Stories, StoryDestination
 from teams_recorder.container import (
-    build_container, build_language_detector, build_retry_transcriber, build_story_publishers, teams_speakers_binary, teams_tap_binary,
+    build_container, build_language_detector, build_retry_transcriber, build_speech_detector, build_story_publishers, teams_speakers_binary,
+    teams_tap_binary,
 )
 from teams_recorder.domain import LanguageReason, Meeting
 from teams_recorder.domain.status import AUDIO, TAP_STATS
@@ -281,6 +283,33 @@ def test_ut039_ut040_a_fixed_language_builds_no_detector_and_auto_builds_the_whi
     assert (use.language, use.languages, use.language_detector) == ("pt", ("pt", "en"), detector)
     assert c.detector is not detector and not isinstance(c.detector, WhisperCppLanguageDetector)   # `detector` stays the Teams call detector
     assert isinstance(build_container(replace(auto, languages=("en", "pt"))).language_detector, WhisperCppLanguageDetector)
+
+
+def test_ut053_the_speech_detector_is_built_with_the_vad_tool_and_model_only_when_the_check_is_on(tmp_path: Path):
+    s = load_settings(tmp_path)   # the default: [transcription] speech_check = true
+    assert s.speech_check and s.speech_model_path == s.models_dir / "ggml-silero-v5.1.2.bin"
+    c = build_container(s)
+    detector, transcriber = c.speech_detector, c.transcriber
+    assert isinstance(detector, WhisperCppSpeechDetector) and isinstance(transcriber, WhisperCppTranscriber)
+    assert detector.vad_tool == find_tool(Bin.WHISPER_VAD, tmp_path.resolve())
+    assert detector.vad_model_path == s.speech_model_path
+    assert (detector.ffmpeg, detector.threads) == (transcriber.ffmpeg, transcriber.threads)   # the transcriber's ffmpeg and threads
+    assert c.transcribe_meeting().speech_detector is detector
+    assert isinstance(build_speech_detector(s), WhisperCppSpeechDetector)
+
+    off = replace(s, speech_check=False)
+    assert off.speech_model_path is None and build_speech_detector(off) is None
+    assert build_container(off).speech_detector is None and build_container(off).transcribe_meeting().speech_detector is None
+
+
+def test_ut053_the_config_key_switches_the_detector_off_and_the_vad_model_names_its_model(tmp_path: Path):
+    (tmp_path / "config.toml").write_text('[transcription]\nspeech_check = false\n')
+    assert build_container(load_settings(tmp_path)).speech_detector is None
+
+    (tmp_path / "config.toml").write_text('[transcription]\nvad_model = "silero-v5.1.2"\n')   # the key absent: on
+    s = load_settings(tmp_path)
+    detector = build_container(s).speech_detector
+    assert isinstance(detector, WhisperCppSpeechDetector) and detector.vad_model_path == s.models_dir / "ggml-silero-v5.1.2.bin"
 
 
 def test_ut044_a_detector_that_raises_never_makes_whisper_get_auto(tmp_path: Path):

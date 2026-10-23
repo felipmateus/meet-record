@@ -164,10 +164,11 @@ def _doctor_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: str =
     return result.exit_code, result.output.splitlines()
 
 
-def test_ut067_doctor_names_the_detection_mode_right_after_the_retry_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_ut067_doctor_names_the_detection_mode_after_the_retry_and_speech_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _, lines = _doctor_lines(tmp_path, monkeypatch, '[transcription]\nlanguage = "auto"\n')
     retry = next(i for i, line in enumerate(lines) if "retry of a degraded transcript:" in line)
-    assert lines[retry + 1] == "[info] language: detected per meeting among pt, en (fallback pt)"
+    assert "speech check:" in lines[retry + 1]   # the speech check's line (docs/tasks/speech-check) sits between the two; its form depends on the machine
+    assert lines[retry + 2] == "[info] language: detected per meeting among pt, en (fallback pt)"
     assert lines[retry - 1].startswith("[info] transcription: whisper -mc 0;")   # the two loop-guard lines stay together
 
 
@@ -180,5 +181,5 @@ def test_ut068_doctor_names_a_fixed_language_and_its_exit_code_is_unaffected(tmp
     auto_code, _ = _doctor_lines(tmp_path, monkeypatch, '[transcription]\nlanguage = "auto"\n')
     code, lines = _doctor_lines(tmp_path, monkeypatch, '[transcription]\nlanguage = "pt"\n')
     retry = next(i for i, line in enumerate(lines) if "retry of a degraded transcript:" in line)
-    assert lines[retry + 1] == "[info] language: pt for every meeting ([transcription] language)"
+    assert "speech check:" in lines[retry + 1] and lines[retry + 2] == "[info] language: pt for every meeting ([transcription] language)"
     assert code == auto_code

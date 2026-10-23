@@ -22,7 +22,8 @@ def get() -> None:
     values = {
         "data_dir": s.data_dir,
         "model_path": s.whisper_model_path,
-        "vad_path": s.vad_model_path or s.retry_vad_model_path or "",   # VAD on every pass, or only on the retry of a degraded transcript
+        # The Silero model, whenever something uses it: VAD on every pass, on the retry of a degraded transcript, or the speech check
+        "vad_path": s.vad_model_path or s.retry_vad_model_path or s.speech_model_path or "",
         "provider": s.llm_provider.value,
         "user_name": s.user_name,
         "active": s.data_dir / Files.ACTIVE_RECORDING,

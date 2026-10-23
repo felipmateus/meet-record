@@ -54,6 +54,7 @@ from .activities import (
 from .language import LanguageDetection, LanguageReason, LanguageRules, LanguageSample, choose_language, counted_tally, sample_offsets
 from .excerpts import clock_seconds, excerpt_window
 from .health import loop_flags, rate_mismatch, transcript_health
+from .speech import SpeechActivity, SpeechCheck, SpeechRules, check_speech, samples_with_speech
 from .speakers import (
     SILENCE_DB, EnergyTimeline, LabelRules, SpeakerEvent, SpeakerLog, SpeakerReason, SpeakerTurn, label_segments, no_label_reason,
     turns_from_events, user_label, window_subject,
@@ -70,6 +71,7 @@ __all__ = [
     "StatusChange", "StatusUpdate", "Segment", "Transcript", "TranscriptHealth", "LabelSummary", "is_speech", "timestamped_line",
     "SILENCE_DB", "EnergyTimeline", "LabelRules", "SpeakerEvent", "SpeakerLog", "SpeakerReason", "SpeakerTurn", "label_segments",
     "no_label_reason", "turns_from_events", "user_label", "window_subject", "CaptureStats", "loop_flags", "rate_mismatch", "transcript_health", "meeting_id_for",
+    "SpeechActivity", "SpeechCheck", "SpeechRules", "check_speech", "samples_with_speech",
     "Publication", "SkippedAction", "StoryDrafts", "UserStory", "Verification", "VerificationStatus",
     "MeetingStatus", "derive_status", "next_step",
     "AnalysisError", "CaptureError", "CommitIncomplete", "CuratorBusy", "MeetingNotFound", "NothingToUndo", "PublishError", "RepositoryError", "SpeakersUnavailable",

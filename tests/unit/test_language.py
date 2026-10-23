@@ -1,4 +1,7 @@
-"""The language detection rules: docs/tasks/language-detection/_tests.md UT-001 to UT-012c."""
+"""The language detection rules: docs/tasks/language-detection/_tests.md UT-001 to UT-012c.
+
+The `planned` count of docs/tasks/speech-check/_tests.md UT-008 is at the end, under `test_speech_ut008_*`: the same number belongs to
+a different spec."""
 from __future__ import annotations
 
 import pytest
@@ -98,3 +101,45 @@ def test_ut012c_the_tally_counts_per_allowed_language_in_allowed_order():
     tally = counted_tally(detection, ALLOWED)
     assert tally == {PT: 2, EN: 2} and list(tally) == [PT, EN]
     assert list(counted_tally(detection, (EN, PT))) == [EN, PT]
+
+
+# choose_language: the planned count (docs/tasks/speech-check, Business Rules > Language samples)
+def test_speech_ut008_one_sample_decides_alone_only_when_one_was_planned():
+    lone = _samples((EN, .99))
+    for planned in (None, 1):
+        detection = choose_language(lone, ALLOWED, PT, planned=planned)
+        assert (detection.language, detection.reason, detection.counted, detection.votes) == (EN, LanguageReason.MAJORITY, 1, 1)
+
+    several = choose_language(lone, ALLOWED, PT, planned=8)
+    assert (several.language, several.reason, several.counted, several.votes) == (PT, LanguageReason.TOO_FEW_VOTES, 1, 0)
+    assert several.samples == tuple(lone) and not several.detected   # the sample sent stays in the record
+
+
+def test_speech_ut008_two_samples_of_eight_planned_decide_when_they_agree():
+    detection = choose_language(_samples((EN, .99), (EN, .97)), ALLOWED, PT, planned=8)
+    assert (detection.language, detection.reason, detection.counted, detection.votes) == (EN, LanguageReason.MAJORITY, 2, 2)
+
+
+def test_speech_ut008_two_planned_need_two_votes_like_any_meeting_of_several_samples():
+    assert choose_language(_samples((EN, .99)), ALLOWED, PT, planned=2).reason is LanguageReason.TOO_FEW_VOTES
+
+
+@pytest.mark.parametrize("answers", [
+    [(EN, .99), (EN, .97), (PT, .9)],
+    [(EN, .9), (PT, .9)],
+    [(EN, .9), ("is", .9), (None, 0.0)],
+    [(EN, .993), ("is", .965), (EN, .997), (EN, .987), ("is", .979), (None, 0.0)],
+], ids=["majority", "split", "one-of-three", "mixed"])
+def test_speech_ut008_a_planned_count_equal_to_the_samples_passed_is_the_default(answers):
+    samples = _samples(*answers)
+    assert choose_language(samples, ALLOWED, PT, planned=len(samples)) == choose_language(samples, ALLOWED, PT)
+
+
+def test_speech_ut008_no_sample_sent_of_several_planned_is_no_usable_sample():
+    detection = choose_language([], ALLOWED, PT, planned=8)
+    assert (detection.language, detection.reason, detection.counted, detection.votes, detection.samples) == (PT, LanguageReason.NO_USABLE_SAMPLE, 0, 0, ())
+
+
+def test_speech_ut008_a_split_among_few_kept_samples_is_still_no_majority():
+    detection = choose_language(_samples((EN, .9), (PT, .9)), ALLOWED, PT, planned=8)
+    assert (detection.language, detection.reason, detection.counted) == (PT, LanguageReason.NO_MAJORITY, 2)

@@ -61,6 +61,7 @@ class Bin:
     FFMPEG = "ffmpeg"
     FFPROBE = "ffprobe"
     WHISPER_CLI = "whisper-cli"
+    WHISPER_VAD = "whisper-vad-speech-segments"   # whisper.cpp's Silero VAD tool, installed next to whisper-cli (docs/tasks/speech-check)
     CLAUDE = "claude"
     PMSET = "pmset"
     PGREP = "pgrep"
@@ -201,6 +202,7 @@ class Audio:
     DEFAULT_WHISPER_THREADS = 0     # 0 = let whisper-cli decide
     DEFAULT_VAD_MODEL = "silero-v5.1.2"
     VAD_ARGS = ["-vt", "0.5", "-vsd", "300", "-vp", "150"]
+    VAD_UNITS_PER_SECOND = 100       # whisper-vad-speech-segments prints its segment times in centiseconds (verified on 2026-10-22 and 2026-10-23)
     MIN_LANGUAGE_CLIP_SECONDS = 1.0  # a language sample holding less audio than this (an offset past a truncated end) is not sent to whisper
     MIX_TIMEOUT_FACTOR = 2.0        # mixing may take up to 2x the meeting length (never less than Proc.FFMPEG_TIMEOUT)
     PARTIAL_INFIX = ".partial"      # mixing writes audio.partial.m4a and renames it only on success
@@ -260,6 +262,7 @@ class Transcription:
     MAX_LOOP_SHARE = 0.10           # above this share of segments in loops the transcript is degraded
     RETRY_ON_LOOP = True            # transcribe a degraded transcript once more with the anti-loop settings
     RETRY_VAD = True                # with Silero VAD on that retry (skips silence, where whisper hallucinates)
+    SPEECH_CHECK = True             # measure the speech in a recording before transcribing it; none means no whisper run (docs/tasks/speech-check)
     RANGES_IN_NOTIFICATION = 3      # time ranges without text listed in a notification or a CLI line
     AUTO = "auto"                   # [transcription] language: detect each meeting's language (docs/tasks/language-detection)
     LANGUAGES = ("pt", "en")        # [transcription] languages: the languages detection may choose, the fallback first
@@ -292,6 +295,8 @@ class Parse:
     DIALOG_GAVE_UP = "gave up:true"
     WHISPER_PROCESSING = r"processing '(?:.*[\\/])?(c\d+\.wav)' \("    # whisper-cli -dl opens a file: `main: processing '<path>' (`; group 1 is its basename
     WHISPER_LANGUAGE = r"auto-detected language: ([a-z]+) \(p = ([0-9.]+)\)"   # and answers it: `auto-detected language: en (p = 0.99)`
+    VAD_COUNT = r"^Detected (\d+) speech segments:$"   # whisper-vad-speech-segments, on a stripped line: how many segments follow
+    VAD_SEGMENT = r"^Speech segment \d+: start = (\d+(?:\.\d+)?), end = (\d+(?:\.\d+)?)$"   # one of them, in centiseconds: `Speech segment 0: start = 0.00, end = 861.00`
     ACTIVITY_OPEN = r"^\s*[-*+] \[ \] "            # an open checkbox line of the activities document
     ACTIVITY_TICKED = r"^\s*[-*+] \[[xX]\] "       # a ticked one
     ACTIVITY_LABEL = r"\]\[([^\]\s]+)\]"            # the label of a reference link: `[text][label]`
@@ -364,6 +369,7 @@ class Proc:
     FFMPEG_TIMEOUT = 600.0          # mixing / probing one meeting
     WHISPER_TIMEOUT = 3 * 3600.0
     LANGUAGE_DETECT_TIMEOUT = 300.0  # cutting the language samples and one whisper-cli -dl call over all of them
+    SPEECH_CHECK_TIMEOUT = 300.0     # each command of the speech check: the conversion to WAV, and the VAD run over it
     IO_RETRIES = 12                 # file reads/writes blocked transiently by TCC
     IO_RETRY_DELAY = 0.5
     SPAWN_RETRIES = 12

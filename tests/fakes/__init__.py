@@ -33,6 +33,7 @@ from teams_recorder.domain import (
     SkippedAction,
     SpeakerLog,
     SpeakersUnavailable,
+    SpeechActivity,
     StoryDrafts,
     TaggedBlock,
     Transcript,
@@ -220,6 +221,26 @@ class FakeLanguageDetector:
             language, probability = (answer, 0.99) if isinstance(answer, str) else answer or (None, 0.0)
             samples.append(LanguageSample(at=offset, language=language, probability=probability))
         return samples
+
+
+class FakeSpeechDetector:
+    """Returns one scripted `SpeechActivity` and records the audio paths it was asked about; `error` makes `activity` raise it.
+
+    `script` is one activity for every audio, or a mapping from audio path to activity when meetings must differ (an audio
+    missing from the mapping is a KeyError, as in FakeLanguageDetector). The default is speech everywhere in 20 minutes of audio,
+    like `speech_transcript()`."""
+
+    def __init__(self, script: SpeechActivity | Mapping[Path, SpeechActivity] = SpeechActivity(1200.0, ((0.0, 1200.0),)),
+                 error: Exception | None = None) -> None:
+        self.script = script
+        self.error = error
+        self.calls: list[Path] = []
+
+    def activity(self, audio: Path) -> SpeechActivity:
+        self.calls.append(audio)
+        if self.error is not None:
+            raise self.error
+        return self.script[audio] if isinstance(self.script, Mapping) else self.script
 
 
 def looped_transcript(minutes: int = 20, loop_minutes: int = 15, line: str = "A CIDADE NO BRASIL") -> Transcript:
