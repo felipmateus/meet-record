@@ -24,9 +24,10 @@ All settings live in `config.toml` at the project root. It holds no secrets, and
 | | `languages` | `["pt", "en"]` | The languages detection may choose; the first is the fallback. Checked even when `language` is a code |
 | | `models_dir` | `""` | Empty means `<data_dir>/models` |
 | | `threads` | `0` | `0` means automatic |
-| | `vad`, `vad_model` | `false`, `"silero-v5.1.2"` | Voice activity detection on every pass |
+| | `speech_check` | `true` | Before transcribing, Silero VAD measures the speech in the whole recording (a conversion and one run of `whisper-vad-speech-segments`: about 25 s for an 86-minute meeting on an M1). A recording with under 2 s of speech is not sent to whisper: its transcript is saved empty and marked "no speech", a warning is logged, and a recording of 1 minute or more raises a notification. The check also feeds the language detection: a 30-second sample with under 3 s of speech in it is not sent. `false` transcribes every recording as before, for example to force one through (see [troubleshooting](troubleshooting.md)). A failing check never blocks a transcription |
+| | `vad`, `vad_model` | `false`, `"silero-v5.1.2"` | Voice activity detection on every pass. `vad_model` is also the model of the speech check, so the installers download it while `speech_check` is on |
 | | `max_context` | `0` | whisper `-mc`; `0` keeps a hallucination loop from carrying over, `-1` is whisper's default |
-| | `max_loop_share` | `0.10` | Share of segments in repetition loops above which a transcript is degraded |
+| | `max_loop_share` | `0.10` | Share of segments in repetition loops above which a transcript is degraded. A loop is 5 copies of a line within 30 segments; a line of at most 2 words ("Okay.") counts only when it also sits in a run of 3 or more such repeated short lines in a row |
 | | `retry_on_loop`, `retry_vad` | `true`, `true` | Transcribe a degraded transcript once more (`-mc 0`, with VAD) |
 | `[llm]` | `provider` | `"api"` | `api` or `claude-code` |
 | | `model` | `"claude-opus-5-5"` | Model for the `api` provider |
