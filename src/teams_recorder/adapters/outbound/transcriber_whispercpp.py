@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from teams_recorder.adapters.outbound.audio_convert import wav_convert_command
 from teams_recorder.adapters.outbound.process_control import NO_WINDOW
 from teams_recorder.constants import Audio, Bin, Files, Proc, Transcription
 from teams_recorder.domain import Segment, Transcript, TranscriptionError
@@ -40,7 +41,7 @@ class WhisperCppTranscriber:
 
     # --- commands (public for testing) ------------------------------------
     def convert_command(self, audio: Path, wav: Path) -> list[str]:
-        return [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(audio), "-ac", "1", "-ar", str(Audio.WHISPER_SAMPLE_RATE), "-c:a", "pcm_s16le", str(wav)]
+        return wav_convert_command(self.ffmpeg, audio, wav)   # shared with the speech detector
 
     def whisper_command(self, wav: Path, language: str, out_prefix: Path) -> list[str]:
         cmd = [
